@@ -137,25 +137,29 @@ void ts_decoder_init(ts_decoder *d, const uint8_t context[32], ts_sink sink, voi
     d->user = user;
     d->check = check;
 }
+static int decode_fail(ts_decoder *d, const char *message) {
+    d->error = message;
+    return -1;
+}
 static int marker(ts_decoder *d, const uint8_t *p) {
     d->markers++;
     if ((p[7] & 0xf0) == 0xf0) {
         unsigned index = be16(p + 26), last = be16(p + 28);
         if (last >= FRAGMENT_LIMIT || index > last)
-            return -1;
+            return decode_fail(d, "Invalid key table fragment bounds");
         if (index == 0) {
             d->fragment = last;
             d->next_fragment = 0;
         }
         if (index != d->next_fragment || last != d->fragment)
-            return -1;
+            return decode_fail(d, "Unexpected key table fragment order");
         memcpy(d->table + index * 158, p + 30, 158);
         d->next_fragment++;
         if (index == last) {
             size_t bytes = (last + 1) * 158;
             uint32_t count = be32(d->table);
             if (count > KEY_LIMIT || 36 + (size_t)count * 32 > bytes)
-                return -1;
+                return decode_fail(d, "Invalid key table length");
             uint8_t kk[16];
             aes128 a;
             aes_init(&a, d->table + 4);
@@ -163,11 +167,20 @@ static int marker(ts_decoder *d, const uint8_t *p) {
             aes_ctr c;
             ctr_init(&c, kk, d->table + 20, 16);
             ctr_xor(&c, d->table + 36, count * 32);
+            /* The device publishes the next table before retiring the old IDs. */
+            secure_clear(d->previous_key_ids, sizeof(d->previous_key_ids));
+            secure_clear(d->previous_keys, sizeof(d->previous_keys));
+            memcpy(d->previous_key_ids, d->key_ids, d->key_count * 16);
+            memcpy(d->previous_keys, d->keys, d->key_count * 16);
+            d->previous_key_count = d->key_count;
+            secure_clear(d->key_ids, sizeof(d->key_ids));
+            secure_clear(d->keys, sizeof(d->keys));
             for (unsigned i = 0; i < count; i++) {
                 memcpy(d->key_ids[i], d->table + 36 + i * 32, 16);
                 memcpy(d->keys[i], d->table + 52 + i * 32, 16);
             }
             d->key_count = count;
+            d->key_tables++;
             secure_clear(kk, 16);
             secure_clear(&a, sizeof(a));
             secure_clear(&c, sizeof(c));
@@ -175,14 +188,27 @@ static int marker(ts_decoder *d, const uint8_t *p) {
         }
     } else {
         unsigned i;
-        for (i = 0; i < d->key_count; i++)
-            if (!memcmp(d->key_ids[i], p + 40, 16))
+        const uint8_t *key = NULL;
+        for (i = 0; i < d->key_count; i++) {
+            if (!memcmp(d->key_ids[i], p + 40, 16)) {
+                key = d->keys[i];
                 break;
-        if (i == d->key_count) {
-            d->active = 0;
-            return -1;
+            }
         }
-        ctr_init(&d->ctr, d->keys[i], p + 56, 16);
+        if (!key) {
+            for (i = 0; i < d->previous_key_count; i++) {
+                if (!memcmp(d->previous_key_ids[i], p + 40, 16)) {
+                    key = d->previous_keys[i];
+                    d->previous_key_uses++;
+                    break;
+                }
+            }
+        }
+        if (!key) {
+            d->active = 0;
+            return decode_fail(d, "Stream key ID is absent from current and previous tables");
+        }
+        ctr_init(&d->ctr, key, p + 56, 16);
         d->active = 1;
         d->iv_updates++;
     }

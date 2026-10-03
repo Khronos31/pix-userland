@@ -15,12 +15,15 @@ PC/SC, Python, systemd, or daemon API in the application.
   implementation, not a general cryptography API; the legacy 1024-bit RSA
   requirement is fixed by the device. RSA exponentiation is not constant-time.
 - `transport.c`: key-table fragments, transfer AES context, 188-byte framing,
-  streaming CTR across TS packets; PAT/PMT CRC and continuity checks. USB transfer
+  streaming CTR across TS packets; PAT/PMT CRC and continuity checks. The current
+  and immediately preceding key tables coexist during device key rotation; new
+  tables can arrive while stream markers still reference the previous generation.
+  Unknown IDs in both generations remain fatal. USB transfer
   cryptography is distinct from broadcast B-CAS/MULTI2. No software B25/MULTI2
   decoder or card-reader API is implemented.
 - `usb_libusb.c`: device enumeration/open or Android borrowed-fd wrapping, 16
   asynchronous 32 KiB bulk reads, cancellation and interface lifecycle.
-- `main.c`: CLI, bounded 4 MiB raw-input queue and output worker. Slow outputs do
+- `main.c`: CLI, bounded 32 MiB raw-input queue and output worker. Slow outputs do
   not block libusb's event handler. A full queue fails the capture rather than
   reporting an intact TS. Nonblocking pipe output times out after 3 seconds
   without progress. All logs and final JSON go to stderr.

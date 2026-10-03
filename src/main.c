@@ -16,7 +16,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#define QUEUE_SLOTS 128
+#define QUEUE_SLOTS 1024
 static volatile sig_atomic_t interrupted;
 static void on_signal(int s) {
     (void)s;
@@ -82,6 +82,9 @@ static int enqueue(void *u, const uint8_t *p, size_t n) {
     stream *s = u;
     os_mutex_lock(&s->mutex);
     if (n > 32768 || s->count == QUEUE_SLOTS || s->error) {
+        if (!s->error)
+            fprintf(stderr, "USB receive queue rejected input: queued=%u/%u bytes=%zu\n", s->count,
+                    QUEUE_SLOTS, n);
         s->error = 1;
         os_cond_signal(&s->cond);
         os_mutex_unlock(&s->mutex);
@@ -113,6 +116,8 @@ static void *worker(void *u) {
         s->count--;
         os_mutex_unlock(&s->mutex);
         if (ts_decoder_feed(&s->decoder, data, n)) {
+            if (s->decoder.error)
+                fprintf(stderr, "TS decoder: %s\n", s->decoder.error);
             os_mutex_lock(&s->mutex);
             s->error = 1;
             os_mutex_unlock(&s->mutex);
@@ -194,14 +199,16 @@ static void report(const stream *s) {
             "{\"packets\":%llu,\"usb_bytes\":%llu,\"markers\":%llu,\"iv_updates\":%llu,\"resync_"
             "bytes\":%llu,\"waiting_for_iv\":%llu,\"trailing_bytes\":%zu,\"tei\":%llu,"
             "\"scrambled\":%llu,\"continuity_errors\":%llu,\"invalid_packets\":%llu,\"psi_crc_"
-            "errors\":%llu,\"pat\":%llu,\"pmt\":%llu,\"stream_error\":%d}\n",
+            "errors\":%llu,\"pat\":%llu,\"pmt\":%llu,\"key_tables\":%llu,"
+            "\"previous_key_uses\":%llu,\"stream_error\":%d}\n",
             (unsigned long long)c->packets, (unsigned long long)s->usb_bytes,
             (unsigned long long)d->markers, (unsigned long long)d->iv_updates,
             (unsigned long long)d->resync, (unsigned long long)d->waiting, d->used,
             (unsigned long long)c->tei, (unsigned long long)c->scrambled,
             (unsigned long long)c->continuity, (unsigned long long)c->invalid,
             (unsigned long long)c->crc_errors, (unsigned long long)c->pat,
-            (unsigned long long)c->pmt, s->error);
+            (unsigned long long)c->pmt, (unsigned long long)d->key_tables,
+            (unsigned long long)d->previous_key_uses, s->error);
 }
 static int offline(const char *path, const char *context, stream *s) {
     FILE *f = fopen(path, "rb");

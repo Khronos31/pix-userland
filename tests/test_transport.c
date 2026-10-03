@@ -24,7 +24,39 @@ static void make_packet(uint8_t p[188], unsigned pid, const uint8_t *section, si
     p[4] = 0;
     memcpy(p + 5, section, n);
 }
+static void test_key_rotation(void) {
+    ts_decoder *d = calloc(1, sizeof(*d));
+    struct output o = {0};
+    uint8_t table_b[188], table_c[188], iv_b[188];
+    assert(d);
+    memcpy(table_b, wire, 188);
+    memcpy(table_c, wire, 188);
+    memcpy(iv_b, wire + 188, 188);
+    /* CTR bit flips change only the synthetic key ID, keeping the content key. */
+    table_b[30 + 36] ^= 0x80;
+    table_c[30 + 36] ^= 0x40;
+    iv_b[40] ^= 0x80;
+    ts_decoder_init(d, context, sink, &o, NULL);
+    assert(!ts_decoder_feed(d, wire, 188));
+    assert(!ts_decoder_feed(d, table_b, 188));
+    /* A new table can arrive before the stream stops referencing the old one. */
+    assert(!ts_decoder_feed(d, wire + 188, sizeof(wire) - 188));
+    assert(o.n == sizeof(plain) && !memcmp(o.data, plain, sizeof(plain)));
+    o.n = 0;
+    assert(!ts_decoder_feed(d, iv_b, 188));
+    assert(!ts_decoder_feed(d, wire + 376, sizeof(wire) - 376));
+    assert(o.n == sizeof(plain) && !memcmp(o.data, plain, sizeof(plain)));
+    assert(!ts_decoder_feed(d, table_c, 188));
+    o.n = 0;
+    assert(!ts_decoder_feed(d, iv_b, 188));
+    assert(!ts_decoder_feed(d, wire + 376, sizeof(wire) - 376));
+    assert(o.n == sizeof(plain) && !memcmp(o.data, plain, sizeof(plain)));
+    /* Only the immediately preceding generation remains eligible. */
+    assert(ts_decoder_feed(d, wire + 188, 188) < 0);
+    free(d);
+}
 int main(void) {
+    test_key_rotation();
     const size_t chunks[] = {1, 2, 7, 37, 187, 188, 189, 376, 752};
     for (unsigned c = 0; c < sizeof(chunks) / sizeof(chunks[0]); c++) {
         ts_decoder *d = calloc(1, sizeof(*d));

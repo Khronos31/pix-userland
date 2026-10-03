@@ -17,8 +17,12 @@ typedef struct {
 } ts_check;
 typedef struct {
     uint64_t input, markers, iv_updates, output, resync, waiting, trailing;
+    uint64_t key_tables, previous_key_uses;
     uint8_t encrypted_kk[16], key_ids[KEY_LIMIT][16], keys[KEY_LIMIT][16];
     unsigned key_count;
+    uint8_t previous_key_ids[KEY_LIMIT][16], previous_keys[KEY_LIMIT][16];
+    unsigned previous_key_count;
+    const char *error;
     uint8_t table[FRAGMENT_LIMIT * 158];
     unsigned fragment, next_fragment;
     uint8_t buffer[32768 + 564];
