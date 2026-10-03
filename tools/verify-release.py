@@ -27,7 +27,7 @@ for name,target in expected.items():
     for n,size in expected_assets.items(): assert len(contents[n])==size
     assert not any(n.lower().endswith(('.dll','.dylib','.so')) for n in contents), 'Unexpected shared library'
     for n in ('LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt'):
-        assert prefix+n in contents, 'Missing license notice'
+        assert prefix+n in contents, f'Missing license notice: {target}/{n}'
     if target != 'source':
         assert prefix+('pix-ts.exe' if target=='windows-x64' else 'pix-ts') in contents
     else:

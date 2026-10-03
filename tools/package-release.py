@@ -15,9 +15,9 @@ def source_files():
         rel = f.relative_to(ROOT)
         if f.is_symlink() or not f.is_file(): continue
         if len(rel.parts) == 1 and rel.name in TOP_FILES:
-            result.append((str(rel), f))
-        elif rel.parts[0] in SOURCE_DIRS and (rel.parts[0] == 'licenses' or f.suffix in EXTENSIONS or str(rel) == 'packaging/pix-usb-permissions'):
-            result.append((str(rel), f))
+            result.append((rel.as_posix(), f))
+        elif rel.parts[0] in SOURCE_DIRS and (rel.parts[0] == 'licenses' or f.suffix in EXTENSIONS or rel.as_posix() == 'packaging/pix-usb-permissions'):
+            result.append((rel.as_posix(), f))
     return sorted(result)
 
 def package(target, binary_dir=None):
@@ -36,6 +36,8 @@ def package(target, binary_dir=None):
     commit = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     metadata = json.dumps({'project':'pix-userland','version':VERSION,'target':target,'commit':commit,'libusb':'1.0.30','private':True,'libusb_linkage':'static','device_assets':False},indent=2).encode()+b'\n'
     members = [(name, path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644) for name,path in files]
+    required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions'}
+    assert required <= {name for name, _, _ in members}, 'Missing package documentation or licenses'
     members.append(('release-info.json', metadata,0o644))
     if target == 'source':
         usb = ROOT/'build/deps/libusb-1.0.30.tar.bz2'
