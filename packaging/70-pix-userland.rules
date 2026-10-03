@@ -1,0 +1,2 @@
+# PIX-DT181-PU0 only. Add the receiver user to video; reconnect after installation.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="06b8", ATTR{idProduct}=="102b", MODE="0660", GROUP="video"

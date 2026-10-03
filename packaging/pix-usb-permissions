@@ -1,0 +1,20 @@
+#!/bin/sh
+# Coldplug helper for mdev installations: only touch DT181 USB device nodes.
+set -eu
+[ "${1:-}" = --scan ] && [ "$#" -eq 1 ] || { echo 'Usage: pix-usb-permissions --scan' >&2; exit 2; }
+sys=${PIX_SYSFS_ROOT:-/sys}
+dev=${PIX_DEV_ROOT:-/dev}
+for entry in "$sys"/bus/usb/devices/*; do
+    [ -r "$entry/idVendor" ] && [ -r "$entry/idProduct" ] || continue
+    [ "$(cat "$entry/idVendor")" = 06b8 ] || continue
+    [ "$(cat "$entry/idProduct")" = 102b ] || continue
+    bus=$(cat "$entry/busnum")
+    addr=$(cat "$entry/devnum")
+    case "$bus:$addr" in *[!0-9:]*|:*|*:) continue;; esac
+    # sysfs exports ordinary decimal numbers, without zero padding.
+    [ "$bus" -ge 1 ] && [ "$bus" -le 999 ] && [ "$addr" -ge 1 ] && [ "$addr" -le 999 ] || continue
+    node=$(printf '%s/bus/usb/%03d/%03d' "$dev" "$bus" "$addr")
+    [ -c "$node" ] || continue
+    chown root:video "$node"
+    chmod 0660 "$node"
+done

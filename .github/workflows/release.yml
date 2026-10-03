@@ -1,0 +1,176 @@
+name: Private release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: private-release
+  cancel-in-progress: false
+env:
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  preflight:
+    if: github.event.repository.private == true
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: tools/check-private.sh
+      - id: version
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          version=$(sed -n 's/^#define VERSION "\([0-9][0-9.]*\)"/\1/p' include/version.h)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Any matching existing tag or release must be handled explicitly.
+          test "$(gh api "repos/$GH_REPO/git/matching-refs/tags/v$version" --jq length)" = 0
+          gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name' > /tmp/release-tags
+          ! grep -Fx "v$version" /tmp/release-tags
+  linux:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux-aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
+            apk add --no-cache build-base linux-headers curl bzip2 pkgconf
+            sh tests/test_mdev.sh
+            CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
+          '
+      - run: python3 tools/audit-binary.py '${{ matrix.target }}' build/musl/pix-ts
+      - run: python3 tools/package-release.py '${{ matrix.target }}' build/musl
+      - run: tools/check-private.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+  macos:
+    needs: preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: CFLAGS='-O2 -g -Werror' tools/build-portable.sh native
+      - run: python3 tools/audit-binary.py darwin-arm64 build/native/pix-ts
+      - run: python3 tools/package-release.py darwin-arm64 build/native
+      - run: tools/check-private.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: darwin-arm64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+  android:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [aarch64, armv7a, x86_64]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: nttld/setup-ndk@afb4c9964b521afb97c864b7d40b11e6911bd410
+        id: ndk
+        with:
+          ndk-version: r27d
+      - run: tools/build-portable.sh android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_ABI: ${{ matrix.abi }}
+          CFLAGS: -O2 -g -Werror
+      - run: python3 tools/audit-binary.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}/pix-ts'
+      - run: python3 tools/package-release.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}'
+      - run: tools/check-private.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-${{ matrix.abi }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+  windows:
+    needs: preflight
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc make curl p7zip python
+      - shell: msys2 {0}
+        run: tools/build-windows.sh
+      - shell: msys2 {0}
+        run: python tools/audit-binary.py windows-x64 build/windows-x64/pix-ts.exe
+      - shell: bash
+        run: python tools/package-release.py windows-x64 build/windows-x64
+      - shell: bash
+        run: tools/check-private.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+  source:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: tools/package-source.sh
+      - run: tools/check-private.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+  release:
+    needs: [preflight, linux, macos, android, windows, source]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify release set and checksums
+        run: python3 tools/verify-release.py
+      - name: Create private draft release
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          tools/check-private.sh
+          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" --title "pix-userland v$VERSION" --notes-file docs/releases.md
+          for asset in dist/*; do
+            tools/check-private.sh
+            gh release upload "v$VERSION" "$asset"
+          done
+          gh release view "v$VERSION" --json isDraft,assets,url

@@ -1,0 +1,17 @@
+/assets
+/build/
+/pix-ts
+*.o
+*.d
+/tests/test-crypto
+/tests/test-transport
+/tests/test-protocol
+*.ts
+*.usb.bin
+*.context
+*.mp4
+__pycache__/
+
+*.exe
+*.dll
+/dist/

@@ -1,0 +1,84 @@
+{
+  "terrestrial": {
+    "packets": 164864,
+    "usb_bytes": 30998528,
+    "markers": 21,
+    "iv_updates": 14,
+    "resync_bytes": 0,
+    "waiting_for_iv": 0,
+    "trailing_bytes": 148,
+    "tei": 0,
+    "scrambled": 0,
+    "continuity_errors": 0,
+    "invalid_packets": 0,
+    "psi_crc_errors": 0,
+    "pat": 150,
+    "pmt": 344,
+    "stream_error": 0
+  },
+  "bs": {
+    "packets": 197631,
+    "usb_bytes": 37158912,
+    "markers": 22,
+    "iv_updates": 15,
+    "resync_bytes": 0,
+    "waiting_for_iv": 0,
+    "trailing_bytes": 148,
+    "tei": 0,
+    "scrambled": 0,
+    "continuity_errors": 0,
+    "invalid_packets": 0,
+    "psi_crc_errors": 0,
+    "pat": 150,
+    "pmt": 898,
+    "stream_error": 0
+  },
+  "cs": {
+    "packets": 363563,
+    "usb_bytes": 68354048,
+    "markers": 22,
+    "iv_updates": 15,
+    "resync_bytes": 0,
+    "waiting_for_iv": 0,
+    "trailing_bytes": 68,
+    "tei": 0,
+    "scrambled": 0,
+    "continuity_errors": 0,
+    "invalid_packets": 0,
+    "psi_crc_errors": 0,
+    "pat": 151,
+    "pmt": 600,
+    "stream_error": 0
+  },
+  "static_cs": {
+    "packets": 243650,
+    "usb_bytes": 45809664,
+    "markers": 18,
+    "iv_updates": 11,
+    "resync_bytes": 0,
+    "waiting_for_iv": 0,
+    "trailing_bytes": 80,
+    "tei": 0,
+    "scrambled": 0,
+    "continuity_errors": 0,
+    "invalid_packets": 0,
+    "psi_crc_errors": 0,
+    "pat": 100,
+    "pmt": 400,
+    "stream_error": 0
+  },
+  "runtime_checks": [
+    {
+      "case": "static-libusb-cs10s",
+      "exit": 0
+    },
+    {
+      "case": "downstream-pipe-close",
+      "exit": 8
+    },
+    {
+      "case": "SIGTERM-graceful-stop",
+      "exit": 0
+    }
+  ]
+}

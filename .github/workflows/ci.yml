@@ -1,0 +1,21 @@
+name: Private checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.event.repository.private == true
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: tools/check-private.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      - run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
+      - run: make -j4 test CFLAGS='-O2 -g -Werror'
