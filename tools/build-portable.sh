@@ -70,8 +70,9 @@ printf 'libusb 1.0.30\nSHA256 %s\nmode=%s\ncompiler=%s\n' "$usb_sha" "$mode" "$c
 "$cc" --version >> "$out/build-info.txt"
 echo "Built $out/pix-ts" >&2
 if [ "$mode" = musl ] && command -v apk >/dev/null 2>&1; then
-    apk info -v musl gcc >> "$out/build-info.txt"
-    apk info -v musl | grep '^musl-1\.2\.5-r' >/dev/null || { echo 'Update musl notices for the installed version' >&2; exit 1; }
+    apk list --installed musl gcc > "$build/runtime-packages.txt"
+    cat "$build/runtime-packages.txt" >> "$out/build-info.txt"
+    grep '^musl-1\.2\.5-r' "$build/runtime-packages.txt" >/dev/null || { echo 'Update musl notices for the installed version' >&2; exit 1; }
 fi
 if [ "$mode" = android ]; then
     mkdir -p "$out/licenses"
