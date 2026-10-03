@@ -11,10 +11,15 @@ mkdir "$build/app"
 cp -R "$root/src" "$root/include" "$root/tests" "$root/Makefile" "$build/app/"
 cd "$build/app"
 make clean
-cp "$build/usb/MinGW64/dll/libusb-1.0.dll" .
-make -j4 test CC=gcc PKG_CONFIG=false USB_CFLAGS="-I$build/usb/include" USB_LIBS="$build/usb/MinGW64/static/libusb-1.0.dll.a" OS_LIBS=-lbcrypt LDFLAGS=-static-libgcc CFLAGS='-O2 -g -Werror'
-# Test executables also resolve the DLL from the application directory via PATH.
+make -j4 test CC=gcc PKG_CONFIG=false USB_CFLAGS="-I$build/usb/include" USB_LIBS="$build/usb/MinGW64/static/libusb-1.0.a" OS_LIBS="-lbcrypt -lsetupapi -luser32 -ladvapi32 -lole32" LDFLAGS=-static-libgcc CFLAGS='-O2 -g -Werror'
 mkdir -p "$root/build/windows-x64"
-cp pix-ts.exe libusb-1.0.dll "$root/build/windows-x64/"
+cp pix-ts.exe "$root/build/windows-x64/"
 gcc --version > "$root/build/windows-x64/build-info.txt"
-objdump -p pix-ts.exe libusb-1.0.dll | grep 'DLL Name' | tee -a "$root/build/windows-x64/build-info.txt"
+objdump -p pix-ts.exe | grep 'DLL Name' | tee -a "$root/build/windows-x64/build-info.txt"
+mkdir -p "$root/build/windows-x64/licenses"
+for name in COPYING.MinGW-w64.txt COPYING.MinGW-w64-runtime.txt; do
+    notice=$(find /mingw64/share/licenses -name "$name" -print -quit)
+    test -n "$notice"
+    cp "$notice" "$root/build/windows-x64/licenses/$name"
+done
+pacman -Q mingw-w64-x86_64-crt mingw-w64-x86_64-gcc >> "$root/build/windows-x64/build-info.txt"

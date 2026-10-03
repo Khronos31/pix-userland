@@ -48,7 +48,10 @@ Apple Silicon / macOS 26.6.2 arm64、sudoなし。従来のPython版とは別の
 | Android aarch64 Bionic | NDK r27d / API 24でクロスビルド、ELF検査 | 未検証 |
 | udev | 06b8:102b限定の権限ルールを用意 | 新ルール適用の実機試験は未実施 |
 | BusyBox mdev | Alpineコンテナ内の模擬sysfs/devで対象限定の権限変更を検査 | 実機ホットプラグは未検証 |
-| Windows / WebUSB | 将来用にUSBプロトコル境界を分離 | 未実装 |
+| Linux aarch64 musl | CIネイティブビルド/単体テスト/ELF依存検査 | 未検証 |
+| Android armv7a / x86_64 | CIクロスビルド/ELF依存検査 | 未検証 |
+| Windows x64 | CIビルド/単体テスト/PE依存検査。v0.1.1からlibusb静的 | 未検証 |
+| WebUSB | 未実装 | 未実装 |
 
 静的libusb版の依存確認:
 
@@ -72,3 +75,7 @@ CLI/移植方針の参考として読んだリポジトリ:
 - Khronos31/px4-userland: `cf38742618bb02db41a95def619fbff50e9eb0f3`
 
 これらのGPLドライバコードは本実装に取り込んでいない。
+
+## v0.1.1の配布検査
+
+全7種類でlibusbを静的リンク。Windows版にlibusb DLLは同梱しません。CIで実行ファイルのアーキテクチャとOS標準依存を検査します。最終Private Releaseのバイナリにだけ3つの実機assetsを追加し、ソースには含めません。ライセンス表示と同一コミットの対応ソースも検査します。

@@ -163,7 +163,16 @@ jobs:
           merge-multiple: true
       - name: Verify release set and checksums
         run: python3 tools/verify-release.py
-      - name: Create private draft release
+      - name: Restore authorized private device assets
+        env:
+          PIX_ASSETS_KEY: ${{ secrets.PIX_ASSETS_KEY }}
+        run: |
+          tools/check-private.sh
+          sudo apt-get update && sudo apt-get install -y python3-cryptography
+          /usr/bin/python3 tools/assets-bundle.py open .private/assets.enc build/private-assets
+          python3 tools/finalize-private-release.py build/private-assets
+          python3 tools/verify-release.py --with-assets
+      - name: Publish private release
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
@@ -173,4 +182,9 @@ jobs:
             tools/check-private.sh
             gh release upload "v$VERSION" "$asset"
           done
+          tools/check-private.sh
+          gh release edit "v$VERSION" --draft=false --latest
           gh release view "v$VERSION" --json isDraft,assets,url
+      - name: Remove plaintext staging files
+        if: always()
+        run: rm -f build/private-assets/fpga.bin build/private-assets/bootstrap.bin build/private-assets/validation.bin

@@ -26,8 +26,8 @@ elif target == 'darwin-arm64':
         assert line.strip().startswith(('/usr/lib/','/System/Library/')), line
     print(deps)
 elif target == 'windows-x64':
-    allowed={'kernel32.dll','msvcrt.dll','bcrypt.dll','user32.dll','advapi32.dll','ole32.dll','setupapi.dll','cfgmgr32.dll','shlwapi.dll','shell32.dll','winusb.dll','libusb-1.0.dll'}
-    for item in (p,p.parent/'libusb-1.0.dll'):
+    allowed={'kernel32.dll','msvcrt.dll','bcrypt.dll','user32.dll','advapi32.dll','ole32.dll','setupapi.dll','cfgmgr32.dll','shlwapi.dll','shell32.dll','winusb.dll'}
+    for item in (p,):
         content=item.read_bytes();pe=struct.unpack_from('<I',content,0x3c)[0]
         assert content[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H',content,pe+4)[0] == 0x8664, 'Wrong PE architecture'
         imports=run('objdump','-p',str(item))

@@ -1,7 +1,7 @@
 # Architecture
 
 `pix-ts` is a single-receiver userspace CLI. Runtime dependencies are libusb and
-standard OS C/POSIX interfaces (including pthreads). There is no libudev, OpenSSL,
+standard OS interfaces (POSIX threads on Unix, Win32 synchronization on Windows). There is no libudev, OpenSSL,
 PC/SC, Python, systemd, or daemon API in the application.
 
 - `protocol.c`: DT181 power sequencing, FPGA upload, I2C tuner setup, terrestrial
@@ -24,8 +24,7 @@ PC/SC, Python, systemd, or daemon API in the application.
   not block libusb's event handler. A full queue fails the capture rather than
   reporting an intact TS. Nonblocking pipe output times out after 3 seconds
   without progress. All logs and final JSON go to stderr.
-- `platform.c`: monotonic time/sleep. OS entropy access is currently in `crypto.c`
-  (`/dev/urandom`); a Windows/browser port must provide an equivalent CSPRNG.
+- `platform.c`: monotonic time/sleep, output mode, and OS entropy. Unix uses `/dev/urandom`; Windows uses BCryptGenRandom. `os.h` abstracts threads, mutexes and condition variables.
 
 Initialization: load private assets → claim USB → power/FPGA → session → tuner
 setup → select channel → clear FIFO → queue USB reads → start stream → worker.
@@ -42,6 +41,4 @@ Future models must get their own verified USB IDs, firmware, power and tuner
 profiles. DT141/195/295 are not claimed to work. The current backend only opens
 06b8:102b; the name `pix-userland` is not a blanket compatibility claim.
 
-WinUSB may eventually use libusb's Windows backend. WebUSB needs a browser
-adapter and an asynchronous command/state-machine bridge, not merely a different
-linker flag. Neither Windows nor browser support is implemented in this version.
+Windows uses libusb's WinUSB backend and native Win32 synchronization. Its CI build and unit tests do not certify USB reception. WebUSB remains unimplemented and needs an asynchronous browser adapter.

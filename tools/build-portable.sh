@@ -10,7 +10,13 @@ echo "Build directory: $build" >&2
 # Keep intermediates for reproducibility/debugging; no unbounded rm -rf.
 usb_url=https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2
 usb_sha=fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf
-curl -fL "$usb_url" -o "$build/libusb.tar.bz2"
+if [ -n "${LIBUSB_SOURCE_TARBALL:-}" ]; then
+    cp "$LIBUSB_SOURCE_TARBALL" "$build/libusb.tar.bz2"
+elif [ -f "$root/third_party/libusb-1.0.30.tar.bz2" ]; then
+    cp "$root/third_party/libusb-1.0.30.tar.bz2" "$build/libusb.tar.bz2"
+else
+    curl -fL --retry 3 "$usb_url" -o "$build/libusb.tar.bz2"
+fi
 actual=$( (sha256sum "$build/libusb.tar.bz2" 2>/dev/null || shasum -a 256 "$build/libusb.tar.bz2") | awk '{print $1}')
 [ "$actual" = "$usb_sha" ] || { echo 'libusb SHA-256 mismatch' >&2; exit 1; }
 tar -xjf "$build/libusb.tar.bz2" -C "$build"
@@ -63,3 +69,11 @@ cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
 printf 'libusb 1.0.30\nSHA256 %s\nmode=%s\ncompiler=%s\n' "$usb_sha" "$mode" "$cc" > "$out/build-info.txt"
 "$cc" --version >> "$out/build-info.txt"
 echo "Built $out/pix-ts" >&2
+if [ "$mode" = musl ] && command -v apk >/dev/null 2>&1; then
+    apk info -v musl gcc >> "$out/build-info.txt"
+    apk info -v musl | grep '^musl-1\.2\.5-r' >/dev/null || { echo 'Update musl notices for the installed version' >&2; exit 1; }
+fi
+if [ "$mode" = android ]; then
+    mkdir -p "$out/licenses"
+    cp "$toolchain/NOTICE" "$out/licenses/Android-NDK-build-NOTICE.txt"
+fi
