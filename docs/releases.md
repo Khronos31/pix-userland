@@ -21,7 +21,7 @@ GitHub Pagesや外部レジストリへの公開は行いません。
 
 ReleaseはGitHubのActions画面で **Private release** をmainから手動実行します。
 タグ名は `include/version.h` のVERSIONから生成します。同じタグの再利用は拒否します。
-全ビルド成功後、同じコミットにタグを付けたDraft Releaseを作成します。
+全ビルド成功後、同じコミットを対象にしたDraft Releaseを作成します。
 失敗したDraftを修復する場合は、既存ファイルを確認して手動で整理してから再実行してください。
 バージョン更新時は `include/version.h` を変更します。
 

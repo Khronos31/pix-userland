@@ -5,7 +5,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 build=$(mktemp -d)
 curl -fL --retry 3 https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.7z -o "$build/libusb.7z"
 echo "7fb1dfec805b97983763d7d0ae244320da12add1003d4249c96cc4d586398c79  $build/libusb.7z" | sha256sum -c -
-7z x "$build/libusb.7z" -o"$build/usb" >/dev/null
+# Extract only this target: older p7zip cannot decode unrelated ARM64 BCJ members.
+7z x "$build/libusb.7z" -o"$build/usb" 'include/*' 'MinGW64/*' >/dev/null
 mkdir "$build/app"
 cp -R "$root/src" "$root/include" "$root/tests" "$root/Makefile" "$build/app/"
 cd "$build/app"
