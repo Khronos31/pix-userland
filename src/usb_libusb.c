@@ -1,4 +1,5 @@
 #include "usb_backend.h"
+#include "usb_log.h"
 #include <libusb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@ struct usb_backend {
     uint8_t buffers[TRANSFERS][32768];
     int pending, stopping, error, claimed, detached;
     int diagnostic;
+    usb_log *log;
     uint64_t completions, short_reads, last_ms, max_gap, next_log;
     unsigned abnormal_logs;
     usb_sink sink;
@@ -134,6 +136,30 @@ pixy_io usb_io(usb_backend *b) {
     pixy_io io = {b, bulk};
     return io;
 }
+static int log_record(void *user, const usb_log_record *r, uint64_t dropped) {
+    (void)user;
+    return fprintf(stderr,
+                   "usb_diagnostic mono_ms=%llu completions=%llu slot=%u status=%d actual=%d "
+                   "requested=%d short_reads=%llu max_gap_ms=%llu pending=%d gap_ms=%llu "
+                   "log_dropped=%llu\n",
+                   (unsigned long long)r->mono_ms, (unsigned long long)r->completions, r->slot,
+                   r->status, r->actual, r->requested, (unsigned long long)r->short_reads,
+                   (unsigned long long)r->max_gap_ms, r->pending, (unsigned long long)r->gap_ms,
+                   (unsigned long long)dropped) < 0
+               ? -1
+               : 0;
+}
+static void close_log(usb_backend *b) {
+    if (!b->log)
+        return;
+    uint64_t dropped = 0;
+    if (usb_log_close(b->log, &dropped))
+        b->error = 1;
+    b->log = NULL;
+    if (dropped &&
+        fprintf(stderr, "usb_diagnostic log_dropped_total=%llu\n", (unsigned long long)dropped) < 0)
+        b->error = 1;
+}
 static void LIBUSB_CALL complete(struct libusb_transfer *t) {
     usb_backend *b = t->user_data;
     b->pending--;
@@ -146,17 +172,17 @@ static void LIBUSB_CALL complete(struct libusb_transfer *t) {
         b->last_ms = now;
         if (t->status == LIBUSB_TRANSFER_COMPLETED && t->actual_length != t->length)
             b->short_reads++;
-        int abnormal = t->status != LIBUSB_TRANSFER_COMPLETED || t->actual_length != t->length;
+        int abnormal =
+            t->status != LIBUSB_TRANSFER_COMPLETED || t->actual_length != t->length || gap >= 100;
         if (now >= b->next_log || (abnormal && b->abnormal_logs++ < 128)) {
             unsigned slot = 0;
             while (slot < TRANSFERS && b->transfers[slot] != t)
                 slot++;
-            fprintf(stderr,
-                    "usb_diagnostic mono_ms=%llu completions=%llu slot=%u status=%d actual=%d "
-                    "requested=%d short_reads=%llu max_gap_ms=%llu pending=%d\n",
-                    (unsigned long long)now, (unsigned long long)b->completions, slot, t->status,
-                    t->actual_length, t->length, (unsigned long long)b->short_reads,
-                    (unsigned long long)b->max_gap, b->pending);
+            usb_log_record record = {now,       b->completions, b->short_reads, b->max_gap,
+                                     gap,       slot,           t->status,      t->actual_length,
+                                     t->length, b->pending};
+            if (usb_log_submit(b->log, &record))
+                b->error = 1;
             b->next_log = now + 30000;
         }
     }
@@ -180,6 +206,11 @@ static void LIBUSB_CALL complete(struct libusb_transfer *t) {
 int usb_stream_start(usb_backend *b, usb_sink sink, void *user) {
     b->sink = sink;
     b->user = user;
+    if (b->diagnostic && !(b->log = usb_log_open(log_record, NULL))) {
+        fprintf(stderr, "Cannot start USB diagnostic logger\n");
+        b->error = 1;
+        return -1;
+    }
     for (unsigned i = 0; i < TRANSFERS; i++) {
         b->transfers[i] = libusb_alloc_transfer(0);
         if (!b->transfers[i]) {
@@ -219,6 +250,7 @@ int usb_stream_stop(usb_backend *b) {
             b->error = 1;
         }
     }
+    close_log(b);
     return b->error ? -1 : 0;
 }
 void usb_close(usb_backend *b) {
@@ -226,6 +258,7 @@ void usb_close(usb_backend *b) {
         return;
     if (b->pending)
         usb_stream_stop(b);
+    close_log(b);
     for (unsigned i = 0; i < TRANSFERS; i++)
         if (b->transfers[i])
             libusb_free_transfer(b->transfers[i]);

@@ -19,3 +19,5 @@ __pycache__/
 *.pixdiag
 /tests/test-diagnostic
 *.dSYM/
+
+/tests/test-usb-log
