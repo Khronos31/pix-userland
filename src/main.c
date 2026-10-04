@@ -31,6 +31,7 @@ typedef struct {
     diagnostic *diag;
     int done, error, output;
     uint64_t write_started;
+    uint64_t capture_elapsed_ms;
     uint64_t usb_bytes;
     os_mutex mutex;
     os_cond cond;
@@ -218,7 +219,7 @@ static void report(const stream *s) {
             "bytes\":%llu,\"waiting_for_iv\":%llu,\"trailing_bytes\":%zu,\"tei\":%llu,"
             "\"scrambled\":%llu,\"continuity_errors\":%llu,\"invalid_packets\":%llu,\"psi_crc_"
             "errors\":%llu,\"pat\":%llu,\"pmt\":%llu,\"key_tables\":%llu,"
-            "\"previous_key_uses\":%llu,\"stream_error\":%d}\n",
+            "\"previous_key_uses\":%llu,\"stream_error\":%d,\"capture_elapsed_ms\":%llu}\n",
             (unsigned long long)c->packets, (unsigned long long)s->usb_bytes,
             (unsigned long long)d->markers, (unsigned long long)d->iv_updates,
             (unsigned long long)d->resync, (unsigned long long)d->waiting, d->used,
@@ -226,7 +227,8 @@ static void report(const stream *s) {
             (unsigned long long)c->continuity, (unsigned long long)c->invalid,
             (unsigned long long)c->crc_errors, (unsigned long long)c->pat,
             (unsigned long long)c->pmt, (unsigned long long)d->key_tables,
-            (unsigned long long)d->previous_key_uses, s->error);
+            (unsigned long long)d->previous_key_uses, s->error,
+            (unsigned long long)s->capture_elapsed_ms);
 }
 static int offline(const char *path, const char *context, stream *s) {
     FILE *f = fopen(path, "rb");
@@ -574,6 +576,7 @@ int main(int argc, char **argv) {
             next = now_ms() + 1000;
         }
     }
+    s->capture_elapsed_ms = now_ms() - start;
 cleanup:
     if (opened) {
         if (rc)

@@ -136,18 +136,23 @@ pixy_io usb_io(usb_backend *b) {
     pixy_io io = {b, bulk};
     return io;
 }
-static int log_record(void *user, const usb_log_record *r, uint64_t dropped) {
+static int log_record(void *user, const usb_log_record *r, uint64_t dropped, usb_log *log) {
     (void)user;
-    return fprintf(stderr,
+    uint64_t last_write_ms, max_write_ms;
+    usb_log_write_timing(log, &last_write_ms, &max_write_ms);
+    char line[512];
+    int length = snprintf(line, sizeof(line),
                    "usb_diagnostic mono_ms=%llu completions=%llu slot=%u status=%d actual=%d "
                    "requested=%d short_reads=%llu max_gap_ms=%llu pending=%d gap_ms=%llu "
-                   "log_dropped=%llu\n",
+                   "log_dropped=%llu log_previous_write_ms=%llu log_max_write_ms=%llu\n",
                    (unsigned long long)r->mono_ms, (unsigned long long)r->completions, r->slot,
                    r->status, r->actual, r->requested, (unsigned long long)r->short_reads,
                    (unsigned long long)r->max_gap_ms, r->pending, (unsigned long long)r->gap_ms,
-                   (unsigned long long)dropped) < 0
-               ? -1
-               : 0;
+                   (unsigned long long)dropped, (unsigned long long)last_write_ms,
+                   (unsigned long long)max_write_ms);
+    if (length < 0 || (size_t)length >= sizeof(line))
+        return -1;
+    return usb_log_write_fd(log, 2, line, (size_t)length);
 }
 static void close_log(usb_backend *b) {
     if (!b->log)
@@ -156,9 +161,18 @@ static void close_log(usb_backend *b) {
     if (usb_log_close(b->log, &dropped))
         b->error = 1;
     b->log = NULL;
-    if (dropped &&
-        fprintf(stderr, "usb_diagnostic log_dropped_total=%llu\n", (unsigned long long)dropped) < 0)
-        b->error = 1;
+#ifndef _WIN32
+    /* Best effort only. On Windows a synchronous summary in the caller could
+     * block after the cancellable logger thread has already been joined. */
+    if (dropped) {
+        char line[96];
+        int length = snprintf(line, sizeof(line), "usb_diagnostic log_dropped_total=%llu\n",
+                              (unsigned long long)dropped);
+        if (length < 0 || (size_t)length >= sizeof(line) ||
+            usb_log_write_fd(NULL, 2, line, (size_t)length) < 0)
+            b->error = 1;
+    }
+#endif
 }
 static void LIBUSB_CALL complete(struct libusb_transfer *t) {
     usb_backend *b = t->user_data;
