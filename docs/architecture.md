@@ -46,31 +46,37 @@ profiles. DT141/195/295 are not claimed to work. The current backend only opens
 
 Windows uses libusb's WinUSB backend and native Win32 synchronization. Its CI build and unit tests do not certify USB reception. WebUSB remains unimplemented and needs an asynchronous browser adapter.
 
-## Bounded diagnostic capture (0.1.3-dev)
+## Bounded diagnostic capture (0.1.3-dev2)
 
-`--diagnostic NEW_DIRECTORY` records the first incident locally while the usual TS output can be redirected to `/dev/null`.
-The directory must not exist. On POSIX it is created with mode 0700, and diagnostic files use mode 0600.
-These files contain private session keys, decoder state and broadcast data; do not commit or upload them.
+`--diagnostic NEW_DIRECTORY` records USB input locally while ordinary TS output can go to `/dev/null`.
+The directory must not exist. On POSIX, directories use mode 0700 and files use mode 0600.
+Checkpoints contain session keys, decoder state and broadcast data: never commit or upload them.
 
-The worker records the original USB completion chunks in sixteen rotating 8 MiB segments, preserving roughly one minute at the observed terrestrial bitrate.
-Each segment starts with a decoder and TS-checker checkpoint, so replay does not depend on receiving a new key table within the captured window.
-At the first resynchronization, IV wait, TS validation error or decoder failure, the ring is frozen and up to 16 MiB of subsequent input is saved separately.
-The bound, including checkpoint overhead, frame headers and the 8 MiB event-log limit, is below 200 MiB. Only the first incident gets raw data; later counter changes remain in the bounded event log.
-A fatal receiver/USB error may end the run before the post-event window is complete; the last ring remains available.
+Two independent capture lanes prevent a CC change from consuming the stream-error evidence:
 
-`events.log` records monotonic and Unix timestamps, PID/expected/actual continuity counters, cumulative decoder anomalies, queue high-water and processing delay.
-Frame headers retain each callback's length and receive/process timestamps. USB status/short-transfer and periodic completion counters are written to stderr.
-The diagnostic file writes occur in the decoder worker and can affect scheduling; queue delay is recorded to expose that effect. They are not made from the USB callback.
-Disk I/O failure makes the diagnostic trial fail explicitly. Normal capture without this option does not write diagnostic files.
+- The top-level ring has eight 8 MiB segments. The first resynchronization, IV wait or decoder failure freezes it and saves an 8 MiB post window.
+- `cc-01` through `cc-03` each have two 8 MiB ring segments and a 2 MiB post window. A CC, TEI, PSI CRC, invalid-packet or scrambled-packet increase freezes the current window; after its post window completes, the next window starts with the existing cumulative CC counter. Further validation errors during a post window are captured there. After three windows, CC events remain logged while the independent stream ring stays active.
 
-Replay a trusted, completed segment using the same binary/build and ABI:
+The total bound, including checkpoints, per-frame overhead, one-frame overshoot and event logs, remains below 200 MiB. Frame headers count toward segment/post limits, including tiny USB completions. Root events are capped at 8 MiB, each CC-window log at 1 MiB. The pre-event time range is shorter than in the original diagnostic build; it depends on bitrate and the current rotating slot position. No complete long-duration TS is retained.
+A fatal receiver/USB error may terminate before a post window finishes. On normal shutdown, unfinished windows remain readable once files close.
+
+Every segment starts with a decoder and checker checkpoint. Raw frame headers record receive/process timestamps, byte counts and queue depth. `events.log` records PID/CC, cumulative errors and periodic packet/queue/delay samples. USB completion statistics remain on stderr. Root logs also describe current, CRC-valid PMT section changes without changing continuity error counting:
+
+- `pmt_begin`: `pid` = PMT PID, `expected` = programme number, `actual` = version.
+- `pmt_es`: `pid` = elementary-stream PID, `expected` = stream type, `actual` = PMT PID.
+- `pmt_end`: `pid` = PMT PID, `expected` = section number, `actual` = last section number.
+
+Each begin/end group describes a section's complete ES list, allowing additions/removals to be compared offline. Multiple sections/programmes must be considered together. CRC-invalid, future and structurally malformed PMTs do not update this observation state. CC history is deliberately not cleared when a PMT changes; a new map alone is not sufficient evidence to suppress a discontinuity.
+
+Diagnostic writes run in the decoder worker and may affect scheduling. Queue delay exposes this overhead. I/O failures make the run fail explicitly. Normal capture without diagnostics writes no diagnostic files.
+
+Replay trusted, completed files with the same build and ABI:
 
 ```sh
 pix-ts --replay-diagnostic /private/path/ring-03.pixdiag > /dev/null
+pix-ts --replay-diagnostic /private/path/ring-03.pixdiag --replay-chunk-bytes 187 > /dev/null
 ```
 
-The checkpoint format is a private native-state snapshot, not an interchange format. It is unsuitable for untrusted input or arbitrary cross-version/architecture replay.
-Generation numbers, printed on replay and in `events.log`, give ring order; slot filenames wrap.
-Reported counters include the state at the segment's start; compare with the printed checkpoint counters to distinguish new errors from inherited ones.
-Raw-frame boundaries are replayed unchanged, including any partial TS packet in the checkpoint. Replayed TS is only that segment's output, not a complete programme recording.
-The context/key bytes are stored only in the private checkpoint and never printed in diagnostic logs.
+The optional split size (1..32768) subdivides each recorded frame before feeding the decoder, preserving byte order. Compare output hashes and counter deltas across splits; this tests dependence on feed boundaries, not reception loss before USB delivery. Default replay preserves recorded frame boundaries.
+The native-state checkpoint format is private, unsuitable for untrusted or cross-version input. The checker layout changed in dev2, so original dev1 snapshots must use the retained original executable or a separately verified ABI-compatible analysis harness, not the dev2 executable.
+Generation numbers give ring order; slot names wrap. Final replay counters include checkpoint history: use differences from starting counters. Replayed TS is only that segment's output, not a complete programme recording. Keys/context are never printed in diagnostic logs.

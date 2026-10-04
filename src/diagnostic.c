@@ -26,6 +26,9 @@ struct diagnostic {
     uint64_t generation, segment_bytes, post_bytes, log_bytes, last_sample;
     uint64_t resync, waiting, cc, tei, crc, invalid, scrambled;
     int triggered, stopped, failed;
+    unsigned slots, post_limit, cc_window;
+    int cc_lane;
+    struct diagnostic *cc_capture;
 };
 static FILE *private_file(const char *path, int truncate) {
     int fd = open(path, O_WRONLY | O_CREAT | O_BINARY | (truncate ? O_TRUNC : O_EXCL), 0600);
@@ -37,7 +40,7 @@ static FILE *private_file(const char *path, int truncate) {
     return f;
 }
 static void event(diagnostic *g, const char *format, ...) {
-    if (!g || !g->events || g->log_bytes >= 8u * 1024u * 1024u)
+    if (!g || !g->events || g->log_bytes >= (g->cc_lane ? 1u : 8u) * 1024u * 1024u)
         return;
     int n = fprintf(g->events, "unix_s=%lld mono_ms=%llu ", (long long)time(NULL),
                     (unsigned long long)now_ms());
@@ -55,7 +58,7 @@ void diag_issue(void *u, const char *kind, unsigned pid, uint64_t packet, unsign
     event(u, "issue=%s pid=%u packet=%llu expected=%u actual=%u\n", kind, pid,
           (unsigned long long)packet, expected, actual);
 }
-diagnostic *diag_open(const char *dir) {
+static diagnostic *open_lane(const char *dir, int cc_lane) {
     diagnostic *g = calloc(1, sizeof(*g));
     if (!g)
         return NULL;
@@ -73,6 +76,9 @@ diagnostic *diag_open(const char *dir) {
         return NULL;
     }
     strcpy(g->directory, dir);
+    g->cc_lane = cc_lane;
+    g->slots = cc_lane ? DIAG_CC_SLOTS : DIAG_SLOTS;
+    g->post_limit = cc_lane ? DIAG_CC_POST : DIAG_POST;
     char path[4096];
     snprintf(path, sizeof(path), "%s/events.log", dir);
     g->events = private_file(path, 0);
@@ -80,8 +86,31 @@ diagnostic *diag_open(const char *dir) {
         free(g);
         return NULL;
     }
-    event(g, "start version=%s slots=%u segment_bytes=%u post_bytes=%u\n", VERSION, DIAG_SLOTS,
-          DIAG_SEGMENT, DIAG_POST);
+    event(g, "start version=%s lane=%s slots=%u segment_bytes=%u post_bytes=%u\n", VERSION,
+          cc_lane ? "cc" : "stream", g->slots, DIAG_SEGMENT, g->post_limit);
+    return g;
+}
+static int next_cc_window(diagnostic *g, const ts_check *c) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/cc-%02u", g->directory, ++g->cc_window);
+    g->cc_capture = open_lane(path, 1);
+    if (!g->cc_capture)
+        return -1;
+    /* Cumulative errors from an earlier window are not new incidents. */
+    g->cc_capture->cc = c ? c->continuity : 0;
+    g->cc_capture->tei = c ? c->tei : 0;
+    g->cc_capture->crc = c ? c->crc_errors : 0;
+    g->cc_capture->invalid = c ? c->invalid : 0;
+    g->cc_capture->scrambled = c ? c->scrambled : 0;
+    event(g, "cc-window number=%u limit=%u\n", g->cc_window, DIAG_CC_WINDOWS);
+    return 0;
+}
+diagnostic *diag_open(const char *dir) {
+    diagnostic *g = open_lane(dir, 0);
+    if (g && next_cc_window(g, NULL)) {
+        diag_close(g);
+        return NULL;
+    }
     return g;
 }
 static int segment(diagnostic *g, const ts_decoder *d, const ts_check *c) {
@@ -92,12 +121,12 @@ static int segment(diagnostic *g, const ts_decoder *d, const ts_check *c) {
             return -1;
     }
     char path[4096];
-    unsigned slot = (unsigned)(g->generation % DIAG_SLOTS);
+    unsigned slot = (unsigned)(g->generation % g->slots);
     if (g->triggered)
         snprintf(path, sizeof(path), "%s/post.pixdiag", g->directory);
     else
         snprintf(path, sizeof(path), "%s/ring-%02u.pixdiag", g->directory, slot);
-    g->raw = private_file(path, !g->triggered && g->generation >= DIAG_SLOTS);
+    g->raw = private_file(path, !g->triggered && g->generation >= g->slots);
     if (!g->raw)
         return -1;
     header h = {0};
@@ -133,6 +162,8 @@ int diag_before(diagnostic *g, const ts_decoder *d, const ts_check *c, const uin
                 uint64_t received, unsigned queued, unsigned high_water) {
     if (!g)
         return 0;
+    if (g->cc_capture && diag_before(g->cc_capture, d, c, p, n, received, queued, high_water))
+        g->failed = 1;
     uint64_t now = now_ms();
     if (now - g->last_sample >= 1000) {
         event(g,
@@ -159,17 +190,33 @@ int diag_before(diagnostic *g, const ts_decoder *d, const ts_check *c, const uin
         g->failed = 1;
         return -1;
     }
-    g->segment_bytes += n;
+    g->segment_bytes += sizeof(f) + n;
     if (g->triggered)
-        g->post_bytes += n;
+        g->post_bytes += sizeof(f) + n;
     return 0;
 }
 int diag_after(diagnostic *g, const ts_decoder *d, const ts_check *c, int failed) {
     if (!g)
         return 0;
-    int changed = d->resync != g->resync || d->waiting != g->waiting || c->continuity != g->cc ||
-                  c->tei != g->tei || c->crc_errors != g->crc || c->invalid != g->invalid ||
-                  c->scrambled != g->scrambled;
+    if (g->cc_capture) {
+        if (diag_after(g->cc_capture, d, c, failed))
+            g->failed = 1;
+        if (g->cc_capture->stopped) {
+            if (diag_close(g->cc_capture))
+                g->failed = 1;
+            g->cc_capture = NULL;
+            event(g, "cc-saved number=%u\n", g->cc_window);
+            if (g->cc_window < DIAG_CC_WINDOWS) {
+                if (next_cc_window(g, c))
+                    g->failed = 1;
+            } else
+                event(g, "cc-limit reached; stream ring remains independent\n");
+        }
+    }
+    int stream_changed = d->resync != g->resync || d->waiting != g->waiting;
+    int check_changed = c->continuity != g->cc || c->tei != g->tei || c->crc_errors != g->crc ||
+                        c->invalid != g->invalid || c->scrambled != g->scrambled;
+    int changed = stream_changed || check_changed;
     if (changed || failed) {
         event(g,
               "anomaly resync=%llu waiting=%llu cc=%llu tei=%llu crc=%llu invalid=%llu "
@@ -178,10 +225,11 @@ int diag_after(diagnostic *g, const ts_decoder *d, const ts_check *c, int failed
               (unsigned long long)c->continuity, (unsigned long long)c->tei,
               (unsigned long long)c->crc_errors, (unsigned long long)c->invalid,
               (unsigned long long)c->scrambled, failed);
-        if (!g->triggered) {
+        int trigger = g->cc_lane ? check_changed : (stream_changed || failed);
+        if (trigger && !g->triggered) {
             g->triggered = 1;
-            event(g, "trigger first-anomaly; preserving ring; collecting post=%u bytes\n",
-                  DIAG_POST);
+            event(g, "trigger lane=%s; preserving ring; collecting post=%u bytes\n",
+                  g->cc_lane ? "cc" : "stream", g->post_limit);
             if (segment(g, d, c))
                 g->failed = 1;
         }
@@ -193,18 +241,20 @@ int diag_after(diagnostic *g, const ts_decoder *d, const ts_check *c, int failed
     g->crc = c->crc_errors;
     g->invalid = c->invalid;
     g->scrambled = c->scrambled;
-    if (g->triggered && !g->stopped && g->post_bytes >= DIAG_POST) {
+    if (g->triggered && !g->stopped && g->post_bytes >= g->post_limit) {
         g->stopped = 1;
         if (g->raw && fclose(g->raw))
             g->failed = 1;
         g->raw = NULL;
-        event(g, "saved first incident; raw capture stopped at bound\n");
+        event(g, "saved lane=%s; raw capture stopped at bound\n", g->cc_lane ? "cc" : "stream");
     }
     return g->failed ? -1 : 0;
 }
 int diag_close(diagnostic *g) {
     if (!g)
         return 0;
+    if (g->cc_capture && diag_close(g->cc_capture))
+        g->failed = 1;
     event(g, "close triggered=%d stopped=%d failed=%d\n", g->triggered, g->stopped, g->failed);
     if (g->raw && fclose(g->raw))
         g->failed = 1;
@@ -214,7 +264,10 @@ int diag_close(diagnostic *g) {
     free(g);
     return r;
 }
-int diag_replay(const char *path, ts_decoder *d, ts_check *c, ts_sink sink, void *user) {
+int diag_replay_chunks(const char *path, ts_decoder *d, ts_check *c, ts_sink sink, void *user,
+                       size_t chunk) {
+    if (chunk > 32768)
+        return -1;
     FILE *f = fopen(path, "rb");
     if (!f)
         return -1;
@@ -251,11 +304,22 @@ int diag_replay(const char *path, ts_decoder *d, ts_check *c, ts_sink sink, void
     rc = 0;
     while ((n = fread(&block, 1, sizeof(block), f)) != 0) {
         if (n != sizeof(block) || block.length > sizeof(data) || !block.length ||
-            fread(data, 1, block.length, f) != block.length ||
-            ts_decoder_feed(d, data, block.length)) {
+            fread(data, 1, block.length, f) != block.length) {
             rc = -1;
             break;
         }
+        for (size_t off = 0; off < block.length;) {
+            size_t take = block.length - off;
+            if (chunk && take > chunk)
+                take = chunk;
+            if (ts_decoder_feed(d, data + off, take)) {
+                rc = -1;
+                break;
+            }
+            off += take;
+        }
+        if (rc)
+            break;
     }
     if (ferror(f))
         rc = -1;
@@ -268,4 +332,7 @@ done:
     c->issue = NULL;
     c->issue_user = NULL;
     return rc;
+}
+int diag_replay(const char *path, ts_decoder *d, ts_check *c, ts_sink sink, void *user) {
+    return diag_replay_chunks(path, d, c, sink, user, 0);
 }

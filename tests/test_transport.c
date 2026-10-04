@@ -55,8 +55,106 @@ static void test_key_rotation(void) {
     assert(ts_decoder_feed(d, wire + 188, 188) < 0);
     free(d);
 }
+struct observed {
+    unsigned begin, es, end, cc;
+};
+static void observe(void *u, const char *kind, unsigned pid, uint64_t packet, unsigned expected,
+                    unsigned actual) {
+    (void)pid;
+    (void)packet;
+    (void)expected;
+    (void)actual;
+    struct observed *o = u;
+    if (!strcmp(kind, "pmt_begin"))
+        o->begin++;
+    if (!strcmp(kind, "pmt_es"))
+        o->es++;
+    if (!strcmp(kind, "pmt_end"))
+        o->end++;
+    if (!strcmp(kind, "cc"))
+        o->cc++;
+}
+static void crc_section(uint8_t *p, size_t n) {
+    uint32_t crc = ts_crc(p, n - 4);
+    for (unsigned i = 0; i < 4; i++)
+        p[n - 4 + i] = (uint8_t)(crc >> (24 - i * 8));
+}
+static void test_pmt_observation(void) {
+    ts_check *c = calloc(1, sizeof(*c));
+    assert(c);
+    ts_check_init(c);
+    struct observed o = {0};
+    c->issue = observe;
+    c->issue_user = &o;
+    uint8_t p[188], section[sizeof(pmt_section)];
+    make_packet(p, 0, pat_section, sizeof(pat_section));
+    ts_check_packet(c, p);
+    make_packet(p, 256, pmt_section, sizeof(pmt_section));
+    ts_check_packet(c, p);
+    assert(o.begin == 1 && o.es == 1 && o.end == 1);
+    p[3] = 0x11;
+    ts_check_packet(c, p); /* Same PMT in another TS packet: no repeat. */
+    assert(o.begin == 1);
+    memcpy(section, pmt_section, sizeof(section));
+    section[5] += 2;
+    section[14] = 0x11;
+    crc_section(section, sizeof(section));
+    /* Old audio PID history survives PMT changes: observation must not hide errors. */
+    c->seen[273] = 1;
+    c->cc[273] = 2;
+    make_packet(p, 256, section, sizeof(section));
+    p[3] = 0x12;
+    ts_check_packet(c, p);
+    assert(o.begin == 2 && o.es == 2 && c->seen[273] && c->cc[273] == 2);
+    memset(p, 255, sizeof(p));
+    p[0] = 0x47;
+    p[1] = 1;
+    p[2] = 17;
+    p[3] = 0x15;
+    ts_check_packet(c, p);
+    assert(o.cc == 1 && c->continuity == 1);
+    section[5] &= ~1;
+    crc_section(section, sizeof(section));
+    make_packet(p, 256, section, sizeof(section));
+    p[3] = 0x13;
+    ts_check_packet(c, p);
+    assert(o.begin == 2); /* Future PMT is not the active map. */
+    section[5] |= 1;
+    section[16] = 100;
+    crc_section(section, sizeof(section));
+    make_packet(p, 256, section, sizeof(section));
+    p[3] = 0x14;
+    ts_check_packet(c, p);
+    assert(o.begin == 2); /* CRC-valid but malformed descriptor length. */
+    free(c);
+}
+static void test_resync_splits(void) {
+    const size_t chunks[] = {1, 2, 7, 37, 187, 188, 189, 375, 376, 377, 563, 564, 565, 4096, 32768};
+    uint8_t data[sizeof(wire) + 2];
+    data[0] = 0x12;
+    data[1] = 0x34;
+    memcpy(data + 2, wire, sizeof(wire));
+    for (unsigned i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++) {
+        ts_decoder *d = calloc(1, sizeof(*d));
+        struct output o = {0};
+        assert(d);
+        ts_decoder_init(d, context, sink, &o, NULL);
+        for (size_t off = 0; off < sizeof(data);) {
+            size_t n = sizeof(data) - off;
+            if (n > chunks[i])
+                n = chunks[i];
+            assert(!ts_decoder_feed(d, data + off, n));
+            off += n;
+        }
+        assert(d->resync == 2 && !d->waiting && d->iv_updates == 1);
+        assert(o.n == sizeof(plain) && !memcmp(o.data, plain, sizeof(plain)));
+        free(d);
+    }
+}
 int main(void) {
     test_key_rotation();
+    test_pmt_observation();
+    test_resync_splits();
     const size_t chunks[] = {1, 2, 7, 37, 187, 188, 189, 376, 752};
     for (unsigned c = 0; c < sizeof(chunks) / sizeof(chunks[0]); c++) {
         ts_decoder *d = calloc(1, sizeof(*d));

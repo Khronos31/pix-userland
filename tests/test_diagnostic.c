@@ -32,7 +32,43 @@ static void feed(diagnostic *g, ts_decoder *d, ts_check *c, const uint8_t *p, si
     assert(!ts_decoder_feed(d, p, n));
     assert(!diag_after(g, d, c, 0));
 }
+static void remove_cc(const char *dir, ts_decoder *d, ts_check *c, unsigned windows,
+                      int expect_post) {
+    char path[256], sub[200];
+    for (unsigned w = 1; w <= windows; w++) {
+        snprintf(sub, sizeof(sub), "%s/cc-%02u", dir, w);
+        for (unsigned i = 0; i < DIAG_CC_SLOTS; i++) {
+            snprintf(path, sizeof(path), "%s/ring-%02u.pixdiag", sub, i);
+            if (i == 0 || expect_post) {
+                assert(!diag_replay(path, d, c, discard, NULL));
+                assert(!remove(path));
+            } else
+                remove(path);
+        }
+        snprintf(path, sizeof(path), "%s/post.pixdiag", sub);
+        if (expect_post) {
+            assert(!diag_replay(path, d, c, discard, NULL));
+            assert(c->continuity > 0);
+            assert(!d->resync); /* CC windows preceded the later sync incident. */
+            assert(!remove(path));
+        }
+        snprintf(path, sizeof(path), "%s/events.log", sub);
+        assert(!remove(path));
+        assert(!rmdir(sub));
+    }
+}
 int main(void) {
+    size_t checkpoint_bound = sizeof(ts_decoder) + sizeof(ts_check) + 1024;
+    size_t stream_bound =
+        (DIAG_SLOTS + 1) * checkpoint_bound + (DIAG_SLOTS * 8u + 8u) * 1024u * 1024u;
+    size_t cc_bound = DIAG_CC_WINDOWS * ((DIAG_CC_SLOTS + 1) * checkpoint_bound +
+                                         (DIAG_CC_SLOTS * 8u + 2u) * 1024u * 1024u);
+    /* Frame headers count toward segment/post limits, including tiny frames.
+     * Reserve two MiB for one-frame overshoots and the final event-log lines. */
+    size_t raw_budget = stream_bound + cc_bound;
+    size_t frame_and_overshoot = 2u * 1024u * 1024u;
+    assert(raw_budget + frame_and_overshoot + (8u + DIAG_CC_WINDOWS) * 1024u * 1024u <
+           200u * 1024u * 1024u);
     char dir[128], path[200];
     snprintf(dir, sizeof(dir), "tests/diag-test-%llu", (unsigned long long)now_ms());
     diagnostic *g = diag_open(dir);
@@ -53,6 +89,14 @@ int main(void) {
     assert(original.count == restored.count &&
            !memcmp(original.bytes, restored.bytes, original.count));
     assert(c->packets == checked->packets && d->iv_updates == replayed->iv_updates);
+    const size_t splits[] = {1, 7, 187, 188, 189, 4096, 32768};
+    for (unsigned i = 0; i < sizeof(splits) / sizeof(splits[0]); i++) {
+        restored.count = 0;
+        assert(!diag_replay_chunks(path, replayed, checked, collect, &restored, splits[i]));
+        assert(original.count == restored.count &&
+               !memcmp(original.bytes, restored.bytes, original.count));
+        assert(c->packets == checked->packets && d->iv_updates == replayed->iv_updates);
+    }
     /* A truncated frame must fail instead of silently reporting a complete replay. */
     FILE *broken = fopen(path, "ab");
     assert(broken);
@@ -64,6 +108,7 @@ int main(void) {
     assert(!remove(path));
     snprintf(path, sizeof(path), "%s/events.log", dir);
     assert(!remove(path));
+    remove_cc(dir, replayed, checked, 1, 0);
     assert(!rmdir(dir));
     g = diag_open(dir);
     assert(g);
@@ -79,6 +124,33 @@ int main(void) {
     }
     for (unsigned i = 0; i < DIAG_SLOTS * 3; i++)
         feed(g, d, c, data, sizeof(data));
+    /* Exhaust all CC windows first. The independent stream ring must stay live. */
+    for (unsigned w = 0; w < DIAG_CC_WINDOWS; w++) {
+        uint8_t cc_packet[188];
+        memcpy(cc_packet, data, 188);
+        cc_packet[1] = 0;
+        cc_packet[2] = 100;
+        cc_packet[3] = 0x10 | (c->seen[100] ? ((c->cc[100] + 2) & 15) : 0);
+        feed(g, d, c, cc_packet, sizeof(cc_packet));
+        if (!w) {
+            cc_packet[3] = 0x12;
+            feed(g, d, c, cc_packet, sizeof(cc_packet));
+        }
+        for (unsigned i = 0; i < 6; i++)
+            feed(g, d, c, data, sizeof(data));
+        snprintf(path, sizeof(path), "%s/post.pixdiag", dir);
+        struct stat absent;
+        assert(stat(path, &absent) != 0);
+    }
+    assert(c->continuity == DIAG_CC_WINDOWS);
+    uint8_t tei_packet[188];
+    memcpy(tei_packet, data, sizeof(tei_packet));
+    tei_packet[1] |= 0x80;
+    feed(g, d, c, tei_packet, sizeof(tei_packet));
+    assert(c->tei == 1);
+    snprintf(path, sizeof(path), "%s/post.pixdiag", dir);
+    struct stat no_stream_incident;
+    assert(stat(path, &no_stream_incident) != 0);
     /* Inject two junk bytes: preserve pre-error ring, replay the error exactly. */
     uint8_t bad[190];
     memcpy(bad + 2, data, 188);
@@ -115,6 +187,7 @@ int main(void) {
                        DIAG_SLOTS * (DIAG_SEGMENT + 32768) + DIAG_POST + 32768);
     snprintf(path, sizeof(path), "%s/events.log", dir);
     assert(!remove(path));
+    remove_cc(dir, replayed, checked, DIAG_CC_WINDOWS, 1);
     assert(!rmdir(dir));
     free(d);
     free(replayed);

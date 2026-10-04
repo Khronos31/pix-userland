@@ -12,6 +12,8 @@ typedef struct {
         uint16_t pid;
         size_t used;
         uint8_t data[4096];
+        uint32_t pmt_crc[256];
+        uint8_t pmt_seen[32];
     } psi[65];
     unsigned psi_count;
     void (*issue)(void *, const char *, unsigned, uint64_t, unsigned, unsigned);

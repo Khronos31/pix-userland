@@ -2,12 +2,17 @@
 #define PIX_DIAGNOSTIC_H
 #include "transport.h"
 #include <stdio.h>
-#define DIAG_SLOTS 16
+#define DIAG_SLOTS 8
+#define DIAG_CC_SLOTS 2
+#define DIAG_CC_WINDOWS 3
 #ifndef DIAG_SEGMENT
 #define DIAG_SEGMENT (8u * 1024u * 1024u)
 #endif
 #ifndef DIAG_POST
-#define DIAG_POST (16u * 1024u * 1024u)
+#define DIAG_POST (8u * 1024u * 1024u)
+#endif
+#ifndef DIAG_CC_POST
+#define DIAG_CC_POST (2u * 1024u * 1024u)
 #endif
 typedef struct diagnostic diagnostic;
 diagnostic *diag_open(const char *directory);
@@ -18,4 +23,5 @@ void diag_issue(void *, const char *, unsigned pid, uint64_t packet, unsigned ex
                 unsigned actual);
 int diag_close(diagnostic *);
 int diag_replay(const char *, ts_decoder *, ts_check *, ts_sink, void *);
+int diag_replay_chunks(const char *, ts_decoder *, ts_check *, ts_sink, void *, size_t);
 #endif

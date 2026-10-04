@@ -170,8 +170,10 @@ static void usage(FILE *f) {
         "      --list           list supported USB devices without opening\n"
         "      --inspect FILE   validate an existing 188-byte TS (no USB/assets required)\n"
         "      --decode RAW --context FILE  offline USB-transfer decode; use -o for output\n"
-        "      --diagnostic DIR  new private directory; bounded first-incident capture (<200 MiB)\n"
+        "      --diagnostic DIR  independent stream/CC capture in a new private directory (<200 "
+        "MiB)\n"
         "      --replay-diagnostic FILE  replay a trusted same-build .pixdiag segment\n"
+        "      --replay-chunk-bytes N  split saved frames into at most N bytes (1..32768)\n"
         "      --version        show version\n"
         "  -h, --help           show help\n"
         "TS goes to stdout; all diagnostics and final JSON statistics go to stderr.\n"
@@ -271,6 +273,7 @@ int main(int argc, char **argv) {
     int fd = -1, tsid = -1, lna = -1, detach = 0, list = 0, rc = 2;
     const char *assets = "assets", *output = "-", *inspect = NULL, *raw = NULL, *context = NULL;
     const char *diag_dir = NULL, *replay = NULL;
+    unsigned replay_chunk = 0;
     static const struct option opts[] = {{"channel", 1, 0, 'c'},
                                          {"system", 1, 0, 's'},
                                          {"time", 1, 0, 't'},
@@ -288,6 +291,7 @@ int main(int argc, char **argv) {
                                          {"version", 0, 0, 264},
                                          {"diagnostic", 1, 0, 265},
                                          {"replay-diagnostic", 1, 0, 266},
+                                         {"replay-chunk-bytes", 1, 0, 267},
                                          {"help", 0, 0, 'h'},
                                          {0, 0, 0, 0}};
     int c;
@@ -367,6 +371,11 @@ int main(int argc, char **argv) {
         case 266:
             replay = optarg;
             break;
+        case 267:
+            if (number(optarg, 32768, &v) || !v)
+                goto bad;
+            replay_chunk = (unsigned)v;
+            break;
         case 'h':
             usage(stdout);
             return 0;
@@ -386,6 +395,8 @@ int main(int argc, char **argv) {
     }
 #endif
     if (fd >= 0 && (list || index))
+        goto bad;
+    if (replay_chunk && !replay)
         goto bad;
     if (list) {
         if (channel || inspect || raw || context || diag_dir || replay)
@@ -448,7 +459,7 @@ int main(int argc, char **argv) {
             rc = 3;
             goto finish;
         }
-        rc = diag_replay(replay, &s->decoder, &s->check, write_ts, s) ? 8 : 0;
+        rc = diag_replay_chunks(replay, &s->decoder, &s->check, write_ts, s, replay_chunk) ? 8 : 0;
         report(s);
         os_mutex_destroy(&s->mutex);
         if (check_bad(&s->check) || s->decoder.resync || s->decoder.waiting)

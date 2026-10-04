@@ -20,7 +20,7 @@ tests/test-transport: tests/test_transport.o src/crypto.o src/transport.o src/pl
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 
 tests/test-diagnostic: tests/test_diagnostic.c src/diagnostic.c src/crypto.c src/transport.c src/platform.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -DDIAG_SEGMENT=32768 -DDIAG_POST=65536 $(LDFLAGS) -o $@ $^ $(OS_LIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -DDIAG_SEGMENT=32768 -DDIAG_POST=65536 -DDIAG_CC_POST=65536 $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 
 test: pix-ts tests/test-crypto tests/test-transport tests/test-diagnostic
 	./tests/test-crypto

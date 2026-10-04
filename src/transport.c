@@ -40,8 +40,39 @@ static void section_done(ts_check *c, unsigned index, size_t n) {
                 if (j == c->psi_count && j < 65)
                     c->psi[c->psi_count++].pid = (uint16_t)pid;
             }
-    } else if (p[0] == 2)
+    } else if (p[0] == 2) {
         c->pmt++;
+        /* Observe current, CRC-valid PMT changes without resetting CC history.
+         * A PID can belong to multiple programmes; removal is not proof of loss. */
+        if (n < 16 || !(p[5] & 1))
+            return;
+        size_t start = 12 + (be16(p + 10) & 4095);
+        if (start > n - 4)
+            return;
+        size_t i;
+        for (i = start; i + 5 <= n - 4;) {
+            size_t next = i + 5 + (be16(p + i + 3) & 4095);
+            if (next > n - 4)
+                return;
+            i = next;
+        }
+        if (i != n - 4)
+            return;
+        unsigned section = p[6], mask = 1u << (section & 7);
+        uint32_t crc = be32(p + n - 4);
+        if ((c->psi[index].pmt_seen[section >> 3] & mask) && c->psi[index].pmt_crc[section] == crc)
+            return;
+        c->psi[index].pmt_seen[section >> 3] |= mask;
+        c->psi[index].pmt_crc[section] = crc;
+        if (c->issue) {
+            c->issue(c->issue_user, "pmt_begin", c->psi[index].pid, c->packets, be16(p + 3),
+                     (p[5] >> 1) & 31);
+            for (i = start; i < n - 4; i += 5 + (be16(p + i + 3) & 4095))
+                c->issue(c->issue_user, "pmt_es", be16(p + i + 1) & 8191, c->packets, p[i],
+                         c->psi[index].pid);
+            c->issue(c->issue_user, "pmt_end", c->psi[index].pid, c->packets, section, p[7]);
+        }
+    }
 }
 static void section_data(ts_check *c, unsigned index, const uint8_t *p, size_t n, int allow_new) {
     while (n) {
