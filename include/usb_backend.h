@@ -3,6 +3,7 @@
 #include "pixy.h"
 typedef struct usb_backend usb_backend;
 typedef int (*usb_sink)(void *, const uint8_t *, size_t);
+void usb_diagnostics(usb_backend *, int enabled);
 int usb_list(void);
 int usb_open(usb_backend **, unsigned index, int fd, int detach);
 pixy_io usb_io(usb_backend *);

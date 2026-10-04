@@ -45,3 +45,32 @@ profiles. DT141/195/295 are not claimed to work. The current backend only opens
 06b8:102b; the name `pix-userland` is not a blanket compatibility claim.
 
 Windows uses libusb's WinUSB backend and native Win32 synchronization. Its CI build and unit tests do not certify USB reception. WebUSB remains unimplemented and needs an asynchronous browser adapter.
+
+## Bounded diagnostic capture (0.1.3-dev)
+
+`--diagnostic NEW_DIRECTORY` records the first incident locally while the usual TS output can be redirected to `/dev/null`.
+The directory must not exist. On POSIX it is created with mode 0700, and diagnostic files use mode 0600.
+These files contain private session keys, decoder state and broadcast data; do not commit or upload them.
+
+The worker records the original USB completion chunks in sixteen rotating 8 MiB segments, preserving roughly one minute at the observed terrestrial bitrate.
+Each segment starts with a decoder and TS-checker checkpoint, so replay does not depend on receiving a new key table within the captured window.
+At the first resynchronization, IV wait, TS validation error or decoder failure, the ring is frozen and up to 16 MiB of subsequent input is saved separately.
+The bound, including checkpoint overhead, frame headers and the 8 MiB event-log limit, is below 200 MiB. Only the first incident gets raw data; later counter changes remain in the bounded event log.
+A fatal receiver/USB error may end the run before the post-event window is complete; the last ring remains available.
+
+`events.log` records monotonic and Unix timestamps, PID/expected/actual continuity counters, cumulative decoder anomalies, queue high-water and processing delay.
+Frame headers retain each callback's length and receive/process timestamps. USB status/short-transfer and periodic completion counters are written to stderr.
+The diagnostic file writes occur in the decoder worker and can affect scheduling; queue delay is recorded to expose that effect. They are not made from the USB callback.
+Disk I/O failure makes the diagnostic trial fail explicitly. Normal capture without this option does not write diagnostic files.
+
+Replay a trusted, completed segment using the same binary/build and ABI:
+
+```sh
+pix-ts --replay-diagnostic /private/path/ring-03.pixdiag > /dev/null
+```
+
+The checkpoint format is a private native-state snapshot, not an interchange format. It is unsuitable for untrusted input or arbitrary cross-version/architecture replay.
+Generation numbers, printed on replay and in `events.log`, give ring order; slot filenames wrap.
+Reported counters include the state at the segment's start; compare with the printed checkpoint counters to distinguish new errors from inherited ones.
+Raw-frame boundaries are replayed unchanged, including any partial TS packet in the checkpoint. Replayed TS is only that segment's output, not a complete programme recording.
+The context/key bytes are stored only in the private checkpoint and never printed in diagnostic logs.

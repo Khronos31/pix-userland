@@ -10,9 +10,15 @@ struct usb_backend {
     struct libusb_transfer *transfers[TRANSFERS];
     uint8_t buffers[TRANSFERS][32768];
     int pending, stopping, error, claimed, detached;
+    int diagnostic;
+    uint64_t completions, short_reads, last_ms, max_gap, next_log;
+    unsigned abnormal_logs;
     usb_sink sink;
     void *user;
 };
+void usb_diagnostics(usb_backend *b, int enabled) {
+    b->diagnostic = enabled;
+}
 static int usb_err(int e, const char *op) {
     if (e < 0)
         fprintf(stderr, "%s: %s\n", op, libusb_error_name(e));
@@ -131,6 +137,29 @@ pixy_io usb_io(usb_backend *b) {
 static void LIBUSB_CALL complete(struct libusb_transfer *t) {
     usb_backend *b = t->user_data;
     b->pending--;
+    if (b->diagnostic) {
+        uint64_t now = now_ms();
+        b->completions++;
+        uint64_t gap = b->last_ms ? now - b->last_ms : 0;
+        if (gap > b->max_gap)
+            b->max_gap = gap;
+        b->last_ms = now;
+        if (t->status == LIBUSB_TRANSFER_COMPLETED && t->actual_length != t->length)
+            b->short_reads++;
+        int abnormal = t->status != LIBUSB_TRANSFER_COMPLETED || t->actual_length != t->length;
+        if (now >= b->next_log || (abnormal && b->abnormal_logs++ < 128)) {
+            unsigned slot = 0;
+            while (slot < TRANSFERS && b->transfers[slot] != t)
+                slot++;
+            fprintf(stderr,
+                    "usb_diagnostic mono_ms=%llu completions=%llu slot=%u status=%d actual=%d "
+                    "requested=%d short_reads=%llu max_gap_ms=%llu pending=%d\n",
+                    (unsigned long long)now, (unsigned long long)b->completions, slot, t->status,
+                    t->actual_length, t->length, (unsigned long long)b->short_reads,
+                    (unsigned long long)b->max_gap, b->pending);
+            b->next_log = now + 30000;
+        }
+    }
     if (t->status == LIBUSB_TRANSFER_COMPLETED ||
         (b->stopping && t->status == LIBUSB_TRANSFER_CANCELLED)) {
         if (t->actual_length && b->sink(b->user, t->buffer, (size_t)t->actual_length))

@@ -14,6 +14,8 @@ typedef struct {
         uint8_t data[4096];
     } psi[65];
     unsigned psi_count;
+    void (*issue)(void *, const char *, unsigned, uint64_t, unsigned, unsigned);
+    void *issue_user;
 } ts_check;
 typedef struct {
     uint64_t input, markers, iv_updates, output, resync, waiting, trailing;

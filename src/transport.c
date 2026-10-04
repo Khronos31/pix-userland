@@ -25,6 +25,8 @@ static void section_done(ts_check *c, unsigned index, size_t n) {
     uint8_t *p = c->psi[index].data;
     if (n < 8 || ts_crc(p, n)) {
         c->crc_errors++;
+        if (c->issue)
+            c->issue(c->issue_user, "psi_crc", c->psi[index].pid, c->packets, 0, 0);
         return;
     }
     if (index == 0 && p[0] == 0) {
@@ -75,10 +77,16 @@ void ts_check_packet(ts_check *c, const uint8_t p[188]) {
         return;
     }
     unsigned pid = be16(p + 1) & 8191, af = (p[3] >> 4) & 3, cc = p[3] & 15;
-    if (p[1] & 128)
+    if (p[1] & 128) {
         c->tei++;
-    if (p[3] & 192)
+        if (c->issue)
+            c->issue(c->issue_user, "tei", pid, c->packets, 0, 1);
+    }
+    if (p[3] & 192) {
         c->scrambled++;
+        if (c->issue)
+            c->issue(c->issue_user, "scrambled", pid, c->packets, 0, p[3] >> 6);
+    }
     if (!af || (af & 2 && p[4] > 183)) {
         c->invalid++;
         return;
@@ -94,6 +102,8 @@ void ts_check_packet(ts_check *c, const uint8_t p[188]) {
             return;
         if (cc != ((c->cc[pid] + 1) & 15)) {
             c->continuity++;
+            if (c->issue)
+                c->issue(c->issue_user, "cc", pid, c->packets, (c->cc[pid] + 1) & 15, cc);
             gap = 1;
         }
     }

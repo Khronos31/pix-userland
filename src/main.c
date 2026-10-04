@@ -1,3 +1,4 @@
+#include "diagnostic.h"
 #include "os.h"
 #include "pixy.h"
 #include "transport.h"
@@ -25,7 +26,9 @@ static void on_signal(int s) {
 typedef struct {
     uint8_t bytes[QUEUE_SLOTS][32768];
     size_t lengths[QUEUE_SLOTS];
-    unsigned head, count;
+    unsigned head, count, high_water;
+    uint64_t received_ms[QUEUE_SLOTS];
+    diagnostic *diag;
     int done, error, output;
     uint64_t write_started;
     uint64_t usb_bytes;
@@ -93,7 +96,10 @@ static int enqueue(void *u, const uint8_t *p, size_t n) {
     unsigned at = (s->head + s->count) % QUEUE_SLOTS;
     memcpy(s->bytes[at], p, n);
     s->lengths[at] = n;
+    s->received_ms[at] = now_ms();
     s->count++;
+    if (s->count > s->high_water)
+        s->high_water = s->count;
     s->usb_bytes += n;
     os_cond_signal(&s->cond);
     os_mutex_unlock(&s->mutex);
@@ -111,11 +117,19 @@ static void *worker(void *u) {
             break;
         }
         size_t n = s->lengths[s->head];
+        uint64_t received = s->received_ms[s->head];
+        unsigned queued = s->count, high_water = s->high_water;
         memcpy(data, s->bytes[s->head], n);
         s->head = (s->head + 1) % QUEUE_SLOTS;
         s->count--;
         os_mutex_unlock(&s->mutex);
-        if (ts_decoder_feed(&s->decoder, data, n)) {
+        int failed =
+            diag_before(s->diag, &s->decoder, &s->check, data, n, received, queued, high_water);
+        if (!failed)
+            failed = ts_decoder_feed(&s->decoder, data, n);
+        if (diag_after(s->diag, &s->decoder, &s->check, failed))
+            failed = -1;
+        if (failed) {
             if (s->decoder.error)
                 fprintf(stderr, "TS decoder: %s\n", s->decoder.error);
             os_mutex_lock(&s->mutex);
@@ -156,6 +170,8 @@ static void usage(FILE *f) {
         "      --list           list supported USB devices without opening\n"
         "      --inspect FILE   validate an existing 188-byte TS (no USB/assets required)\n"
         "      --decode RAW --context FILE  offline USB-transfer decode; use -o for output\n"
+        "      --diagnostic DIR  new private directory; bounded first-incident capture (<200 MiB)\n"
+        "      --replay-diagnostic FILE  replay a trusted same-build .pixdiag segment\n"
         "      --version        show version\n"
         "  -h, --help           show help\n"
         "TS goes to stdout; all diagnostics and final JSON statistics go to stderr.\n"
@@ -254,6 +270,7 @@ int main(int argc, char **argv) {
     unsigned channel = 0, index = 0, seconds = 0;
     int fd = -1, tsid = -1, lna = -1, detach = 0, list = 0, rc = 2;
     const char *assets = "assets", *output = "-", *inspect = NULL, *raw = NULL, *context = NULL;
+    const char *diag_dir = NULL, *replay = NULL;
     static const struct option opts[] = {{"channel", 1, 0, 'c'},
                                          {"system", 1, 0, 's'},
                                          {"time", 1, 0, 't'},
@@ -269,6 +286,8 @@ int main(int argc, char **argv) {
                                          {"decode", 1, 0, 262},
                                          {"context", 1, 0, 263},
                                          {"version", 0, 0, 264},
+                                         {"diagnostic", 1, 0, 265},
+                                         {"replay-diagnostic", 1, 0, 266},
                                          {"help", 0, 0, 'h'},
                                          {0, 0, 0, 0}};
     int c;
@@ -342,6 +361,12 @@ int main(int argc, char **argv) {
         case 264:
             puts("pix-ts " VERSION);
             return 0;
+        case 265:
+            diag_dir = optarg;
+            break;
+        case 266:
+            replay = optarg;
+            break;
         case 'h':
             usage(stdout);
             return 0;
@@ -363,15 +388,18 @@ int main(int argc, char **argv) {
     if (fd >= 0 && (list || index))
         goto bad;
     if (list) {
-        if (channel || inspect || raw || context)
+        if (channel || inspect || raw || context || diag_dir || replay)
             goto bad;
         return usb_list() ? 4 : 0;
     }
     if ((inspect && raw) || (raw && !context) || (context && !raw) ||
         ((inspect || raw) && (channel || fd >= 0)))
         goto bad;
+    if ((diag_dir && (inspect || raw || replay)) ||
+        (replay && (inspect || raw || context || channel || fd >= 0)))
+        goto bad;
     uint32_t hz = 0;
-    if (!inspect && !raw) {
+    if (!inspect && !raw && !replay) {
         if (!channel || pixy_frequency(system, channel, &hz))
             goto bad;
         if (system == PIXY_TERRESTRIAL && tsid >= 0)
@@ -415,6 +443,18 @@ int main(int argc, char **argv) {
             goto finish;
         }
     }
+    if (replay) {
+        if (os_mutex_init(&s->mutex, NULL)) {
+            rc = 3;
+            goto finish;
+        }
+        rc = diag_replay(replay, &s->decoder, &s->check, write_ts, s) ? 8 : 0;
+        report(s);
+        os_mutex_destroy(&s->mutex);
+        if (check_bad(&s->check) || s->decoder.resync || s->decoder.waiting)
+            rc = 8;
+        goto finish;
+    }
     if (inspect || raw) {
         if (os_mutex_init(&s->mutex, NULL)) {
             rc = 3;
@@ -423,6 +463,16 @@ int main(int argc, char **argv) {
         rc = offline(inspect ? inspect : raw, context, s);
         os_mutex_destroy(&s->mutex);
         goto finish;
+    }
+    if (diag_dir) {
+        s->diag = diag_open(diag_dir);
+        if (!s->diag) {
+            perror("diagnostic directory");
+            rc = 3;
+            goto finish;
+        }
+        s->check.issue = diag_issue;
+        s->check.issue_user = s->diag;
     }
     uint8_t *fw = load_file(assets, "fpga.bin", 699673),
             *bootstrap = load_file(assets, "bootstrap.bin", 16),
@@ -442,6 +492,7 @@ int main(int argc, char **argv) {
     if (usb_open(&usb, index, fd, detach))
         goto cleanup;
     opened = 1;
+    usb_diagnostics(usb, diag_dir != NULL);
     pixy_init(&device, usb_io(usb));
     fprintf(stderr, "Initializing PIX-DT181-PU0...\n");
     if (pixy_power(&device, fw, 699673) || pixy_session(&device, bootstrap, validation) ||
@@ -546,6 +597,10 @@ cleanup:
     secure_clear(validation, 64);
     free(validation);
 finish:
+    if (diag_close(s->diag)) {
+        fprintf(stderr, "Diagnostic capture I/O failed\n");
+        rc = 8;
+    }
     if (flags >= 0 && s->output == STDOUT_FILENO)
         os_output_restore(s->output, flags);
     if (s->output != STDOUT_FILENO && close(s->output) && !rc)
