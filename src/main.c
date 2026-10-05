@@ -1,3 +1,7 @@
+#include "pid_filter.h"
+#include "channel.h"
+#include "control.h"
+#include "usb_selector.h"
 #include "diagnostic.h"
 #include "os.h"
 #include "pixy.h"
@@ -33,6 +37,8 @@ typedef struct {
     uint64_t write_started;
     uint64_t capture_elapsed_ms;
     uint64_t usb_bytes;
+    uint8_t pid_mask[8192];
+    int filter_pids;
     os_mutex mutex;
     os_cond cond;
     ts_decoder decoder;
@@ -40,6 +46,13 @@ typedef struct {
 } stream;
 static int write_ts(void *u, const uint8_t *p, size_t n) {
     stream *s = u;
+    uint8_t filtered[32768 + 564];
+    if (s->filter_pids) {
+        if (n > sizeof(filtered)) return -1;
+        memcpy(filtered, p, n);
+        if (pix_pid_filter(filtered, &n, s->pid_mask)) return -1;
+        p = filtered;
+    }
     uint64_t deadline = now_ms() + 3000;
     while (n) {
 #ifdef _WIN32
@@ -157,18 +170,26 @@ static void usage(FILE *f) {
         f,
         "pix-ts " VERSION " — PIX-DT181-PU0 libusb TS receiver\n"
         "Usage: pix-ts --system terrestrial|bs|cs --channel N [options]\n"
-        "  -c, --channel N       physical channel (terrestrial 13..52, BS odd 1..23, CS even "
+        "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..52, BS odd 1..23, CS even "
         "2..24)\n"
         "  -s, --system TYPE     terrestrial (default), bs, cs\n"
         "      --tsid N          satellite TSID, decimal or 0xhex; default first detected\n"
-        "  -t, --time SECONDS    receive for N seconds; default until SIGINT/SIGTERM\n"
-        "  -o, --output PATH     new file (never overwrite); default stdout, '-' also stdout\n"
+        "  -t, --time SECONDS    N seconds; '-' or omitted: until SIGINT/SIGTERM\n"
+        "  -o, --output PATH     file (overwrite existing); default stdout, '-' also stdout\n"
         "  -a, --assets DIR      fpga.bin, bootstrap.bin, validation.bin (default ./assets)\n"
-        "  -d, --device INDEX    zero-based matching USB device index (default 0)\n"
+        "  -d, --device SPEC    index, bus:address, or bus-port.path (default 0)\n"
         "      --fd FD          borrowed USB fd from Android/Termux (or final integer argument)\n"
         "      --lna on|off     internal receive amplifier; default terrestrial off, BS/CS on\n"
         "      --detach-kernel-driver   explicitly detach a bound interface\n"
-        "      --list           list supported USB devices without opening\n"
+        "  -l, --list           list devices in enclosure/receiver key=value format\n"
+        "      --list-json      list the same devices as one JSON document\n"
+        "  -f, --freq HZ        tune frequency in Hz (exclusive with --channel)\n"
+        "  -F, --firmware PATH  FPGA file; other assets still come from --assets\n"
+        "  -p, --pid PID        output only this PID (repeatable; 8192 = all)\n"
+        "  -v, --verbose        log control retuning\n"
+        "      --control        stdin: channel N|T27|BS01_0, tune HZ, quit\n"
+        "      --fail-on-drop   queue overflow is always fatal in pix-ts\n"
+        "      --slot 0..7      satellite slot, resolved from live TSID table\n"
         "      --inspect FILE   validate an existing 188-byte TS (no USB/assets required)\n"
         "      --decode RAW --context FILE  offline USB-transfer decode; use -o for output\n"
         "      --diagnostic DIR  independent stream/CC capture in a new private directory (<200 "
@@ -271,12 +292,26 @@ static int offline(const char *path, const char *context, stream *s) {
 }
 int main(int argc, char **argv) {
     pixy_system system = PIXY_TERRESTRIAL;
-    unsigned channel = 0, index = 0, seconds = 0;
+    unsigned channel = 0, seconds = 0;
+    usb_selector selector;
+    usb_selector_parse("0", &selector);
+    const char *channel_text = NULL, *firmware = NULL;
+    uint32_t frequency = 0;
+    int slot = -1, control = 0, verbose = 0, system_given = 0;
+    uint8_t pid_mask[8192] = {0}; int filter_pids = 0;
     int fd = -1, tsid = -1, lna = -1, detach = 0, list = 0, rc = 2;
     const char *assets = "assets", *output = "-", *inspect = NULL, *raw = NULL, *context = NULL;
     const char *diag_dir = NULL, *replay = NULL;
     unsigned replay_chunk = 0;
     static const struct option opts[] = {{"channel", 1, 0, 'c'},
+                                         {"freq", 1, 0, 'f'},
+                                         {"firmware", 1, 0, 'F'},
+                                         {"pid", 1, 0, 'p'},
+                                         {"verbose", 0, 0, 'v'},
+                                         {"control", 0, 0, 268},
+                                         {"fail-on-drop", 0, 0, 269},
+                                         {"list-json", 0, 0, 270},
+                                         {"slot", 1, 0, 271},
                                          {"system", 1, 0, 's'},
                                          {"time", 1, 0, 't'},
                                          {"output", 1, 0, 'o'},
@@ -298,15 +333,34 @@ int main(int argc, char **argv) {
                                          {0, 0, 0, 0}};
     int c;
     unsigned long v;
-    while ((c = getopt_long(argc, argv, "c:s:t:o:a:d:h", opts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:s:t:o:a:d:f:F:p:vlh", opts, NULL)) != -1) {
         switch (c) {
         case 'c':
-            if (number(optarg, 52, &v) || !v)
-                goto bad;
-            channel = (unsigned)v;
+            channel_text = optarg;
             break;
+        case 'f':
+            if (number(optarg, UINT32_MAX, &v) || !v) goto bad;
+            frequency = (uint32_t)v;
+            break;
+        case 'F': firmware = optarg; break;
+        case 'p':
+            if (number(optarg, 8192, &v)) goto bad;
+            if (v == 8192) { memset(pid_mask, 1, sizeof(pid_mask)); }
+            else pid_mask[v] = 1;
+            filter_pids = 1;
+            break;
+        case 'v': verbose = 1; break;
+        case 268: control = 1; break;
+        case 269: break; /* Queue overflow already fails closed. */
+        case 270:
+            if (list) goto bad;
+            list = 2; break;
+        case 271:
+            if (number(optarg, 7, &v)) goto bad;
+            slot = (int)v; break;
         case 's':
-            if (!strcmp(optarg, "terrestrial"))
+            system_given = 1;
+            if (!strcmp(optarg, "terrestrial") || !strcmp(optarg, "isdb-t"))
                 system = PIXY_TERRESTRIAL;
             else if (!strcmp(optarg, "bs"))
                 system = PIXY_BS;
@@ -316,6 +370,7 @@ int main(int argc, char **argv) {
                 goto bad;
             break;
         case 't':
+            if (!strcmp(optarg, "-")) { seconds = 0; break; }
             if (number(optarg, 86400 * 365u, &v) || !v)
                 goto bad;
             seconds = (unsigned)v;
@@ -327,9 +382,7 @@ int main(int argc, char **argv) {
             assets = optarg;
             break;
         case 'd':
-            if (number(optarg, UINT_MAX, &v))
-                goto bad;
-            index = (unsigned)v;
+            if (usb_selector_parse(optarg, &selector)) goto bad;
             break;
         case 256:
             if (number(optarg, 65535, &v))
@@ -352,7 +405,9 @@ int main(int argc, char **argv) {
         case 259:
             detach = 1;
             break;
+        case 'l':
         case 260:
+            if (list == 2) goto bad;
             list = 1;
             break;
         case 261:
@@ -396,28 +451,42 @@ int main(int argc, char **argv) {
         goto bad;
     }
 #endif
-    if (fd >= 0 && (list || index))
+    if (fd >= 0 && (list || selector.kind != USB_SELECT_INDEX || selector.index))
         goto bad;
     if (replay_chunk && !replay)
         goto bad;
     if (list) {
-        if (channel || inspect || raw || context || diag_dir || replay)
+        if (channel_text || frequency || control || detach || inspect || raw || context || diag_dir || replay)
             goto bad;
-        return usb_list() ? 4 : 0;
+        return usb_list(list == 2) ? 4 : 0;
     }
     if ((inspect && raw) || (raw && !context) || (context && !raw) ||
-        ((inspect || raw) && (channel || fd >= 0)))
+        ((inspect || raw) && (channel_text || frequency || control || fd >= 0)))
         goto bad;
     if ((diag_dir && (inspect || raw || replay)) ||
-        (replay && (inspect || raw || context || channel || fd >= 0)))
+        (replay && (inspect || raw || context || channel_text || frequency || control || fd >= 0)))
         goto bad;
-    uint32_t hz = 0;
-    if (!inspect && !raw && !replay) {
-        if (!channel || pixy_frequency(system, channel, &hz))
-            goto bad;
-        if (system == PIXY_TERRESTRIAL && tsid >= 0)
-            goto bad;
+    uint32_t hz = frequency;
+    if (channel_text && frequency) goto bad;
+    if (control && (seconds || diag_dir || inspect || raw || replay)) goto bad;
+    if (channel_text) {
+        pix_channel selected;
+        if (channel_text[0] >= '0' && channel_text[0] <= '9') {
+            if (number(channel_text, 52, &v) || !v) goto bad;
+            selected = (pix_channel){system, (unsigned)v, -1};
+        } else if (pix_channel_parse(channel_text, system, &selected)) goto bad;
+        if (system_given && selected.system != system) goto bad;
+        system = selected.system; channel = selected.channel;
+        if (selected.slot >= 0) {
+            if (slot >= 0) goto bad;
+            if (tsid < 0) slot = selected.slot;
+        }
+        if (pixy_frequency(system, channel, &hz)) goto bad;
     }
+    if (system == PIXY_TERRESTRIAL && (tsid >= 0 || slot >= 0)) goto bad;
+    if (slot >= 0 && tsid >= 0) goto bad;
+    pix_control input = {0};
+    if (!inspect && !raw && !replay && !hz && !control) goto bad;
 #ifdef _WIN32
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
@@ -430,15 +499,26 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
 #endif
+    while (control && !hz && !interrupted) {
+        pix_command cmd; int result = pix_control_poll(&input, system, &cmd);
+        if (result < 0) { rc = 2; return rc; }
+        if (result == 2 || (result == 1 && cmd.quit)) { rc = 0; return rc; }
+        if (result == 1) {
+            if (cmd.frequency) hz = cmd.hz;
+            else { system = cmd.channel.system; channel = cmd.channel.channel; slot = cmd.channel.slot; pixy_frequency(system, channel, &hz); }
+        } else sleep_ms(20);
+    }
+    if (interrupted) return 0;
     stream *s = calloc(1, sizeof(*s));
     if (!s)
         return 3;
     s->output = STDOUT_FILENO;
     ts_check_init(&s->check);
+    memcpy(s->pid_mask, pid_mask, sizeof(pid_mask)); s->filter_pids = filter_pids;
     int flags = -1;
     if (!inspect) {
         if (strcmp(output, "-")) {
-            s->output = open(output, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0666);
+            s->output = open(output, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
             if (s->output < 0) {
                 perror(output);
                 free(s);
@@ -487,7 +567,7 @@ int main(int argc, char **argv) {
         s->check.issue = diag_issue;
         s->check.issue_user = s->diag;
     }
-    uint8_t *fw = load_file(assets, "fpga.bin", 699673),
+    uint8_t *fw = load_file(firmware ? "." : assets, firmware ? firmware : "fpga.bin", 699673),
             *bootstrap = load_file(assets, "bootstrap.bin", 16),
             *validation = load_file(assets, "validation.bin", 64);
     if (!fw || !bootstrap || !validation) {
@@ -502,7 +582,7 @@ int main(int argc, char **argv) {
     int opened = 0, queue = 0, started_thread = 0;
     os_thread thread;
     rc = 4;
-    if (usb_open(&usb, index, fd, detach))
+    if (usb_open(&usb, &selector, fd, detach))
         goto cleanup;
     opened = 1;
     usb_diagnostics(usb, diag_dir != NULL);
@@ -515,7 +595,7 @@ int main(int argc, char **argv) {
         rc = 130;
         goto cleanup;
     }
-    if (pixy_tune(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid))
+    if (pixy_tune_slot(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot))
         goto cleanup;
     uint8_t status[64];
     size_t statusn = 64;
@@ -536,6 +616,8 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     queue = 1;
+capture_restart:
+    rc = 4;
     if (pixy_fifo_clear(&device) || usb_stream_start(usb, enqueue, s))
         goto cleanup;
     uint8_t stream_context[32];
@@ -549,8 +631,15 @@ int main(int argc, char **argv) {
     }
     started_thread = 1;
     uint64_t start = now_ms(), next = start + 1000;
+    pix_command retune = {0}; int changing = 0;
     rc = 0;
     while (!interrupted && (!seconds || now_ms() - start < (uint64_t)seconds * 1000)) {
+        if (control) {
+            int result = pix_control_poll(&input, system, &retune);
+            if (result < 0) { fprintf(stderr, "Invalid control command\n"); rc = 2; break; }
+            if (result == 2 || (result == 1 && retune.quit)) break;
+            if (result == 1) { changing = 1; break; }
+        }
         if (usb_poll(usb, 50)) {
             rc = 8;
             break;
@@ -576,7 +665,21 @@ int main(int argc, char **argv) {
             next = now_ms() + 1000;
         }
     }
-    s->capture_elapsed_ms = now_ms() - start;
+    s->capture_elapsed_ms += now_ms() - start;
+    if (changing) {
+        if (pixy_stop(&device) || usb_stream_stop(usb)) { rc = 4; goto cleanup; }
+        os_mutex_lock(&s->mutex); s->done = 1; os_cond_signal(&s->cond); os_mutex_unlock(&s->mutex);
+        os_thread_join(thread, 0); started_thread = 0;
+        if (s->error || s->check.tei || s->check.scrambled || s->check.continuity || s->check.invalid || s->check.crc_errors || s->decoder.resync || s->decoder.waiting) { rc = 8; goto cleanup; }
+        s->done = 0; s->head = 0; s->count = 0;
+        ts_check_init(&s->check);
+        if (retune.frequency) { hz = retune.hz; channel = 0; slot = -1; }
+        else { system = retune.channel.system; channel = retune.channel.channel; slot = retune.channel.slot; pixy_frequency(system, channel, &hz); }
+        tsid = -1;
+        if (verbose) fprintf(stderr, "control tune frequency=%u\n", hz);
+        if (pixy_tune_slot(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot)) { rc = 4; goto cleanup; }
+        goto capture_restart;
+    }
 cleanup:
     if (opened) {
         if (rc)

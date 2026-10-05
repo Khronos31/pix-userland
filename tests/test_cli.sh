@@ -10,3 +10,20 @@ for args in '--channel -1' '--channel 27junk' '--channel 0' '--system bs --chann
     [ "$status" -eq 2 ] || { echo "Bad exit code $status for $args" >&2; exit 1; }
 done
 echo 'CLI invalid-input tests passed'
+for args in '--channel T53' '--channel BS01_8' '--channel T25 --freq 545142857' '--channel BS01_0 --system terrestrial' '--channel BS01_0 --slot 1' '--channel T25 --pid 8193' '--device 1-0 --list' '--list --list-json' '--control --time 10'; do
+    set +e
+    ./pix-ts $args >/dev/null 2>&1
+    status=$?
+    set -e
+    [ "$status" -eq 2 ] || { echo "Bad exit code $status for $args" >&2; exit 1; }
+done
+for args in '--channel T25' '--channel BS01_0' '--channel CS02' '--channel BS01_0 --tsid 0x4010' '--freq 545142857' '--channel T25 --time - --pid 8192'; do
+    set +e
+    ./pix-ts $args --assets /nonexistent-pix-assets >/dev/null 2>&1
+    status=$?
+    set -e
+    [ "$status" -eq 3 ] || { echo "Valid options rejected ($status): $args" >&2; exit 1; }
+done
+printf 'quit\n' | ./pix-ts --control >/dev/null
+printf 'quit' | ./pix-ts --control >/dev/null
+echo 'CLI compatibility parsing passed'

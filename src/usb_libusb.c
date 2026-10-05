@@ -1,5 +1,6 @@
 #include "usb_backend.h"
 #include "usb_log.h"
+#include "usb_listing.h"
 #include <libusb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,27 +40,49 @@ static int is_model(libusb_device *d) {
     return !libusb_get_device_descriptor(d, &desc) && desc.idVendor == 0x06b8 &&
            desc.idProduct == 0x102b;
 }
-int usb_list(void) {
+static void device_info(libusb_device *device, unsigned index, usb_device_info *out) {
+    memset(out, 0, sizeof(*out));
+    out->index = index;
+    out->bus = libusb_get_bus_number(device);
+    out->address = libusb_get_device_address(device);
+    int count = libusb_get_port_numbers(device, out->ports, sizeof(out->ports));
+    if (count > 0)
+        out->port_count = (unsigned)count;
+}
+int usb_list(int json) {
     libusb_context *ctx = NULL;
     if (init(&ctx, -1))
         return -1;
     libusb_device **list;
     ssize_t n = libusb_get_device_list(ctx, &list);
     if (n < 0) {
+        usb_err((int)n, "list USB devices");
         libusb_exit(ctx);
         return -1;
     }
-    unsigned index = 0;
-    for (ssize_t i = 0; i < n; i++)
-        if (is_model(list[i]))
-            printf("index=%u model=PIX-DT181-PU0 usb=06b8:102b bus=%u address=%u receivers=1 "
-                   "systems=ISDB-T,ISDB-S\n",
-                   index++, libusb_get_bus_number(list[i]), libusb_get_device_address(list[i]));
+    usb_device_info *found = n ? calloc((size_t)n, sizeof(*found)) : NULL;
+    if (n && !found) {
+        fprintf(stderr, "Cannot allocate USB device list\n");
+        libusb_free_device_list(list, 1);
+        libusb_exit(ctx);
+        return -1;
+    }
+    unsigned count = 0;
+    for (ssize_t i = 0; i < n; i++) {
+        if (is_model(list[i])) {
+            device_info(list[i], count, &found[count]);
+            count++;
+        }
+    }
     libusb_free_device_list(list, 1);
     libusb_exit(ctx);
-    return 0;
+    int result = usb_listing_write(stdout, found, count, json);
+    free(found);
+    if (result)
+        fprintf(stderr, "Cannot write USB device list\n");
+    return result;
 }
-int usb_open(usb_backend **result, unsigned index, int fd, int detach) {
+int usb_open(usb_backend **result, const usb_selector *selector, int fd, int detach) {
     usb_backend *b = calloc(1, sizeof(*b));
     if (!b)
         return -1;
@@ -79,9 +102,13 @@ int usb_open(usb_backend **result, unsigned index, int fd, int detach) {
         ssize_t n = libusb_get_device_list(b->ctx, &list);
         if (n < 0)
             goto error;
+        unsigned index = 0;
         for (ssize_t i = 0; i < n; i++)
             if (is_model(list[i])) {
-                if (index-- == 0) {
+                usb_device_info info;
+                device_info(list[i], index++, &info);
+                if (usb_selector_matches(selector, info.index, info.bus, info.address,
+                                         info.ports, info.port_count)) {
                     int r = libusb_open(list[i], &b->handle);
                     usb_err(r, "open tuner");
                     break;
@@ -218,6 +245,16 @@ static void LIBUSB_CALL complete(struct libusb_transfer *t) {
     }
 }
 int usb_stream_start(usb_backend *b, usb_sink sink, void *user) {
+    if (!sink || b->error || b->pending || b->log)
+        return -1;
+    for (unsigned i = 0; i < TRANSFERS; i++)
+        if (b->transfers[i])
+            return -1;
+    b->stopping = 0;
+    /* A deliberate retune pause is not an observed USB completion gap. */
+    b->last_ms = 0;
+    b->next_log = 0;
+    b->abnormal_logs = 0;
     b->sink = sink;
     b->user = user;
     if (b->diagnostic && !(b->log = usb_log_open(log_record, NULL))) {
@@ -244,8 +281,10 @@ int usb_stream_start(usb_backend *b, usb_sink sink, void *user) {
 int usb_poll(usb_backend *b, unsigned ms) {
     struct timeval t = {(long)(ms / 1000), (long)(ms % 1000) * 1000};
     int r = libusb_handle_events_timeout(b->ctx, &t);
-    if (r < 0 && r != LIBUSB_ERROR_INTERRUPTED)
+    if (r < 0 && r != LIBUSB_ERROR_INTERRUPTED) {
+        b->error = 1;
         return usb_err(r, "USB events");
+    }
     return b->error ? -1 : 0;
 }
 int usb_stream_stop(usb_backend *b) {
@@ -253,8 +292,10 @@ int usb_stream_stop(usb_backend *b) {
     for (unsigned i = 0; i < TRANSFERS; i++)
         if (b->transfers[i]) {
             int r = libusb_cancel_transfer(b->transfers[i]);
-            if (r < 0 && r != LIBUSB_ERROR_NOT_FOUND)
+            if (r < 0 && r != LIBUSB_ERROR_NOT_FOUND) {
+                b->error = 1;
                 usb_err(r, "cancel stream");
+            }
         }
     while (b->pending) {
         struct timeval t = {0, 50000};
@@ -265,6 +306,14 @@ int usb_stream_stop(usb_backend *b) {
         }
     }
     close_log(b);
+    for (unsigned i = 0; i < TRANSFERS; i++) {
+        if (b->transfers[i]) {
+            libusb_free_transfer(b->transfers[i]);
+            b->transfers[i] = NULL;
+        }
+    }
+    b->sink = NULL;
+    b->user = NULL;
     return b->error ? -1 : 0;
 }
 void usb_close(usb_backend *b) {

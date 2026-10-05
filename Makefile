@@ -6,8 +6,8 @@ OS_LIBS ?= -pthread
 WARN = -std=c11 -Wall -Wextra -Wpedantic
 USB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libusb-1.0)
 USB_LIBS ?= $(shell $(PKG_CONFIG) --libs libusb-1.0)
-CORE = src/crypto.o src/platform.o src/protocol.o src/transport.o
-OBJ = $(CORE) src/diagnostic.o src/main.o src/usb_libusb.o src/usb_log.o
+CORE = src/pid_filter.o src/control.o src/channel.o src/crypto.o src/platform.o src/protocol.o src/transport.o
+OBJ = src/usb_selector.o src/usb_listing.o $(CORE) src/diagnostic.o src/main.o src/usb_libusb.o src/usb_log.o
 .PHONY: all clean test
 all: pix-ts
 pix-ts: $(OBJ)
@@ -25,12 +25,26 @@ tests/test-diagnostic: tests/test_diagnostic.c src/diagnostic.c src/crypto.c src
 tests/test-usb-log: tests/test_usb_log.o src/usb_log.o src/platform.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 
-test: pix-ts tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log
+tests/test-usb-selector: tests/test_usb_selector.c src/usb_selector.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
+tests/test-usb-listing: tests/test_usb_listing.c src/usb_listing.c src/usb_selector.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
+tests/test-compat: tests/test_compat.c src/pid_filter.c src/channel.c src/control.c src/protocol.c src/crypto.c src/platform.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
+
+tests/test-usb-restart: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o src/usb_selector.o src/platform.o
+	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(USB_LIBS) $(OS_LIBS)
+
+test: pix-ts tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
 	./tests/test-crypto
 	./tests/test-transport
 	./tests/test-diagnostic
 	./tests/test-usb-log
+	./tests/test-usb-selector
+	./tests/test-usb-listing
+	./tests/test-usb-restart
+	./tests/test-compat
 	./tests/test_cli.sh
 clean:
-	rm -f pix-ts pix-ts.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log
+	rm -f pix-ts pix-ts.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
 -include $(OBJ:.o=.d) tests/test_crypto.d tests/test_transport.d tests/test_usb_log.d

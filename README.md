@@ -9,7 +9,7 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 
 単一チューナーを制御し、選択した伝送ストリーム全体の TS パケットを出力します。
 
-なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、PID フィルター、標準入力による動的な再選局（`--control`）、ブラウザからの WebUSB 制御も未実装です。
+なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。
 
 ## 対応機器・動作環境
 
@@ -128,7 +128,7 @@ Windows (PowerShell) の場合:
 ```
 - `-c` にはリモコンの番号やサービス番号ではなく、物理チャンネル（13〜52）を指定します。
 - 物理チャンネル 27ch は今回の東京地域での受信確認例です。お住まいの地域に合わせて適切な物理チャンネル番号を指定してください。
-- `-o` で指定した出力先ファイルは上書きしません。同名のファイルが既に存在する場合はエラー終了します。
+- `-o` で指定した出力先ファイルは上書きします。同名のファイルが既に存在する場合は上書きします。
 
 Windows (PowerShell) での保存例:
 ```powershell
@@ -179,6 +179,48 @@ termux-usb -r -e './pix-ts --assets ./assets -c 27 -t 15 -o terrestrial.ts' /dev
 
 ## CLI 仕様
 
+### mirakc / siano-ts 互換の使用方法
+
+`--channel T25`、`--channel BS01_0`、`--channel CS02` に対応します。
+数値と従来の `--system bs|cs` も使用できます。BSの末尾は受信機から取得した
+TSID配列のスロット番号（0〜7）で、空スロットはエラーになります。
+`--tsid` の明示指定は名前のスロットに優先します。
+
+`-f/--freq HZ`（衛星では中間周波数）、`-p/--pid PID`（繰り返し可、8192は全PID）、
+`-v/--verbose`、`--list-json`、`--control`、`--fail-on-drop` を追加しました。
+`--device` はインデックス、`BUS:ADDRESS`、`BUS-PORT[.PORT...]` を受け付けます。
+`--list-json` は `enclosures` / `ungrouped_usb_devices` 形式で、1台につき
+`system: "ISDB-T/S"` の受信機1基を列挙します。
+
+mirakc設定例（展開先とUSB位置は実際の環境に置換）:
+
+```yaml
+tuners:
+  - name: pix-dt181
+    types: [GR, BS, CS]
+    command: /opt/pix-userland/pix-ts --assets /opt/pix-userland/assets --device 1-2 --channel {{{channel}}} --time {{{duration}}} {{{extra_args}}}
+    decoded: true
+```
+
+channelsには `channel: T25`、`channel: BS01_0`、`channel: CS02` のように設定します。
+service IDによる分離はmirakc側で行います。本機内のB-CAS処理後のTSを出力するため
+`decoded: true` とします。`--time -` は無期限受信で、SIGTERMに対応します。
+受信時のstdoutは188バイトTSのみ、ログはstderrです。実際のmirakcとの結合運用は未検証です。
+
+`--control` は改行区切りの `channel T25`、`channel BS01_0`、`tune 545142857`、
+`quit` を受け付け、EOFでも終了します。初期選局を省略すると最初のコマンドを待ちます。
+時間指定・診断保存との併用はできません。
+
+機器固有の差異:
+
+- `-F/--firmware` はPIX用FPGAファイルで、siano用rioファームウェアは使用できません。
+  bootstrap/validationは引き続き `--assets` から読みます。配布assetsの暗号化・復号手順はありません。
+- 地上波は13〜52ch、LNB電源とソフトB25復号は非対応です。
+- ログ文言・統計JSON・エラー終了コードはPIX固有です。
+- PIDフィルターは復号・全入力検査後に適用し、統計のpacketsはフィルター前の数です。
+- `--fail-on-drop` は互換引数です。pix-tsは常にキュー欠落をエラー終了させます。
+
+
 ### 書式
 ```text
 pix-ts --system terrestrial|bs|cs --channel N [options]
@@ -188,13 +230,13 @@ pix-ts --system terrestrial|bs|cs --channel N [options]
 
 | オプション | 引数 | 説明 |
 |---|---|---|
-| `-c, --channel` | `N` | 物理チャンネル番号を指定します（地上波: 13〜52、BS: 奇数 1〜23、CS: 偶数 2〜24）。リモコン番号やサービス番号ではありません。 |
+| `-c, --channel` | `TOKEN` | `T27` / `BS01_0` / `CS02` または物理チャンネル番号を指定します（地上波: 13〜52、BS: 奇数 1〜23、CS: 偶数 2〜24）。リモコン番号やサービス番号ではありません。 |
 | `-s, --system` | `TYPE` | 放送波の種別を指定します（`terrestrial`（既定値）、`bs`、`cs`）。 |
 | `--tsid` | `N` | 衛星放送の TSID を 10 進数または 16 進数（`0x...`）で指定します。省略時は最初に検出した TS を選択します。 |
-| `-t, --time` | `SECONDS` | 受信時間を秒単位で指定します。省略時は SIGINT / SIGTERM で停止するまで継続受信します。 |
-| `-o, --output` | `PATH` | 出力先ファイルパスを指定します。既存ファイルへの上書きはしません。省略時または `-` の場合は標準出力に出力します。 |
+| `-t, --time` | `SECONDS` | 受信時間を秒単位で指定します。`-` または省略時は SIGINT / SIGTERM で停止するまで継続受信します。 |
+| `-o, --output` | `PATH` | 出力先ファイルパスを指定します。既存ファイルは上書きします。省略時または `-` の場合は標準出力に出力します。 |
 | `-a, --assets` | `DIR` | 機器データ（`fpga.bin`, `bootstrap.bin`, `validation.bin`）のあるディレクトリを指定します（既定値: `./assets`）。 |
-| `-d, --device` | `INDEX` | 検出した対応 USB デバイスの 0 始まりのインデックスを指定します（既定値: `0`）。 |
+| `-d, --device` | `SPEC` | インデックス（既定値: `0`）、`BUS:ADDRESS`、`BUS-PORT[.PORT...]` を指定します。 |
 | `--fd` | `FD` | Android / Termux から渡された借用 USB ファイルディスクリプタを指定します（引数末尾の整数でも指定可能）。Windows では未対応です。`--list` や 0 以外の `--device` とは併用できません。 |
 | `--lna` | `on / off` | 内部受信増幅器（LNA）を設定します（既定値: 地上波は `off`、BS/CS は `on`）。LNB 電源ではありません。 |
 | `--detach-kernel-driver` | なし | カーネルドライバが対象インターフェースにアタッチされている場合、明示的にデタッチします。 |

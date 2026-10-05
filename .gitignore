@@ -21,3 +21,9 @@ __pycache__/
 *.dSYM/
 
 /tests/test-usb-log
+
+/tests/test-compat
+/tests/test-usb-selector
+/tests/test-usb-listing
+
+tests/test-usb-restart

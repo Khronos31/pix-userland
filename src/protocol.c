@@ -1,3 +1,4 @@
+#include "channel.h"
 #include "pixy.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -380,6 +381,11 @@ int pixy_frequency(pixy_system s, unsigned ch, uint32_t *hz) {
     return 0;
 }
 int pixy_tune(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid) {
+    return pixy_tune_slot(d, s, hz, lna, tsid, -1);
+}
+int pixy_tune_slot(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid, int slot) {
+    if (slot < -1 || slot > 7 || (slot >= 0 && (*tsid >= 0 || s == PIXY_TERRESTRIAL)))
+        return fail(d, "Invalid satellite slot selection");
     uint8_t v, a, b;
     if (s == PIXY_TERRESTRIAL) {
         if (wr(d, 24, 0x0f, 0x1c) || wr(d, 25, 0x1c, 0xaa) || wr(d, 25, 0x1f, 0xaa) ||
@@ -433,14 +439,7 @@ int pixy_tune(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid) {
                 uint8_t ids[16];
                 if (rd(d, 25, 0xce, ids, 16))
                     return -1;
-                int chosen = -1;
-                for (unsigned j = 0; j < 16; j += 2) {
-                    int t = ids[j] * 256 + ids[j + 1];
-                    if (t && t != 65535 && (*tsid < 0 || t == *tsid)) {
-                        chosen = t;
-                        break;
-                    }
-                }
+                int chosen = pix_select_tsid(ids, *tsid, slot);
                 if (chosen < 0)
                     continue;
                 *tsid = chosen;

@@ -20,6 +20,7 @@ int pixy_power(pixy *, const uint8_t *, size_t);
 int pixy_session(pixy *, const uint8_t bootstrap[16], const uint8_t validation[64]);
 int pixy_tuner_init(pixy *);
 int pixy_tune(pixy *, pixy_system, uint32_t frequency, int lna, int *tsid);
+int pixy_tune_slot(pixy *, pixy_system, uint32_t frequency, int lna, int *tsid, int slot);
 int pixy_certify(pixy *);
 int pixy_status(pixy *, uint8_t *, size_t *);
 int pixy_fifo_clear(pixy *);

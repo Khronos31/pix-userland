@@ -1,0 +1,14 @@
+#ifndef PIX_USB_LISTING_H
+#define PIX_USB_LISTING_H
+#include "usb_selector.h"
+#include <stdio.h>
+typedef struct {
+    unsigned index, bus, address;
+    uint8_t ports[USB_SELECTOR_MAX_PORTS];
+    unsigned port_count;
+} usb_device_info;
+/* DT181 descriptor enumeration only; never claims the receiver or reads serials.
+ * Unknown paths are null in JSON. "ready" describes the known receiver layout,
+ * not successful interface claiming or signal reception. */
+int usb_listing_write(FILE *, const usb_device_info *, size_t count, int json);
+#endif
