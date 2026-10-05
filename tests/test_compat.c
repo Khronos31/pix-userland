@@ -25,6 +25,8 @@ static void test_channels(void) {
     channel("T27", PIXY_BS, PIXY_TERRESTRIAL, 27, -1);
     channel("T13", PIXY_TERRESTRIAL, PIXY_TERRESTRIAL, 13, -1);
     channel("T52", PIXY_TERRESTRIAL, PIXY_TERRESTRIAL, 52, -1);
+    channel("T53", PIXY_TERRESTRIAL, PIXY_TERRESTRIAL, 53, -1);
+    channel("T62", PIXY_TERRESTRIAL, PIXY_TERRESTRIAL, 62, -1);
     channel("BS01_0", PIXY_TERRESTRIAL, PIXY_BS, 1, 0);
     channel("BS23_7", PIXY_TERRESTRIAL, PIXY_BS, 23, 7);
     channel("BS1", PIXY_TERRESTRIAL, PIXY_BS, 1, -1);
@@ -34,7 +36,7 @@ static void test_channels(void) {
     channel("CS24", PIXY_TERRESTRIAL, PIXY_CS, 24, -1);
     channel("24", PIXY_CS, PIXY_CS, 24, -1);
     const char *bad[] = {"", " ", "27 ", " 27", "+27", "-27", "t27", "T", "BS", "CS",
-                         "T12", "T53", "T27_0", "BS00", "BS02", "BS25", "BS01_", "BS01_8",
+                         "T12", "T63", "T27_0", "BS00", "BS02", "BS25", "BS01_", "BS01_8",
                          "BS01_-1", "BS01_0_1", "BS01x", "CS0", "CS1", "CS26", "27_0",
                          "4294967296", "BS4294967296", "BS01_4294967296"};
     pix_channel c;
@@ -43,6 +45,7 @@ static void test_channels(void) {
     assert(pix_channel_parse(NULL, PIXY_TERRESTRIAL, &c) < 0);
     assert(pix_channel_parse("T27", PIXY_TERRESTRIAL, NULL) < 0);
     uint32_t hz;
+    assert(!pixy_frequency(PIXY_TERRESTRIAL, 62, &hz) && hz == 767142857);
     assert(!pixy_frequency(PIXY_TERRESTRIAL, 27, &hz) && hz == 557142857);
     assert(!pixy_frequency(PIXY_BS, 1, &hz) && hz == 1049480000);
     assert(!pixy_frequency(PIXY_CS, 2, &hz) && hz == 1613000000);
@@ -83,7 +86,7 @@ static void test_commands(void) {
     assert(pix_command_parse("quit\t", PIXY_TERRESTRIAL, &c) == 1 && c.quit && !c.frequency);
     assert(pix_command_parse("", PIXY_TERRESTRIAL, &c) == 0);
     assert(pix_command_parse(" \t\r\n", PIXY_TERRESTRIAL, &c) == 0);
-    const char *bad[] = {"channel", "channel 27 extra", "channel T53", "channel BS01_8", "quit now",
+    const char *bad[] = {"channel", "channel 27 extra", "channel T63", "channel BS01_8", "quit now",
                          "tune", "tune 0", "tune -1", "tune +1", "tune 4294967296", "tune 1x",
                          "tune 99999999999999999999999999999999999999999999999999999999999999999",
                          "tune 1 2", "unknown 27", "quitx", "channel27"};
@@ -175,8 +178,21 @@ static void test_pids(void) {
     data[0] = 0; assert(pix_pid_filter(data, &n, mask) < 0);
     data[0] = 0x47; memset(mask, 0, sizeof(mask)); assert(!pix_pid_filter(data, &n, mask) && !n);
 }
+static int failing_bulk(void *u, uint8_t ep, uint8_t *p, size_t *n, unsigned ms) {
+    (void)u; (void)ep; (void)p; (void)n; (void)ms; return -1;
+}
+static void test_protocol_failures(void) {
+    pixy d; pixy_io io = {NULL, failing_bulk}; uint8_t fw = 0;
+    pixy_init(&d, io);
+    assert(pixy_power(&d, &fw, 1) < 0 && d.failure_exit == 10);
+    d.powered = 1; assert(pixy_shutdown(&d) < 0 && d.failure_exit == 10);
+    pixy_init(&d, io); d.failure_context = 10;
+    assert(pixy_power(&d, &fw, 699673) < 0 && d.failure_exit == 7);
+    pixy_init(&d, io); int tsid = -1;
+    assert(pixy_tune_slot(&d, PIXY_BS, 1049480000, 1, &tsid, 8) < 0 && d.failure_exit == 2);
+}
 int main(void) {
-    test_pids(); test_channels(); test_slots(); test_commands(); test_pipe_poll();
+    test_protocol_failures(); test_pids(); test_channels(); test_slots(); test_commands(); test_pipe_poll();
     puts("compat: channel tokens, satellite slots, commands, and stdin polling passed");
     return 0;
 }

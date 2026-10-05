@@ -11,7 +11,7 @@ struct usb_backend {
     libusb_device_handle *handle;
     struct libusb_transfer *transfers[TRANSFERS];
     uint8_t buffers[TRANSFERS][32768];
-    int pending, stopping, error, claimed, detached;
+    int pending, stopping, error, failure_exit, claimed, detached;
     int diagnostic;
     usb_log *log;
     uint64_t completions, short_reads, last_ms, max_gap, next_log;
@@ -19,6 +19,25 @@ struct usb_backend {
     usb_sink sink;
     void *user;
 };
+/* Shared CLI exit classes. Preserve the first cause through cleanup. */
+static int backend_fail(usb_backend *b, int code) {
+    if (!b->failure_exit)
+        b->failure_exit = code;
+    b->error = 1;
+    return -1;
+}
+int usb_failure_exit(const usb_backend *b) {
+    return b ? b->failure_exit : 70;
+}
+static int open_failure(int error) {
+    return error == LIBUSB_ERROR_BUSY ? 4 : error == LIBUSB_ERROR_NO_MEM ? 70 : 7;
+}
+static int open_usb_error(usb_backend *b, int error, const char *operation) {
+    if (error >= 0)
+        return 0;
+    fprintf(stderr, "%s: %s\n", operation, libusb_error_name(error));
+    return backend_fail(b, open_failure(error));
+}
 void usb_diagnostics(usb_backend *b, int enabled) {
     b->diagnostic = enabled;
 }
@@ -31,14 +50,18 @@ static int init(libusb_context **ctx, int fd) {
     if (fd >= 0) {
         int r = libusb_set_option(NULL, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
         if (usb_err(r, "disable device discovery"))
-            return -1;
+            return r;
     }
-    return usb_err(libusb_init(ctx), "libusb_init");
+    int r = libusb_init(ctx);
+    usb_err(r, "libusb_init");
+    return r;
 }
-static int is_model(libusb_device *d) {
+static int model_state(libusb_device *d) {
     struct libusb_device_descriptor desc;
-    return !libusb_get_device_descriptor(d, &desc) && desc.idVendor == 0x06b8 &&
-           desc.idProduct == 0x102b;
+    int r = libusb_get_device_descriptor(d, &desc);
+    if (r < 0)
+        return r;
+    return desc.idVendor == 0x06b8 && desc.idProduct == 0x102b;
 }
 static void device_info(libusb_device *device, unsigned index, usb_device_info *out) {
     memset(out, 0, sizeof(*out));
@@ -51,25 +74,31 @@ static void device_info(libusb_device *device, unsigned index, usb_device_info *
 }
 int usb_list(int json) {
     libusb_context *ctx = NULL;
-    if (init(&ctx, -1))
-        return -1;
+    int initialized = init(&ctx, -1);
+    if (initialized) return open_failure(initialized);
     libusb_device **list;
     ssize_t n = libusb_get_device_list(ctx, &list);
     if (n < 0) {
         usb_err((int)n, "list USB devices");
         libusb_exit(ctx);
-        return -1;
+        return open_failure((int)n);
     }
     usb_device_info *found = n ? calloc((size_t)n, sizeof(*found)) : NULL;
     if (n && !found) {
         fprintf(stderr, "Cannot allocate USB device list\n");
         libusb_free_device_list(list, 1);
         libusb_exit(ctx);
-        return -1;
+        return 70;
     }
     unsigned count = 0;
     for (ssize_t i = 0; i < n; i++) {
-        if (is_model(list[i])) {
+        int model = model_state(list[i]);
+        if (model < 0) {
+            usb_err(model, "read USB descriptor");
+            free(found); libusb_free_device_list(list, 1); libusb_exit(ctx);
+            return open_failure(model);
+        }
+        if (model) {
             device_info(list[i], count, &found[count]);
             count++;
         }
@@ -80,70 +109,99 @@ int usb_list(int json) {
     free(found);
     if (result)
         fprintf(stderr, "Cannot write USB device list\n");
-    return result;
+    return result ? 70 : 0;
 }
 int usb_open(usb_backend **result, const usb_selector *selector, int fd, int detach) {
+    if (!result)
+        return 70;
+    *result = NULL;
+    if (fd < 0 && !selector)
+        return 70;
     usb_backend *b = calloc(1, sizeof(*b));
     if (!b)
-        return -1;
-    if (init(&b->ctx, fd)) {
+        return 70;
+    int r = init(&b->ctx, fd);
+    if (r < 0) {
+        int code = open_failure(r);
         free(b);
-        return -1;
+        return code;
     }
     if (fd >= 0) {
-        if (usb_err(libusb_wrap_sys_device(b->ctx, (intptr_t)fd, &b->handle), "wrap USB fd"))
+        if (open_usb_error(b, libusb_wrap_sys_device(b->ctx, (intptr_t)fd, &b->handle), "wrap USB fd"))
             goto error;
-        if (!is_model(libusb_get_device(b->handle))) {
+        r = model_state(libusb_get_device(b->handle));
+        if (r < 0) {
+            open_usb_error(b, r, "read USB descriptor");
+            goto error;
+        }
+        if (!r) {
             fprintf(stderr, "USB fd is not a PIX-DT181-PU0\n");
+            backend_fail(b, 3);
             goto error;
         }
     } else {
         libusb_device **list;
         ssize_t n = libusb_get_device_list(b->ctx, &list);
-        if (n < 0)
+        if (n < 0) {
+            open_usb_error(b, (int)n, "list USB devices");
             goto error;
+        }
         unsigned index = 0;
-        for (ssize_t i = 0; i < n; i++)
-            if (is_model(list[i])) {
+        int scan_error = 0;
+        for (ssize_t i = 0; i < n; i++) {
+            int model = model_state(list[i]);
+            if (model < 0) {
+                if (!scan_error)
+                    scan_error = open_failure(model);
+                continue;
+            }
+            if (model) {
                 usb_device_info info;
                 device_info(list[i], index++, &info);
                 if (usb_selector_matches(selector, info.index, info.bus, info.address,
                                          info.ports, info.port_count)) {
-                    int r = libusb_open(list[i], &b->handle);
-                    usb_err(r, "open tuner");
+                    open_usb_error(b, libusb_open(list[i], &b->handle), "open tuner");
                     break;
                 }
             }
+        }
         libusb_free_device_list(list, 1);
         if (!b->handle) {
             fprintf(stderr, "Selected PIX-DT181-PU0 not accessible\n");
+            backend_fail(b, scan_error ? scan_error : 3);
             goto error;
         }
     }
     int active = libusb_kernel_driver_active(b->handle, 0);
+    if (active < 0 && active != LIBUSB_ERROR_NOT_SUPPORTED) {
+        open_usb_error(b, active, "query kernel driver");
+        goto error;
+    }
     if (active == 1) {
         if (!detach) {
             fprintf(stderr,
                     "USB interface is bound; use --detach-kernel-driver to detach explicitly\n");
+            backend_fail(b, 4);
             goto error;
         }
-        if (usb_err(libusb_detach_kernel_driver(b->handle, 0), "detach"))
+        if (open_usb_error(b, libusb_detach_kernel_driver(b->handle, 0), "detach"))
             goto error;
         b->detached = 1;
     }
     int cfg;
-    if (usb_err(libusb_get_configuration(b->handle, &cfg), "get configuration"))
+    if (open_usb_error(b, libusb_get_configuration(b->handle, &cfg), "get configuration"))
         goto error;
-    if (cfg != 1 && usb_err(libusb_set_configuration(b->handle, 1), "set configuration"))
+    if (cfg != 1 && open_usb_error(b, libusb_set_configuration(b->handle, 1), "set configuration"))
         goto error;
-    if (usb_err(libusb_claim_interface(b->handle, 0), "claim interface"))
+    if (open_usb_error(b, libusb_claim_interface(b->handle, 0), "claim interface"))
         goto error;
     b->claimed = 1;
     *result = b;
     return 0;
-error:
+error:;
+    int code = usb_failure_exit(b);
     usb_close(b);
-    return -1;
+    return code ? code : 70;
 }
 static int bulk(void *v, uint8_t ep, uint8_t *p, size_t *n, unsigned timeout) {
     usb_backend *b = v;
@@ -152,10 +210,10 @@ static int bulk(void *v, uint8_t ep, uint8_t *p, size_t *n, unsigned timeout) {
     int r = libusb_bulk_transfer(b->handle, ep, p, (int)*n, &actual, timeout);
     *n = (size_t)actual;
     if (usb_err(r, "bulk transfer"))
-        return -1;
+        return backend_fail(b, 7);
     if (!(ep & 128) && wanted != (size_t)actual) {
         fprintf(stderr, "Short USB write\n");
-        return -1;
+        return backend_fail(b, 7);
     }
     return 0;
 }
@@ -186,7 +244,7 @@ static void close_log(usb_backend *b) {
         return;
     uint64_t dropped = 0;
     if (usb_log_close(b->log, &dropped))
-        b->error = 1;
+        backend_fail(b, 70);
     b->log = NULL;
 #ifndef _WIN32
     /* Best effort only. On Windows a synchronous summary in the caller could
@@ -197,7 +255,7 @@ static void close_log(usb_backend *b) {
                               (unsigned long long)dropped);
         if (length < 0 || (size_t)length >= sizeof(line) ||
             usb_log_write_fd(NULL, 2, line, (size_t)length) < 0)
-            b->error = 1;
+            backend_fail(b, 70);
     }
 #endif
 }
@@ -223,33 +281,35 @@ static void LIBUSB_CALL complete(struct libusb_transfer *t) {
                                      gap,       slot,           t->status,      t->actual_length,
                                      t->length, b->pending};
             if (usb_log_submit(b->log, &record))
-                b->error = 1;
+                backend_fail(b, 70);
             b->next_log = now + 30000;
         }
     }
     if (t->status == LIBUSB_TRANSFER_COMPLETED ||
         (b->stopping && t->status == LIBUSB_TRANSFER_CANCELLED)) {
         if (t->actual_length && b->sink(b->user, t->buffer, (size_t)t->actual_length))
-            b->error = 1;
+            backend_fail(b, 8);
     } else {
         fprintf(stderr, "USB stream completion status=%d\n", t->status);
-        b->error = 1;
+        backend_fail(b, 7);
     }
     if (!b->stopping && !b->error) {
         int r = libusb_submit_transfer(t);
         if (r < 0) {
             usb_err(r, "resubmit stream");
-            b->error = 1;
+            backend_fail(b, 7);
         } else
             b->pending++;
     }
 }
 int usb_stream_start(usb_backend *b, usb_sink sink, void *user) {
-    if (!sink || b->error || b->pending || b->log)
+    if (b->error)
         return -1;
+    if (!sink || b->pending || b->log)
+        return backend_fail(b, 70);
     for (unsigned i = 0; i < TRANSFERS; i++)
         if (b->transfers[i])
-            return -1;
+            return backend_fail(b, 70);
     b->stopping = 0;
     /* A deliberate retune pause is not an observed USB completion gap. */
     b->last_ms = 0;
@@ -259,19 +319,19 @@ int usb_stream_start(usb_backend *b, usb_sink sink, void *user) {
     b->user = user;
     if (b->diagnostic && !(b->log = usb_log_open(log_record, NULL))) {
         fprintf(stderr, "Cannot start USB diagnostic logger\n");
-        b->error = 1;
+        backend_fail(b, 70);
         return -1;
     }
     for (unsigned i = 0; i < TRANSFERS; i++) {
         b->transfers[i] = libusb_alloc_transfer(0);
         if (!b->transfers[i]) {
-            b->error = 1;
+            backend_fail(b, 70);
             return -1;
         }
         libusb_fill_bulk_transfer(b->transfers[i], b->handle, 0x82, b->buffers[i], 32768, complete,
                                   b, 0);
         if (usb_err(libusb_submit_transfer(b->transfers[i]), "submit stream")) {
-            b->error = 1;
+            backend_fail(b, 7);
             return -1;
         }
         b->pending++;
@@ -282,7 +342,7 @@ int usb_poll(usb_backend *b, unsigned ms) {
     struct timeval t = {(long)(ms / 1000), (long)(ms % 1000) * 1000};
     int r = libusb_handle_events_timeout(b->ctx, &t);
     if (r < 0 && r != LIBUSB_ERROR_INTERRUPTED) {
-        b->error = 1;
+        backend_fail(b, 7);
         return usb_err(r, "USB events");
     }
     return b->error ? -1 : 0;
@@ -293,7 +353,7 @@ int usb_stream_stop(usb_backend *b) {
         if (b->transfers[i]) {
             int r = libusb_cancel_transfer(b->transfers[i]);
             if (r < 0 && r != LIBUSB_ERROR_NOT_FOUND) {
-                b->error = 1;
+                backend_fail(b, 7);
                 usb_err(r, "cancel stream");
             }
         }
@@ -302,7 +362,7 @@ int usb_stream_stop(usb_backend *b) {
         int r = libusb_handle_events_timeout(b->ctx, &t);
         if (r < 0 && r != LIBUSB_ERROR_INTERRUPTED) {
             usb_err(r, "drain cancellations");
-            b->error = 1;
+            backend_fail(b, 7);
         }
     }
     close_log(b);

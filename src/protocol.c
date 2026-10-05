@@ -11,9 +11,13 @@ static void le32(uint8_t *p, uint32_t v) {
 static uint32_t get32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
-static int fail(pixy *d, const char *s) {
+static int fail_code(pixy *d, int code, const char *s) {
+    if (!d->failure_exit) d->failure_exit = code;
     snprintf(d->error, sizeof(d->error), "%s", s);
     return -1;
+}
+static int fail(pixy *d, const char *s) {
+    return fail_code(d, d->failure_context ? d->failure_context : 7, s);
 }
 void pixy_init(pixy *d, pixy_io io) {
     memset(d, 0, sizeof(*d));
@@ -21,7 +25,7 @@ void pixy_init(pixy *d, pixy_io io) {
 }
 static int bulk(pixy *d, uint8_t ep, uint8_t *p, size_t *n, unsigned ms) {
     if (d->io.bulk(d->io.user, ep, p, n, ms))
-        return fail(d, "USB bulk transfer failed");
+        return fail_code(d, 7, "USB bulk transfer failed");
     return 0;
 }
 static int fx(pixy *d, uint8_t op, uint32_t param, const uint8_t *p, size_t n, uint8_t out[64],
@@ -63,7 +67,7 @@ static int gpio_write(pixy *d, uint8_t g[2]) {
 int pixy_power(pixy *d, const uint8_t *fw, size_t n) {
     uint8_t z = 0, g[2];
     if (n != 699673)
-        return fail(d, "DT181 FPGA size must be 699673 bytes");
+        return fail_code(d, 10, "DT181 FPGA size must be 699673 bytes");
     d->powered = 1;
     if (simple(d, 2, 1, &z, 1) || simple(d, 9, 0, NULL, 0) || gpio_read(d, g))
         return -1;
@@ -84,7 +88,7 @@ int pixy_power(pixy *d, const uint8_t *fw, size_t n) {
     size_t chunk = n >> 4;
     uint8_t *expanded = malloc(chunk * 16);
     if (!expanded)
-        return fail(d, "Out of memory");
+        return fail_code(d, 70, "Out of memory");
     for (size_t off = 0; off < n;) {
         size_t take = n - off < chunk ? n - off : chunk;
         for (size_t i = 0; i < take; i++)
@@ -122,7 +126,7 @@ static int command(pixy *d, uint8_t op, const uint8_t *p, size_t n, uint8_t flag
     b[0] = flags;
     if (flags & 64) {
         if (random_bytes(d->tx, 16))
-            return fail(d, "Random source failed");
+            return fail_code(d, 70, "Random source failed");
         memcpy(b + 1, d->tx, 16);
     }
     b[off - 1] = ++d->seq;
@@ -137,7 +141,7 @@ static int command(pixy *d, uint8_t op, const uint8_t *p, size_t n, uint8_t flag
     if (flags & 128) {
         if (len < off + 16) {
             if (random_bytes(b + len, off + 16 - len))
-                return fail(d, "Random source failed");
+                return fail_code(d, 70, "Random source failed");
             len = off + 16;
         }
         aes_ctr c;
@@ -174,6 +178,7 @@ static int command(pixy *d, uint8_t op, const uint8_t *p, size_t n, uint8_t flag
     if (got > len - off - 6 || got > *outn)
         return fail(d, "Invalid FPGA response length");
     if (b[off]) {
+        if (!d->failure_exit) d->failure_exit = d->failure_context ? d->failure_context : 7;
         snprintf(d->error, sizeof(d->error), "FPGA opcode 0x%02x status %u", op, b[off]);
         return -1;
     }
@@ -187,7 +192,7 @@ int pixy_certify(pixy *d) {
     uint8_t p[8], r[8];
     size_t n = 8;
     if (random_bytes(p, 4))
-        return fail(d, "Random source failed");
+        return fail_code(d, 70, "Random source failed");
     memcpy(p + 4, d->token, 4);
     if (command(d, 4, p, 8, 0xc0, r, &n))
         return -1;
@@ -204,17 +209,20 @@ int pixy_session(pixy *d, const uint8_t bootstrap[16], const uint8_t validation[
     if (command(d, 0, NULL, 0, 0xc0, p, &n) || n != 4)
         return fail(d, "Preparation failed");
     if (rsa_generate(mod, priv))
-        return fail(d, "Session RSA generation failed");
+        return fail_code(d, 70, "Session RSA generation failed");
     le32(p + 4, (uint32_t)time(NULL));
     /* Locally administered per-session host identifier; not a network MAC lookup. */
-    if (random_bytes(p + 14, 6))
+    if (random_bytes(p + 14, 6)) {
+        fail_code(d, 70, "Random source failed");
         goto done;
+    }
     p[14] = (p[14] & 0xfe) | 2;
     memcpy(p + 20, mod, 128);
     memcpy(p + 164, validation, 64);
     n = 128;
-    if (command(d, 1, p, sizeof(p), 0x80, reply, &n) || n != 128)
+    if (command(d, 1, p, sizeof(p), 0x80, reply, &n))
         goto done;
+    if (n != 128) { fail(d, "Invalid session response length"); goto done; }
     if (rsa_apply(reply, priv, mod, secret)) {
         fail(d, "Invalid session RSA response");
         goto done;
@@ -366,7 +374,7 @@ int pixy_tuner_init(pixy *d) {
 }
 int pixy_frequency(pixy_system s, unsigned ch, uint32_t *hz) {
     if (s == PIXY_TERRESTRIAL) {
-        if (ch < 13 || ch > 52)
+        if (ch < 13 || ch > 62)
             return -1;
         *hz = 473142857 + (ch - 13) * 6000000;
     } else if (s == PIXY_BS) {
@@ -385,7 +393,7 @@ int pixy_tune(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid) {
 }
 int pixy_tune_slot(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid, int slot) {
     if (slot < -1 || slot > 7 || (slot >= 0 && (*tsid >= 0 || s == PIXY_TERRESTRIAL)))
-        return fail(d, "Invalid satellite slot selection");
+        return fail_code(d, 2, "Invalid satellite slot selection");
     uint8_t v, a, b;
     if (s == PIXY_TERRESTRIAL) {
         if (wr(d, 24, 0x0f, 0x1c) || wr(d, 25, 0x1c, 0xaa) || wr(d, 25, 0x1f, 0xaa) ||
@@ -450,5 +458,5 @@ int pixy_tune_slot(pixy *d, pixy_system s, uint32_t hz, int lna, int *tsid, int 
             }
         }
     }
-    return fail(d, "No signal lock or requested satellite TSID absent");
+    return fail_code(d, 5, "No signal lock or requested satellite TSID absent");
 }

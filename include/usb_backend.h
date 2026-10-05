@@ -6,7 +6,12 @@ typedef struct usb_backend usb_backend;
 typedef int (*usb_sink)(void *, const uint8_t *, size_t);
 void usb_diagnostics(usb_backend *, int enabled);
 int usb_list(int json);
+/* Returns 0, or a shared CLI exit class: 3 absent, 4 busy/kernel-bound,
+ * 7 USB/access/disconnect, 70 internal. Failure sets *result to NULL. */
 int usb_open(usb_backend **, const usb_selector *, int fd, int detach);
+/* First failure, preserved through cleanup: 0 healthy, 7 USB, 8 sink,
+ * 70 internal/diagnostics. NULL is an internal failure (70). */
+int usb_failure_exit(const usb_backend *);
 pixy_io usb_io(usb_backend *);
 /* A clean stop permits restart. Failed streams remain failed until usb_close.
  * Do not start again before stop has drained callbacks and closed the logger. */

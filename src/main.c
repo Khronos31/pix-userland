@@ -33,7 +33,7 @@ typedef struct {
     unsigned head, count, high_water;
     uint64_t received_ms[QUEUE_SLOTS];
     diagnostic *diag;
-    int done, error, output;
+    int done, error, output, failure_exit;
     uint64_t write_started;
     uint64_t capture_elapsed_ms;
     uint64_t usb_bytes;
@@ -44,6 +44,13 @@ typedef struct {
     ts_decoder decoder;
     ts_check check;
 } stream;
+static int stream_fail(stream *s, int code) {
+    os_mutex_lock(&s->mutex);
+    if (!s->failure_exit) s->failure_exit = code;
+    s->error = 1;
+    os_mutex_unlock(&s->mutex);
+    return -1;
+}
 static int write_ts(void *u, const uint8_t *p, size_t n) {
     stream *s = u;
     uint8_t filtered[32768 + 564];
@@ -79,19 +86,19 @@ static int write_ts(void *u, const uint8_t *p, size_t n) {
         if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             if (now_ms() >= deadline) {
                 fprintf(stderr, "TS output stalled for 3 seconds\n");
-                return -1;
+                return stream_fail(s, 8);
             }
 #ifdef _WIN32
             sleep_ms(50);
 #else
             struct pollfd fd = {s->output, POLLOUT, 0};
             if (poll(&fd, 1, 50) < 0 && errno != EINTR)
-                return -1;
+                return stream_fail(s, 70);
 #endif
             continue;
         }
         fprintf(stderr, "TS write: %s\n", strerror(errno));
-        return -1;
+        return stream_fail(s, 70);
     }
     return 0;
 }
@@ -139,10 +146,11 @@ static void *worker(void *u) {
         os_mutex_unlock(&s->mutex);
         int failed =
             diag_before(s->diag, &s->decoder, &s->check, data, n, received, queued, high_water);
+        if (failed) stream_fail(s, 70);
         if (!failed)
             failed = ts_decoder_feed(&s->decoder, data, n);
         if (diag_after(s->diag, &s->decoder, &s->check, failed))
-            failed = -1;
+            failed = stream_fail(s, 70);
         if (failed) {
             if (s->decoder.error)
                 fprintf(stderr, "TS decoder: %s\n", s->decoder.error);
@@ -170,7 +178,7 @@ static void usage(FILE *f) {
         f,
         "pix-ts " VERSION " — PIX-DT181-PU0 libusb TS receiver\n"
         "Usage: pix-ts --system terrestrial|bs|cs --channel N [options]\n"
-        "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..52, BS odd 1..23, CS even "
+        "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..62, BS odd 1..23, CS even "
         "2..24)\n"
         "  -s, --system TYPE     terrestrial (default), bs, cs\n"
         "      --tsid N          satellite TSID, decimal or 0xhex; default first detected\n"
@@ -201,6 +209,7 @@ static void usage(FILE *f) {
         "TS goes to stdout; all diagnostics and final JSON statistics go to stderr.\n"
         "This model does not provide LNB power. LNA is a separate internal amplifier.\n");
 }
+static int load_allocation_failed;
 static uint8_t *load_file(const char *dir, const char *name, size_t expected) {
     char path[4096];
     if (snprintf(path, sizeof(path), "%s%s%s",
@@ -215,6 +224,7 @@ static uint8_t *load_file(const char *dir, const char *name, size_t expected) {
     }
     uint8_t *p = malloc(expected);
     if (!p) {
+        load_allocation_failed = 1;
         fclose(f);
         return NULL;
     }
@@ -227,6 +237,11 @@ static uint8_t *load_file(const char *dir, const char *name, size_t expected) {
         return NULL;
     }
     return p;
+}
+static int device_exit(const pixy *device, usb_backend *usb) {
+    int code = usb_failure_exit(usb);
+    if (code) return code;
+    return device->failure_exit ? device->failure_exit : 70;
 }
 static int check_bad(const ts_check *c) {
     return c->tei || c->scrambled || c->continuity || c->invalid || c->crc_errors || !c->pat ||
@@ -255,7 +270,7 @@ static int offline(const char *path, const char *context, stream *s) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         perror(path);
-        return 3;
+        return 70;
     }
     uint8_t block[32768];
     size_t n;
@@ -263,7 +278,7 @@ static int offline(const char *path, const char *context, stream *s) {
         uint8_t *ctx = load_file(".", context, 32);
         if (!ctx) {
             fclose(f);
-            return 3;
+            return 70;
         }
         ts_decoder_init(&s->decoder, ctx, write_ts, s, &s->check);
         secure_clear(ctx, 32);
@@ -281,10 +296,12 @@ static int offline(const char *path, const char *context, stream *s) {
             ts_check_packet(&s->check, p);
         s->decoder.used = n;
     }
-    if (ferror(f))
-        s->error = 1;
+    if (ferror(f)) {
+        s->error = 1; s->failure_exit = 70;
+    }
     fclose(f);
     report(s);
+    if (s->failure_exit) return s->failure_exit;
     return s->error || check_bad(&s->check) || s->decoder.resync || s->decoder.waiting ||
                    (!context && s->decoder.used)
                ? 8
@@ -458,7 +475,7 @@ int main(int argc, char **argv) {
     if (list) {
         if (channel_text || frequency || control || detach || inspect || raw || context || diag_dir || replay)
             goto bad;
-        return usb_list(list == 2) ? 4 : 0;
+        return usb_list(list == 2);
     }
     if ((inspect && raw) || (raw && !context) || (context && !raw) ||
         ((inspect || raw) && (channel_text || frequency || control || fd >= 0)))
@@ -472,7 +489,7 @@ int main(int argc, char **argv) {
     if (channel_text) {
         pix_channel selected;
         if (channel_text[0] >= '0' && channel_text[0] <= '9') {
-            if (number(channel_text, 52, &v) || !v) goto bad;
+            if (number(channel_text, 62, &v) || !v) goto bad;
             selected = (pix_channel){system, (unsigned)v, -1};
         } else if (pix_channel_parse(channel_text, system, &selected)) goto bad;
         if (system_given && selected.system != system) goto bad;
@@ -511,7 +528,7 @@ int main(int argc, char **argv) {
     if (interrupted) return 0;
     stream *s = calloc(1, sizeof(*s));
     if (!s)
-        return 3;
+        return 70;
     s->output = STDOUT_FILENO;
     ts_check_init(&s->check);
     memcpy(s->pid_mask, pid_mask, sizeof(pid_mask)); s->filter_pids = filter_pids;
@@ -522,7 +539,7 @@ int main(int argc, char **argv) {
             if (s->output < 0) {
                 perror(output);
                 free(s);
-                return 3;
+                return 70;
             }
         } else if (isatty(STDOUT_FILENO)) {
             fprintf(stderr, "Refusing binary TS output to a terminal; use -o FILE or a pipe\n");
@@ -532,25 +549,25 @@ int main(int argc, char **argv) {
         flags = os_output_prepare(s->output);
         if (flags < 0) {
             perror("output flags");
-            rc = 3;
+            rc = 70;
             goto finish;
         }
     }
     if (replay) {
         if (os_mutex_init(&s->mutex, NULL)) {
-            rc = 3;
+            rc = 70;
             goto finish;
         }
         rc = diag_replay_chunks(replay, &s->decoder, &s->check, write_ts, s, replay_chunk) ? 8 : 0;
         report(s);
         os_mutex_destroy(&s->mutex);
-        if (check_bad(&s->check) || s->decoder.resync || s->decoder.waiting)
-            rc = 8;
+        if (s->failure_exit) rc = s->failure_exit;
+        else if (check_bad(&s->check) || s->decoder.resync || s->decoder.waiting) rc = 8;
         goto finish;
     }
     if (inspect || raw) {
         if (os_mutex_init(&s->mutex, NULL)) {
-            rc = 3;
+            rc = 70;
             goto finish;
         }
         rc = offline(inspect ? inspect : raw, context, s);
@@ -561,12 +578,13 @@ int main(int argc, char **argv) {
         s->diag = diag_open(diag_dir);
         if (!s->diag) {
             perror("diagnostic directory");
-            rc = 3;
+            rc = 70;
             goto finish;
         }
         s->check.issue = diag_issue;
         s->check.issue_user = s->diag;
     }
+    load_allocation_failed = 0;
     uint8_t *fw = load_file(firmware ? "." : assets, firmware ? firmware : "fpga.bin", 699673),
             *bootstrap = load_file(assets, "bootstrap.bin", 16),
             *validation = load_file(assets, "validation.bin", 64);
@@ -574,59 +592,61 @@ int main(int argc, char **argv) {
         free(fw);
         free(bootstrap);
         free(validation);
-        rc = 3;
+        rc = load_allocation_failed ? 70 : 10;
         goto finish;
     }
     usb_backend *usb = NULL;
     pixy device;
     int opened = 0, queue = 0, started_thread = 0;
     os_thread thread;
-    rc = 4;
-    if (usb_open(&usb, &selector, fd, detach))
+    rc = usb_open(&usb, &selector, fd, detach);
+    if (rc)
         goto cleanup;
     opened = 1;
     usb_diagnostics(usb, diag_dir != NULL);
     pixy_init(&device, usb_io(usb));
     fprintf(stderr, "Initializing PIX-DT181-PU0...\n");
-    if (pixy_power(&device, fw, 699673) || pixy_session(&device, bootstrap, validation) ||
-        pixy_tuner_init(&device))
-        goto cleanup;
+    device.failure_context = 10;
+    if (pixy_power(&device, fw, 699673) || pixy_session(&device, bootstrap, validation)) {
+        rc = device_exit(&device, usb); goto cleanup;
+    }
+    device.failure_context = 7;
+    if (pixy_tuner_init(&device)) { rc = device_exit(&device, usb); goto cleanup; }
     if (interrupted) {
-        rc = 130;
+        rc = 0;
         goto cleanup;
     }
     if (pixy_tune_slot(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot))
-        goto cleanup;
+        { rc = device_exit(&device, usb); goto cleanup; }
     uint8_t status[64];
     size_t statusn = 64;
-    if (pixy_status(&device, status, &statusn))
-        goto cleanup;
+    if (pixy_status(&device, status, &statusn)) { rc = device_exit(&device, usb); goto cleanup; }
+    if (statusn > 3 && !status[3]) { fprintf(stderr, "B-CAS card not inserted\n"); rc = 9; goto cleanup; }
     fprintf(stderr, "locked system=%s channel=%u frequency=%u tsid=%d bcas_inserted=%d\n",
             system == PIXY_TERRESTRIAL ? "terrestrial"
             : system == PIXY_BS        ? "bs"
                                        : "cs",
             channel, hz, tsid, statusn > 3 ? !!status[3] : -1);
     if (os_mutex_init(&s->mutex, NULL)) {
-        rc = 3;
+        rc = 70;
         goto cleanup;
     }
     if (os_cond_init(&s->cond, NULL)) {
         os_mutex_destroy(&s->mutex);
-        rc = 3;
+        rc = 70;
         goto cleanup;
     }
     queue = 1;
 capture_restart:
-    rc = 4;
-    if (pixy_fifo_clear(&device) || usb_stream_start(usb, enqueue, s))
-        goto cleanup;
+    if (pixy_fifo_clear(&device) || usb_stream_start(usb, enqueue, s)) {
+        rc = device_exit(&device, usb); goto cleanup;
+    }
     uint8_t stream_context[32];
-    if (pixy_start(&device, stream_context))
-        goto cleanup;
+    if (pixy_start(&device, stream_context)) { rc = device_exit(&device, usb); goto cleanup; }
     ts_decoder_init(&s->decoder, stream_context, write_ts, s, &s->check);
     secure_clear(stream_context, 32);
     if (os_thread_create(&thread, NULL, worker, s)) {
-        rc = 3;
+        rc = 70;
         goto cleanup;
     }
     started_thread = 1;
@@ -641,25 +661,31 @@ capture_restart:
             if (result == 1) { changing = 1; break; }
         }
         if (usb_poll(usb, 50)) {
-            rc = 8;
+            rc = usb_failure_exit(usb);
+            os_mutex_lock(&s->mutex);
+            if (rc == 8 && s->failure_exit) rc = s->failure_exit;
+            os_mutex_unlock(&s->mutex);
             break;
         }
         os_mutex_lock(&s->mutex);
         int err = s->error;
+        int stream_exit = s->failure_exit ? s->failure_exit : 8;
 #ifdef _WIN32
         if (s->write_started && now_ms() - s->write_started > 3000) {
             s->error = 1;
+            if (!s->failure_exit) s->failure_exit = 8;
+            stream_exit = s->failure_exit;
             err = 1;
         }
 #endif
         os_mutex_unlock(&s->mutex);
         if (err) {
-            rc = 8;
+            rc = stream_exit;
             break;
         }
         if (now_ms() >= next) {
             if (pixy_certify(&device)) {
-                rc = 4;
+                rc = device_exit(&device, usb);
                 break;
             }
             next = now_ms() + 1000;
@@ -667,17 +693,17 @@ capture_restart:
     }
     s->capture_elapsed_ms += now_ms() - start;
     if (changing) {
-        if (pixy_stop(&device) || usb_stream_stop(usb)) { rc = 4; goto cleanup; }
+        if (pixy_stop(&device) || usb_stream_stop(usb)) { rc = device_exit(&device, usb); goto cleanup; }
         os_mutex_lock(&s->mutex); s->done = 1; os_cond_signal(&s->cond); os_mutex_unlock(&s->mutex);
         os_thread_join(thread, 0); started_thread = 0;
-        if (s->error || s->check.tei || s->check.scrambled || s->check.continuity || s->check.invalid || s->check.crc_errors || s->decoder.resync || s->decoder.waiting) { rc = 8; goto cleanup; }
+        if (s->error || s->check.tei || s->check.scrambled || s->check.continuity || s->check.invalid || s->check.crc_errors || s->decoder.resync || s->decoder.waiting) { rc = s->failure_exit ? s->failure_exit : 8; goto cleanup; }
         s->done = 0; s->head = 0; s->count = 0;
         ts_check_init(&s->check);
         if (retune.frequency) { hz = retune.hz; channel = 0; slot = -1; }
         else { system = retune.channel.system; channel = retune.channel.channel; slot = retune.channel.slot; pixy_frequency(system, channel, &hz); }
         tsid = -1;
         if (verbose) fprintf(stderr, "control tune frequency=%u\n", hz);
-        if (pixy_tune_slot(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot)) { rc = 4; goto cleanup; }
+        if (pixy_tune_slot(&device, system, hz, lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot)) { rc = device_exit(&device, usb); goto cleanup; }
         goto capture_restart;
     }
 cleanup:
@@ -685,9 +711,9 @@ cleanup:
         if (rc)
             fprintf(stderr, "%s\n", device.error[0] ? device.error : "Capture did not complete");
         if (device.streaming && pixy_stop(&device) && !rc)
-            rc = 4;
+            rc = device_exit(&device, usb);
         if (usb_stream_stop(usb) && !rc)
-            rc = 8;
+            rc = usb_failure_exit(usb);
         if (started_thread) {
             os_mutex_lock(&s->mutex);
             s->done = 1;
@@ -695,12 +721,13 @@ cleanup:
             os_mutex_unlock(&s->mutex);
             os_thread_join(thread, rc || interrupted);
             report(s);
+            if (rc == 8 && s->failure_exit) rc = s->failure_exit;
             if (!rc &&
                 (s->error || check_bad(&s->check) || s->decoder.resync || s->decoder.waiting))
-                rc = 8;
+                rc = s->failure_exit ? s->failure_exit : 8;
         }
         if (pixy_shutdown(&device) && !rc)
-            rc = 4;
+            rc = device_exit(&device, usb);
         usb_close(usb);
         secure_clear(&device, sizeof(device));
     }
@@ -716,12 +743,12 @@ cleanup:
 finish:
     if (diag_close(s->diag)) {
         fprintf(stderr, "Diagnostic capture I/O failed\n");
-        rc = 8;
+        if (!rc) rc = 70;
     }
     if (flags >= 0 && s->output == STDOUT_FILENO)
         os_output_restore(s->output, flags);
     if (s->output != STDOUT_FILENO && close(s->output) && !rc)
-        rc = 3;
+        rc = 70;
     secure_clear(s, sizeof(*s));
     free(s);
     return rc;

@@ -12,6 +12,8 @@ typedef struct {
     pixy_io io;
     uint8_t fxseq, seq, key[16], tx[16], rx[16], token[4];
     int powered, session_ready, streaming;
+    /* Common CLI failure code; first cause survives cleanup. */
+    int failure_exit, failure_context;
     char error[192];
 } pixy;
 typedef enum { PIXY_TERRESTRIAL, PIXY_BS, PIXY_CS } pixy_system;
