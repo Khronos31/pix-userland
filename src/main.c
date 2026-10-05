@@ -147,8 +147,10 @@ static void *worker(void *u) {
         int failed =
             diag_before(s->diag, &s->decoder, &s->check, data, n, received, queued, high_water);
         if (failed) stream_fail(s, 70);
-        if (!failed)
+        if (!failed) {
             failed = ts_decoder_feed(&s->decoder, data, n);
+            if (failed) stream_fail(s, 8);
+        }
         if (diag_after(s->diag, &s->decoder, &s->check, failed))
             failed = stream_fail(s, 70);
         if (failed) {
