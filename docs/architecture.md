@@ -46,7 +46,7 @@ profiles. DT141/195/295 are not claimed to work. The current backend only opens
 
 Windows uses libusb's WinUSB backend and native Win32 synchronization. Its CI build and unit tests do not certify USB reception. WebUSB remains unimplemented and needs an asynchronous browser adapter.
 
-## Bounded diagnostic capture (0.1.3-dev2)
+## Bounded diagnostic capture (0.1.3)
 
 `--diagnostic NEW_DIRECTORY` records USB input locally while ordinary TS output can go to `/dev/null`.
 The directory must not exist. On POSIX, directories use mode 0700 and files use mode 0600.
@@ -81,10 +81,10 @@ The optional split size (1..32768) subdivides each recorded frame before feeding
 The native-state checkpoint format is private, unsuitable for untrusted or cross-version input. The checker layout changed in dev2, so original dev1 snapshots must use the retained original executable or a separately verified ABI-compatible analysis harness, not the dev2 executable.
 Generation numbers give ring order; slot names wrap. Final replay counters include checkpoint history: use differences from starting counters. Replayed TS is only that segment's output, not a complete programme recording. Keys/context are never printed in diagnostic logs.
 
-### USB diagnostic logging (0.1.3-dev3, pending hardware validation)
+### USB diagnostic logging (0.1.3)
 
 Periodic USB telemetry is queued to a separate writer thread. The completion callback never writes normal diagnostic records to stderr: a slow log file must not delay resubmitting bulk transfers. The queue holds 128 metadata-only records; when full, it drops telemetry and counts `log_dropped`, rather than blocking USB reception. The logger releases its queue lock before calling the writer. Writer failures fail the diagnostic run, and shutdown drains the logger after USB transfers have stopped. Final `log_dropped_total` records any telemetry loss. Callback gaps of at least 100 ms are logged alongside periodic records, subject to the existing abnormal-event log limit. Fatal USB error messages can still be printed on the error path.
 
-A synthetic blocked-writer test holds the writer indefinitely while the producer submits more than the queue capacity. Submissions must finish before the writer is released; ordering, bounded drops and write-error propagation are checked. This fixes the synchronous diagnostic logging path, not yet every possible source of receiver starvation. The original non-diagnostic Release did not use this periodic logging path. Existing dev2 hardware trials continue on their original executable; dev3 has not yet been validated by a new hardware soak.
+A synthetic blocked-writer test holds the writer indefinitely while the producer submits more than the queue capacity. Submissions must finish before the writer is released; ordering, bounded drops and write-error propagation are checked. This fixes the synchronous diagnostic logging path, not yet every possible source of receiver starvation. The original non-diagnostic Release did not use this periodic logging path. The adopted dev3 build passed two consecutive five-hour terrestrial channel 25 hardware trials on Linux x86_64; see validation.md for the exact build and scope.
 
 The POSIX sink uses low-level writes and checks shutdown while waiting for a full single-writer pipe, without changing shared descriptor flags. Shutdown may discard telemetry; this makes the diagnostic run fail. OS-blocked regular-file writes, competing pipe writers, and arbitrary non-cooperative custom writers have no portable hard shutdown deadline. `log_previous_write_ms` and `log_max_write_ms` measure completed writer calls; a call appears in the next metadata record. Final JSON `capture_elapsed_ms` measures the live receive loop only, excluding initialization and cleanup (zero for replay/offline).

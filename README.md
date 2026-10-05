@@ -30,7 +30,7 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 | ターゲット | リンク方式・依存関係 | 検証状況 |
 |---|---|---|
 | **darwin-arm64** (macOS) | OS 標準ライブラリに動的依存 | DT181 実機にて C 版による地上・BS・110 度 CS の選局・受信・TS 復元を確認済み。CI 単体テストを通過。 |
-| **linux-x86_64** | musl 完全静的（glibc / musl 両対応） | glibc / musl 環境での起動、単体テスト、TS 解析を確認済み。C 版による実機 USB 受信は未検証。CI 単体テストを通過。 |
+| **linux-x86_64** | musl 完全静的（glibc / musl 両対応） | Latitude上で実機受信を確認。v0.1.3採用コードで地上波25ch・5時間2回を合格。詳細は[検証記録](docs/validation.md)。 |
 | **linux-aarch64** | musl 完全静的（glibc / musl 両対応） | ビルドおよび検査範囲のみ。実機未検証。CI 単体テストを通過。 |
 | **android-aarch64** | Android NDK r27d / API 24（Bionic 動的依存） | Termux 向け CLI。クロスビルドと ELF 検査のみ確認、実機未検証。 |
 | **android-armv7a** | Android NDK r27d / API 24（Bionic 動的依存） | 同上。 |
@@ -38,7 +38,7 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 | **windows-x64** | OS 標準 DLL（Win32 API）に動的依存 | ビルドおよび検査範囲のみ。別途 libusb DLL は不要ですが機器への WinUSB ドライバ設定が必須。CI 単体テストを通過。 |
 
 - **注意事項・未検証項目**:
-  - 長時間の連続受信、受信中の USB ケーブル抜去、スリープからの復帰処理は未検証です。
+  - 長時間受信の確認範囲はLinux x86_64・地上波25chの5時間2回です。受信中の USB ケーブル抜去、スリープからの復帰処理は未検証です。
   - Linux 向けの udev / mdev 設定例を用意していますが、新規権限ルールによる実機でのホットプラグ動作は未検証です。
   - Android 向けは Termux の端末環境で動かす CLI バイナリであり、Android アプリ（APK）ではありません。実行には Termux 上で `Termux:API` アプリと `termux-api` パッケージ（`termux-usb` コマンドを含む）が必要です。
 
