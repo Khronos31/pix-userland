@@ -3,6 +3,7 @@
 #include "pid_filter.h"
 #include "os.h"
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #ifdef _WIN32
@@ -191,8 +192,17 @@ static void test_protocol_failures(void) {
     pixy_init(&d, io); int tsid = -1;
     assert(pixy_tune_slot(&d, PIXY_BS, 1049480000, 1, &tsid, 8) < 0 && d.failure_exit == 2);
 }
+static void test_null_output(void) {
+#ifdef _WIN32
+    int fd = open("NUL", O_WRONLY | O_BINARY);
+#else
+    int fd = open("/dev/null", O_WRONLY);
+#endif
+    assert(fd >= 0 && !os_output_is_terminal(fd));
+    close(fd);
+}
 int main(void) {
-    test_protocol_failures(); test_pids(); test_channels(); test_slots(); test_commands(); test_pipe_poll();
+    test_null_output(); test_protocol_failures(); test_pids(); test_channels(); test_slots(); test_commands(); test_pipe_poll();
     puts("compat: channel tokens, satellite slots, commands, and stdin polling passed");
     return 0;
 }

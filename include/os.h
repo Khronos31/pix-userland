@@ -104,5 +104,6 @@ static inline void os_thread_join(os_thread t, int cancel_io) {
 #define O_BINARY 0
 #endif
 int os_output_prepare(int fd);
+int os_output_is_terminal(int fd);
 void os_output_restore(int fd, int state);
 #endif

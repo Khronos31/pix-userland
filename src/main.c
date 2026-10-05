@@ -543,7 +543,7 @@ int main(int argc, char **argv) {
                 free(s);
                 return 70;
             }
-        } else if (isatty(STDOUT_FILENO)) {
+        } else if (os_output_is_terminal(STDOUT_FILENO)) {
             fprintf(stderr, "Refusing binary TS output to a terminal; use -o FILE or a pipe\n");
             free(s);
             return 2;

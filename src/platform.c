@@ -15,6 +15,10 @@ int random_bytes(void *p, size_t n) {
         return -1;
     return BCryptGenRandom(NULL, p, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
 }
+int os_output_is_terminal(int fd) {
+    DWORD mode;
+    return GetConsoleMode((HANDLE)_get_osfhandle(fd), &mode) != 0;
+}
 int os_output_prepare(int fd) {
     return _setmode(fd, _O_BINARY);
 }
@@ -33,6 +37,9 @@ void sleep_ms(unsigned ms) {
     struct timespec t = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000};
     while (nanosleep(&t, &t) && errno == EINTR) {
     }
+}
+int os_output_is_terminal(int fd) {
+    return isatty(fd);
 }
 int os_output_prepare(int fd) {
     int flags = fcntl(fd, F_GETFL);
