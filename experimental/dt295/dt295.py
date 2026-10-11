@@ -173,6 +173,8 @@ class Device:
         rid, status, words = struct.unpack('>3I', response[:12])
         if rid != command_id or status or words > 124:
             raise ProtocolError(f'secure command {command_id:08x}: id={rid:08x}, status={status:08x}, words={words}')
+        # Driver 41b94 checks status at +4 and copies payload from +16.
+        # The encrypted prefix at +12 is not a result/status DWORD.
         return response[16:16+4*words]
 
     def i2c(self, address, data=b'', read_length=0):
