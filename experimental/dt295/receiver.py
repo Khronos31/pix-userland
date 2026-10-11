@@ -1,7 +1,7 @@
 """Target-0 receive setup using a private, offline-resolved configuration.
 
 Profiles contain device/session-specific inputs and stay outside source control.
-Mac reception is partially verified; video/audio output remains unresolved.
+Bounded Mac video/audio reception is verified; Linux hardware is untested.
 """
 import json
 import struct
