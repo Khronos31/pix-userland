@@ -1,4 +1,4 @@
-"""Bounded cold-start terrestrial capture; decoded TS on stdout, logs on stderr."""
+"""Bounded terrestrial capture; decoded TS on stdout, logs on stderr."""
 import argparse
 import os
 from pathlib import Path
@@ -11,18 +11,23 @@ from dt295 import (USB, USBError, Device, Crypto, Framer, ProtocolError,
 from receiver import ReceiveProfile, Receiver
 
 
-def capture(device, assets, profile, iv, channel, seconds, output):
+def capture(device, assets, profile, iv, channel, seconds, output, recover=False):
     if not 0 < seconds <= 60 or len(iv) != 16:
         raise ValueError('requires 0 < seconds <= 60 and a 16-byte IV')
-    if device.word(0x82008) != 0:
-        raise ProtocolError('cold device required; reconnect USB before capture')
+    initial_state = device.word(0x82008)
+    if initial_state == 0xffff and recover:
+        device.recover_session()
+        initial_state = 0x10
+    if initial_state not in (0, 0x10):
+        raise ProtocolError('cold or unauthenticated ready device required')
     material = driver_material(assets/'pxmb86m0x_usb.sys')
     crypto = Crypto()
     receiver = Receiver(device)
     received = packets = 0
     framer = Framer()
     try:
-        device.boot(assets/'mb86m01_assp_osec_idle.bin')
+        if initial_state == 0:
+            device.boot(assets/'mb86m01_assp_osec_idle.bin')
         authenticate(device, crypto, material)
         device.configure_idle()
         card = Card(device)
@@ -74,6 +79,8 @@ def main():
     p.add_argument('--profile', required=True, type=Path)
     p.add_argument('--iv', required=True, type=Path)
     p.add_argument('--seconds', type=float, default=40)
+    p.add_argument('--recover', action='store_true',
+                   help='explicitly reset firmware error before authentication')
     p.add_argument('channel')
     a = p.parse_args()
     try:
@@ -81,7 +88,7 @@ def main():
         iv = a.iv.read_bytes()
         with USB() as usb:
             result = capture(Device(usb), a.assets, profile, iv, a.channel,
-                             a.seconds, sys.stdout.buffer)
+                             a.seconds, sys.stdout.buffer, recover=a.recover)
         print('capture complete: '+str(result), file=sys.stderr)
         return 0
     except BrokenPipeError:

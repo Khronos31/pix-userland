@@ -8,9 +8,9 @@ from dt295 import ProtocolError
 
 
 class CaptureTests(unittest.TestCase):
-    def run_capture(self, output, card_error=None):
+    def run_capture(self, output, card_error=None, initial_state=0):
         d = Mock(session_key=bytes(16))
-        d.word.side_effect = [0, 2]
+        d.word.side_effect = [initial_state, 2]
         d.drain_states.side_effect = [2, 17]
         packet = b'\x47\x01\x00\x10' + bytes(184)
         d.usb.transfer.return_value = packet * 2
@@ -32,7 +32,13 @@ class CaptureTests(unittest.TestCase):
                     capture(d, Path('.'), Mock(), bytes(16), 'T27', 60, output)
                 finally:
                     receiver.return_value.stop.assert_called_once()
+        if initial_state == 0x10:
+            d.boot.assert_not_called()
         return packet * 2
+
+    def test_ready_firmware_authenticates_without_cold_upload(self):
+        out = io.BytesIO()
+        self.assertEqual(self.run_capture(out, initial_state=0x10), out.getvalue())
 
     def test_stdout_contains_only_ts(self):
         out = io.BytesIO()

@@ -57,6 +57,10 @@ class Receiver:
         self.prepared = False
         self.started = False
         self.pause_state = None
+        self.reusable = False
+        self.session_key = None
+        self.profile = None
+        self.firmware = None
 
     def prepare(self, profile, firmware):
         """Get the key before TRC preparation, as observed before KS ACQUIRE.
@@ -79,8 +83,14 @@ class Receiver:
         key = d.secure_command(0x07010600, profile.key_request)
         if len(key) != 16:
             raise ProtocolError('TS key response must contain exactly four words')
-        # Direct USB response is already in wire byte order. Do not apply the
-        # SDK's host-DWORD conversion a second time to the AES key.
+        # USB key reply is in wire byte order; do not apply SDK DWORD swapping.
+        self._configure(profile, firmware)
+        self.key, self.prepared = key, True
+        self.session_key = d.session_key
+        self.profile, self.firmware = profile, firmware
+
+    def _configure(self, profile, firmware):
+        d = self.device
         d.load_trc(firmware)
         if d.word(0x82008) != 0x11:
             raise ProtocolError('TRC upload did not retain idle state')
@@ -91,8 +101,23 @@ class Receiver:
         d.put(0x82028, 0)
         d.command(4, 0x20)
         d.wait_state(1)
-        self.key, self.prepared = key, True
         self.pause_state = profile.pause_state
+
+    def rearm(self):
+        """Reacquire the same configured channel after a reusable stop.
+
+        Driver action6/32540 reloads TRC and configuration before action2/32788
+        acquires (command 4/sub20); 32900 starts from state 1. The caller
+        must maintain authentication and leave tuning/configuration unchanged.
+        """
+        if (not self.reusable or self.key is None or
+                self.device.session_key != self.session_key):
+            raise ProtocolError('rearm requires retained receiver and authentication')
+        if self.device.drain_states() != 0x11:
+            raise ProtocolError('rearm requires idle state')
+        self.reusable = False  # Never retry a failed acquisition.
+        self._configure(self.profile, self.firmware)
+        self.prepared = True
 
     def start(self):
         if not self.prepared or self.started or self.key is None:
@@ -124,9 +149,10 @@ class Receiver:
                 if e.code != -7:
                     raise
 
-    def stop(self):
+    def stop(self, reusable=False):
         """Use observed hardware state, even when start timed out."""
         drained = 0
+        completed = False
         try:
             state = self.device.drain_states()
             if state == 2:
@@ -142,7 +168,12 @@ class Receiver:
                 self.device.configure_idle()
             elif state not in (1, 0x11):
                 raise ProtocolError(f'cannot stop device state={state:04x}')
+            if reusable and state == 1:
+                self.device.configure_idle()
+            completed = True
             return drained
         finally:
-            self.key = None
+            self.reusable = bool(reusable and completed and self.key is not None)
+            if not self.reusable:
+                self.key = None
             self.started = self.prepared = False

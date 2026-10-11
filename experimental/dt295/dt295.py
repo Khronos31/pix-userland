@@ -227,6 +227,33 @@ class Device:
         self.command(1)
         self.wait_state(0x11, 5000)
 
+    def recover_session(self):
+        """Explicitly recover firmware error; never reset a healthy receiver.
+
+        Driver 1d38c/action16 uses command 3 to return to unauthenticated
+        state 0x10. A stale error notification may remain briefly after the
+        completion; only this bounded reset wait tolerates that old error.
+        This command is rejected in normal idle, so it is not a shutdown API.
+        """
+        state = self.word(0x82008)
+        if state != 0xffff:
+            raise ProtocolError('session recovery requires firmware error state')
+        self.session_key = self.session_iv = self.crypto = None
+        self.renewal_counter = self.renewal_due = None
+        if self.word(0x90074) & 4:
+            self.put(0x90074, 4)
+        self.command(3)
+        deadline = time.monotonic() + 5
+        while True:
+            pending, state = self.word(0x90074), self.word(0x82008)
+            if pending & 4:
+                self.put(0x90074, 4)
+            if state == 0x10:
+                return
+            if state not in (0x11, 0xffff) or time.monotonic() >= deadline:
+                raise ProtocolError(f'session reset incomplete: state={state:04x}')
+            time.sleep(.01)
+
     def load_trc(self, firmware):
         # Driver action 6: table e68, 2e4d0 -> 1d318 -> 184d8.
         # Unlike cold boot, command 4 prepares this upload; no 90070 kick follows.

@@ -45,6 +45,35 @@ class ReceiverTests(unittest.TestCase):
                          [(4,0x20),(5,0,2),(5,0,4),(5,0,1)])
         self.assertIsNone(self.r.key)
 
+    def test_reusable_stop_reloads_configuration_without_new_key_request(self):
+        self.r.key=bytes(16);self.r.session_key=self.d.session_key
+        self.r.pause_state=4;self.r.started=True
+        self.r.profile=profile();self.r.firmware=self.firmware
+        self.d.word.return_value=17
+        self.d.drain_states.side_effect=[2,4,17]
+        self.r.stop(reusable=True)
+        self.r.rearm()
+        self.d.word.return_value=1
+        self.r.start()
+        self.assertEqual([c.args for c in self.d.command.call_args_list],
+                         [(5,0,4),(5,0,1),(4,0x20),(5,0,2)])
+        self.d.secure_command.assert_not_called();self.d.load_trc.assert_called_once_with(self.firmware)
+        self.assertEqual(self.r.key,bytes(16))
+
+    def test_rearm_requires_same_session_and_failure_cannot_be_retried(self):
+        self.r.key=bytes(16);self.r.session_key=self.d.session_key
+        self.r.reusable=True;self.d.drain_states.return_value=17
+        self.r.profile=profile();self.r.firmware=self.firmware
+        self.d.word.return_value=17
+        self.d.command.side_effect=USBError(-7,'timeout')
+        with self.assertRaises(USBError):self.r.rearm()
+        with self.assertRaises(ProtocolError):self.r.rearm()
+        self.d.command.assert_called_once_with(4,0x20)
+        self.d.command.reset_mock();self.r.reusable=True
+        self.d.session_key=b'different session'
+        with self.assertRaises(ProtocolError):self.r.rearm()
+        self.d.command.assert_not_called()
+
     def test_key_failure_never_uploads_or_starts(self):
         self.d.word.return_value=0x11
         for reply in (b'',bytes(12),bytes(20)):
@@ -54,6 +83,27 @@ class ReceiverTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):self.r.prepare(profile(),self.firmware)
         self.d.load_trc.assert_not_called();self.d.command.assert_not_called()
         with self.assertRaises(ProtocolError):self.r.start()
+
+    def test_error_recovery_tolerates_old_error_notification_without_resending(self):
+        d=Device(Mock());d.session_key=bytes(16);d.renewal_counter=5
+        d.word=Mock(side_effect=[0xffff,4,4,0xffff,4,16])
+        d.put=Mock();d.command=Mock()
+        from unittest.mock import patch
+        with patch('dt295.time.sleep'):d.recover_session()
+        d.command.assert_called_once_with(3)
+        self.assertIsNone(d.session_key);self.assertIsNone(d.renewal_counter)
+        self.assertEqual(d.put.call_count,3)
+
+    def test_error_recovery_refuses_healthy_device_and_bounds_failed_transition(self):
+        from unittest.mock import patch
+        for state in (0,1,2,16,17):
+            d=Device(Mock());d.word=Mock(return_value=state);d.command=Mock()
+            with self.assertRaises(ProtocolError):d.recover_session()
+            d.command.assert_not_called()
+        d=Device(Mock());d.word=Mock(side_effect=[0xffff,0,0,0xffff]);d.command=Mock()
+        with patch('dt295.time.monotonic',side_effect=[0,6]):
+            with self.assertRaises(ProtocolError):d.recover_session()
+        d.command.assert_called_once_with(3)
 
     def test_timeout_does_not_repeat_start_and_stop_checks_hardware(self):
         self.d.word.side_effect=[0x11,0x11,1];self.d.drain_states.side_effect=[2,2,4];self.d.usb.transfer.return_value=bytes(188)

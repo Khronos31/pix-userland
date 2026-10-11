@@ -7,7 +7,7 @@ video/audio and fed it directly to FFmpeg. It is not a stable tuner release.
 Implemented primitives: libusb transport, idle firmware upload, initial firmware
 authentication and 30-second renewal, card interface initialization/activation,
 terrestrial tuning, TRC firmware upload, TS-key requests, target-0 receive
-preparation/start/stop, TS payload decryption, and a cold-start capture command.
+preparation/start/stop, TS payload decryption, and a capture command supporting cold or unauthenticated ready state.
 Only target 0 / EP81 is addressed. Firmware, authentication material, the receive
 profile and IV are separately supplied private files, never embedded in source.
 Host-side card APDU handling is not implemented.
@@ -27,8 +27,11 @@ python3 capture.py --assets /path/to/official/Driver/selene/usb/x64 \
 
 The capture command writes decrypted TS to stdout and diagnostics to stderr.
 The decoder discards its output. Closing the consumer triggers receiver cleanup.
-Capture duration must be greater than zero and at most 60 seconds. This command
-requires cold state 0; it does not resume an expired authentication session.
+Capture duration must be greater than zero and at most 60 seconds. The command
+accepts cold state 0 or unauthenticated ready state 0x10. Add `--recover` to
+explicitly recover firmware error state 0xffff before new authentication. It
+refuses healthy, already authenticated idle or running devices. This option
+does not silently seize a live session.
 There is no device listing, mirakc integration, or stable CLI compatibility.
 The private receive profile still derives from the owner's Windows reference;
 it is not a general-purpose configuration generator.
@@ -70,15 +73,37 @@ Mac validation on 2026-10-12:
   frames with the audio stream selected, reaching 10.010 seconds. Both processes
   exited zero. Initial `Invalid frame dimensions 0x0` messages were present;
   this was not an error-free decoder run. TS and decoded media were discarded.
-- A later read after the capture process had exited found state 0xffff and error
-  0x11000001. Authentication expiry after exit is a hypothesis, not a verified
-  cause. Repeat capture without reconnecting and clean session shutdown remain
-  unresolved. The capture cleanup now logs its immediate final state to stderr;
-  this added log has synthetic coverage but has not been rerun on hardware.
+- A later controlled experiment received three 20-second segments on the same
+  USB connection and authentication session, with 35-second authenticated idle
+  intervals. Both restarts and all stops succeeded. Each restarted segment
+  decoded video/audio for 10.010 seconds with FFmpeg. Startup header messages
+  still occur when reception begins before a MPEG-2 sequence header.
+- Restart requires retaining the TS key and reloading TRC/configuration. A fresh
+  key request after stop returned status 0x00020019; retaining the key without
+  TRC reload returned completion 0x0480. `stop(reusable=True)` retains the key;
+  after servicing authentication throughout the idle interval, call `rearm()`
+  then `start()`. This is same-channel, same-session reuse. Default `stop()` still
+  discards the key. Do not retune or mutate the profile during retained reuse.
+- Disabling renewal after the successful cycles reproduced firmware error
+  0x11000001 approximately 61 seconds after the last renewal. Stopping TS alone
+  does not terminate the authenticated session. Normal CLI exit still leaves
+  idle state 0x11, which subsequently expires; clean session termination remains
+  unresolved. Commands 3 and 2 were rejected in healthy idle, including command
+  2 after card deactivation. They are not used as generic shutdown commands.
+- In error state, the official recovery command 3 returned the device to 0x10
+  without unplugging. The old error notification can remain briefly after command
+  completion; `recover_session()` uses a bounded wait for the new state, clears
+  local authentication material, and never resends the reset. Fresh authentication
+  and another 20-second reception then succeeded in a separate process.
+- For a saved sample, seven picture headers preceded the first sequence header.
+  An offline diagnostic filter removed only those early video packets while
+  preserving other PIDs: the same 10-second decode changed from initial dimension
+  errors to no stderr. The capture command preserves the received TS; it does
+  not silently remove startup video. This is not a general stream repair feature.
 
 Earlier inactive EP84/86 polling probes suffered spontaneous device resets;
 EP81-only success does not prove their cause. Full-period TS was not retained,
 so independent validation is limited to saved samples and the short decoder run.
-Mac and Linux Alpine 3.22 x86_64 musl synthetic tests pass. Linux hardware, BS,
-long-running reception and start-after-stop reuse remain unverified. Keep the
+Mac and Linux Alpine 3.22 x86_64 musl synthetic tests pass. Linux hardware, BS, long-running reception, retuning during reuse and clean
+termination of authentication remain unverified. Keep the
 Windows application/driver for reference while these lifecycle gaps are resolved.
