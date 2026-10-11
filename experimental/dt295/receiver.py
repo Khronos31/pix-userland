@@ -1,12 +1,13 @@
 """Target-0 receive setup using a private, offline-resolved configuration.
 
 Profiles contain device/session-specific inputs and stay outside source control.
-No successful live Mac/Linux reception is claimed by this module.
+Mac reception is partially verified; video/audio output remains unresolved.
 """
 import json
 import struct
+import time
 from pathlib import Path
-from dt295 import ProtocolError
+from dt295 import ProtocolError, USBError
 
 
 class ReceiveProfile:
@@ -105,8 +106,27 @@ class Receiver:
         self.device.wait_state(2)
         self.started = True
 
+    def _drain_to_pause(self, timeout=5000):
+        # The observed pause needed pending target-0 output to be drained.
+        # Keep consuming EP81 after command 5, without resending the command
+        # or polling inactive output endpoints.
+        deadline = time.monotonic() + timeout / 1000
+        total = 0
+        while True:
+            state = self.device.drain_states()
+            if state == self.pause_state:
+                return total
+            if state != 2 or time.monotonic() >= deadline:
+                raise ProtocolError(f'pause incomplete: state={state:04x}')
+            try:
+                total += len(self.device.usb.transfer(0x81, 65536, 10))
+            except USBError as e:
+                if e.code != -7:
+                    raise
+
     def stop(self):
         """Use observed hardware state, even when start timed out."""
+        drained = 0
         try:
             state = self.device.drain_states()
             if state == 2:
@@ -114,7 +134,7 @@ class Receiver:
                 if self.pause_state is None:
                     raise ProtocolError('missing receive profile for running device')
                 self.device.command(5, 0, self.pause_state)
-                self.device.wait_state(self.pause_state)
+                drained = self._drain_to_pause()
                 state = self.pause_state
             if state in (3,4):
                 self.device.command(5, 0, 1)
@@ -122,6 +142,7 @@ class Receiver:
                 self.device.configure_idle()
             elif state not in (1, 0x11):
                 raise ProtocolError(f'cannot stop device state={state:04x}')
+            return drained
         finally:
             self.key = None
             self.started = self.prepared = False

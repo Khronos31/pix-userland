@@ -1,7 +1,8 @@
 # Experimental PIX-DT295 primitives
 
 This is an incomplete research prototype for USB `06b8:103b`, separate from the
-stable PIX-DT181 command. It cannot yet capture live TS and is not a release.
+stable PIX-DT181 command. It has received live TS in a bounded Mac probe, but lacks video/audio
+packets and is not a usable tuner release.
 
 Implemented primitives: libusb control/bulk/interrupt transport, idle firmware
 upload, initial firmware authentication, 30-second authentication renewal,
@@ -34,34 +35,28 @@ only after its 30-second deadline; an error must abort the session. Do not
 re-send a timed-out firmware upload or start command. The boot path retries
 only status reads across a firmware restart.
 
-Mac hardware observations (2026-10-12): initial authentication and three
-successive renewal exchanges succeeded; T27 lock-condition registers were
-observed in a separate tuning probe. Applying the driver's default TRC fields
-reaches prepared state 1, but starting TS still leads to state `0xffff` and
-firmware error `0x03030006`, with no bulk TS received. This also happens with a
-recent successful authentication renewal. Its cause remains unknown. Do not
-reuse the failing start sequence as a working receiver.
+Latest Mac probe: EP81-only reception completed 40 seconds (67,483,136 bytes,
+358,952 packets), one authentication renewal and normal return to idle. The
+pause path now keeps draining USB input; 65,536 queued bytes had to be consumed
+before firmware acknowledged pause. Independently decoded 1,024 encrypted sample
+packets matched CommonCrypto, and reassembled PAT/PMT sections passed CRC checks.
+However, PMT-declared video/audio PIDs 256/272/273 were absent; valid subtitle and
+other sections do not establish working video/audio. Two probes polling inactive
+EP84/86 also suffered spontaneous device resets; EP81-only success is evidence
+for further isolation, not proof of the reset cause. Windows remains needed.
 
-Offline decryption matched an independent AES implementation for 32 captured
-Windows packets. This does not validate live capture or session-key acquisition.
+Earlier probes exposed three corrected lifecycle errors: response offset +12 was
+incorrectly treated as status (the actual status is +4), a queued state 1 was
+misread as failed start before acknowledging state-event bit 4, and stopping
+required draining pending output before transition from running state 2 to pause
+3/4, then 1 and idle. Synthetic tests cover these cases and abort on disconnect
+or a bounded pause timeout without forcing another state-changing command.
+
+The current stop drain reads only target-0 EP81. This narrow change is covered
+by synthetic tests; the completed hardware probe still used the earlier stop
+loop that also polled EP84/86. No repeat hardware validation is claimed for the
+narrowed stop loop.
+
 Linux testing covers compilation and synthetic regression tests only; Linux
 hardware reception has not been tested. Keep the official Windows environment
-for reference until live receive/decrypt/stop/restart are independently verified.
-
-The successful Windows reload trace supplied a revised profile (including PID
-filters) for the next Mac test. Its first probe completed initialization,
-authentication and tuning, then stopped before TRC upload because an experimental
-check treated the encrypted prefix at response offset +12 as a status. Driver
-41b94 checks status at +4 and copies data from +16; the response status was zero
-with four payload words. That extra check has been removed and a synthetic
-regression accepts a nonzero prefix while rejecting actual error status. Live TS
-with the revised profile remains unverified.
-
-A follow-up acquired the 16-byte TS key and prepared TRC. The prototype initially
-misread a queued state 1 as start failure: acknowledging state-event bit 4
-revealed running state 2. State-event draining and bounded waits are now
-implemented. Stop follows 2 -> pause state 3/4 (DMA input dependent) -> 1 -> idle,
-instead of issuing idle directly while running. The device later reached error
-`0x11000001` during diagnosis; no bulk TS was collected and the corrected full
-lifecycle still requires a fresh hardware test. Synthetic tests cover stale
-state events, firmware error, timeout, pause selection, and no repeated start.
+for reference until live video/audio receive/decrypt/stop/restart are verified.

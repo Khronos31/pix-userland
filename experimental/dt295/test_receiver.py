@@ -30,7 +30,7 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(profile().key_request,bytes.fromhex('1234567890abcdef00000000'))
 
     def test_key_precedes_prepare_and_start(self):
-        self.d.word.side_effect=[0x11,0x11,1];self.d.drain_states.return_value=2
+        self.d.word.side_effect=[0x11,0x11,1];self.d.drain_states.side_effect=[2,2,4];self.d.usb.transfer.return_value=bytes(188)
         self.r.prepare(profile(),self.firmware);self.r.start()
         calls=self.d.mock_calls
         key=next(i for i,c in enumerate(calls) if c[0]=='secure_command')
@@ -56,7 +56,7 @@ class ReceiverTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):self.r.start()
 
     def test_timeout_does_not_repeat_start_and_stop_checks_hardware(self):
-        self.d.word.side_effect=[0x11,0x11,1];self.d.drain_states.return_value=2
+        self.d.word.side_effect=[0x11,0x11,1];self.d.drain_states.side_effect=[2,2,4];self.d.usb.transfer.return_value=bytes(188)
         self.r.prepare(profile(),self.firmware)
         self.d.command.side_effect=USBError(-7,'start timeout')
         with self.assertRaises(USBError):self.r.start()
@@ -82,6 +82,33 @@ class ReceiverTests(unittest.TestCase):
         with patch('dt295.time.monotonic',side_effect=[0,1]):
             with self.assertRaises(ProtocolError):d.wait_state(2,timeout=10)
         d.usb.control.assert_not_called()
+
+    def test_pause_drains_bulk_without_repeating_pause_command(self):
+        self.r.pause_state=4
+        self.d.drain_states.side_effect=[2,2,2,4]
+        self.d.usb.transfer.side_effect=[USBError(-7,'timeout'),bytes(188)]
+        self.assertEqual(self.r.stop(),188)
+        self.assertEqual([c.args for c in self.d.usb.transfer.call_args_list],[(0x81,65536,10)]*2)
+        self.assertEqual([c.args for c in self.d.command.call_args_list],[(5,0,4),(5,0,1)])
+        self.d.configure_idle.assert_called_once()
+
+    def test_pause_disconnect_aborts_without_idle_command(self):
+        self.r.pause_state=4;self.r.key=bytes(16);self.r.started=True
+        self.d.drain_states.return_value=2
+        self.d.usb.transfer.side_effect=USBError(-4,'disconnected')
+        with self.assertRaises(USBError):self.r.stop()
+        self.d.command.assert_called_once_with(5,0,4)
+        self.d.configure_idle.assert_not_called()
+        self.assertIsNone(self.r.key);self.assertFalse(self.r.started)
+
+    def test_pause_timeout_does_not_force_idle(self):
+        from unittest.mock import patch
+        self.r.pause_state=4;self.d.drain_states.return_value=2
+        with patch('receiver.time.monotonic',side_effect=[0,6]):
+            with self.assertRaises(ProtocolError):self.r.stop()
+        self.d.command.assert_called_once_with(5,0,4)
+        self.d.configure_idle.assert_not_called()
+        self.d.usb.transfer.assert_not_called()
 
     def test_dma_input_selects_pause_state(self):
         for value, state in [(0,4),(1,3)]:
