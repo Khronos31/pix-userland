@@ -56,3 +56,12 @@ check treated the encrypted prefix at response offset +12 as a status. Driver
 with four payload words. That extra check has been removed and a synthetic
 regression accepts a nonzero prefix while rejecting actual error status. Live TS
 with the revised profile remains unverified.
+
+A follow-up acquired the 16-byte TS key and prepared TRC. The prototype initially
+misread a queued state 1 as start failure: acknowledging state-event bit 4
+revealed running state 2. State-event draining and bounded waits are now
+implemented. Stop follows 2 -> pause state 3/4 (DMA input dependent) -> 1 -> idle,
+instead of issuing idle directly while running. The device later reached error
+`0x11000001` during diagnosis; no bulk TS was collected and the corrected full
+lifecycle still requires a fresh hardware test. Synthetic tests cover stale
+state events, firmware error, timeout, pause selection, and no repeated start.

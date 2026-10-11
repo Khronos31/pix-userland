@@ -194,16 +194,38 @@ class Device:
             raise ProtocolError(f'I2C {address:02x} status {reply[0]:02x}/{reply[1]:02x}')
         return reply[2:2+read_length]
 
+    def drain_states(self):
+        """Consume state notifications; 82008 can show an older queued state."""
+        for _ in range(64):
+            pending = self.word(0x90074)
+            state = self.word(0x82008)
+            if pending & 4:
+                self.put(0x90074, 4)
+            if state == 0xffff:
+                raise ProtocolError('firmware entered error state')
+            if not pending & 4:
+                return state
+        raise ProtocolError('state notification queue did not settle')
+
+    def wait_state(self, expected, timeout=30000):
+        # Driver 29378 waits for a separate state notification after command
+        # completion; command 5's target state is its value, not the KS state.
+        deadline = time.monotonic() + timeout / 1000
+        while True:
+            state = self.drain_states()
+            if state == expected:
+                return state
+            if time.monotonic() >= deadline:
+                raise ProtocolError(f'state {expected:04x} timed out; last={state:04x}')
+            time.sleep(.01)
+
     def configure_idle(self):
         # 2efe0 defaults, USB INF BCASNUM=1, script table cb8.
         self.field(0x80074,8,2,1); self.field(0x80074,0,7,0)
         for shift in (12,8,4): self.field(0x80076,shift,4,1)
         self.field(0x80078,8,8,0); self.field(0x80078,0,8,0)
         self.command(1)
-        deadline = time.monotonic()+5
-        while self.word(0x82008) != 0x11:
-            if time.monotonic() >= deadline: raise ProtocolError('idle transition timed out')
-            time.sleep(.01)
+        self.wait_state(0x11, 5000)
 
     def load_trc(self, firmware):
         # Driver action 6: table e68, 2e4d0 -> 1d318 -> 184d8.

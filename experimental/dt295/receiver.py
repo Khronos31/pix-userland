@@ -33,6 +33,16 @@ class ReceiveProfile:
                 raise ValueError('TRC field bit range')
             fields.append((a,shift,width,value))
         self.fields = tuple(fields)
+        # Reconstruct DMA input selection after the configuration block clear.
+        reg = 0
+        for a, shift, width, value in fields:
+            if a == 0x1002:
+                mask = ((1 << width) - 1) << shift
+                reg = (reg & ~mask) | value << shift
+        dma_input = (reg >> 8) & 3
+        if dma_input not in (0, 1):
+            raise ValueError('unsupported DMA input selection')
+        self.pause_state = 3 if dma_input else 4
 
     @classmethod
     def load(cls, path):
@@ -45,6 +55,7 @@ class Receiver:
         self.key = None
         self.prepared = False
         self.started = False
+        self.pause_state = None
 
     def prepare(self, profile, firmware):
         """Get the key before TRC preparation, as observed before KS ACQUIRE.
@@ -59,7 +70,7 @@ class Receiver:
         d = self.device
         if d.session_key is None or d.word(0x82008) != 0x11:
             raise ProtocolError('authenticated idle state required')
-        # Read firmware before sending any key/state-changing request.
+        # Validate firmware size before sending any key/state-changing request.
         size = Path(firmware).stat().st_size
         if not 0 < size <= 16*1024*1024:
             raise ProtocolError('invalid firmware size')
@@ -78,9 +89,9 @@ class Receiver:
             d.field(*field)
         d.put(0x82028, 0)
         d.command(4, 0x20)
-        if d.word(0x82008) != 1:
-            raise ProtocolError('TRC preparation did not reach state 1')
+        d.wait_state(1)
         self.key, self.prepared = key, True
+        self.pause_state = profile.pause_state
 
     def start(self):
         if not self.prepared or self.started or self.key is None:
@@ -91,21 +102,25 @@ class Receiver:
         # another start on this object; recover with a new idle session instead.
         self.prepared = False
         self.device.command(5, 0, 2)
-        state = self.device.word(0x82008)
-        if state not in (3, 4):
-            raise ProtocolError(f'TS start failed: state={state:04x}')
+        self.device.wait_state(2)
         self.started = True
 
     def stop(self):
         """Use observed hardware state, even when start timed out."""
         try:
-            state = self.device.word(0x82008)
+            state = self.device.drain_states()
+            if state == 2:
+                # Driver 31fd0/32bec chooses 3 or 4 from DMA input selection.
+                if self.pause_state is None:
+                    raise ProtocolError('missing receive profile for running device')
+                self.device.command(5, 0, self.pause_state)
+                self.device.wait_state(self.pause_state)
+                state = self.pause_state
             if state in (3,4):
                 self.device.command(5, 0, 1)
+                self.device.wait_state(1)
                 self.device.configure_idle()
-            elif state == 1:
-                self.device.configure_idle()
-            elif state != 0x11:
+            elif state not in (1, 0x11):
                 raise ProtocolError(f'cannot stop device state={state:04x}')
         finally:
             self.key = None
