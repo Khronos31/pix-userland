@@ -1,0 +1,646 @@
+{
+  "five_minute_bins": [
+    {
+      "start_min": 0,
+      "end_min": 5,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 6357032,
+      "cumulative_writer_max_ms": 3038.277
+    },
+    {
+      "start_min": 5,
+      "end_min": 10,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 1048664,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 10,
+      "end_min": 15,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 15,
+      "end_min": 20,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 20,
+      "end_min": 25,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 25,
+      "end_min": 30,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 30,
+      "end_min": 35,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8912892,
+      "cumulative_writer_max_ms": 4239.462
+    },
+    {
+      "start_min": 35,
+      "end_min": 40,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8912892,
+      "cumulative_writer_max_ms": 4239.462
+    },
+    {
+      "start_min": 40,
+      "end_min": 45,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8912892,
+      "cumulative_writer_max_ms": 4239.462
+    },
+    {
+      "start_min": 45,
+      "end_min": 50,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 11599976,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 50,
+      "end_min": 55,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 55,
+      "end_min": 60,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 5046296,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 60,
+      "end_min": 65,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 65,
+      "end_min": 70,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 70,
+      "end_min": 75,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 75,
+      "end_min": 80,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 80,
+      "end_min": 85,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 85,
+      "end_min": 90,
+      "partial": false,
+      "samples": 29,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 90,
+      "end_min": 95,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 95,
+      "end_min": 100,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 2686896,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 100,
+      "end_min": 105,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 105,
+      "end_min": 110,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 262072,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 110,
+      "end_min": 115,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 115,
+      "end_min": 120,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 120,
+      "end_min": 125,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 125,
+      "end_min": 130,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 130,
+      "end_min": 135,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 135,
+      "end_min": 140,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 720792,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 140,
+      "end_min": 145,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 983052,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 145,
+      "end_min": 150,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 1572808,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 150,
+      "end_min": 155,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 2097140,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 155,
+      "end_min": 160,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 2490436,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 160,
+      "end_min": 165,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 3604336,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 165,
+      "end_min": 170,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 3997632,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 170,
+      "end_min": 175,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 4128856,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 175,
+      "end_min": 180,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 4653188,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 180,
+      "end_min": 185,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 4980684,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 185,
+      "end_min": 190,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 5439404,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 190,
+      "end_min": 195,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 3342452,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 195,
+      "end_min": 200,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 4980872,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 200,
+      "end_min": 205,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 1114088,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 205,
+      "end_min": 210,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 210,
+      "end_min": 215,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 215,
+      "end_min": 220,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 2818120,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 220,
+      "end_min": 225,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 225,
+      "end_min": 230,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 230,
+      "end_min": 235,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 235,
+      "end_min": 240,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 262072,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 240,
+      "end_min": 245,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 196460,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 245,
+      "end_min": 250,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 589756,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 250,
+      "end_min": 255,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 255,
+      "end_min": 260,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 260,
+      "end_min": 265,
+      "partial": false,
+      "samples": 30,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 265,
+      "end_min": 270,
+      "partial": true,
+      "samples": 2,
+      "sample_pending_max_B": 131036,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    }
+  ],
+  "thirty_minute_bins": [
+    {
+      "start_min": 0,
+      "end_min": 30,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 1048664,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 8126488,
+      "cumulative_writer_max_ms": 3851.906
+    },
+    {
+      "start_min": 30,
+      "end_min": 60,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 11599976,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 60,
+      "end_min": 90,
+      "partial": false,
+      "samples": 179,
+      "sample_pending_max_B": 131224,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 90,
+      "end_min": 120,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 2686896,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 120,
+      "end_min": 150,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 1572808,
+      "sample_pending_end_B": 65424,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 150,
+      "end_min": 180,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 4653188,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 180,
+      "end_min": 210,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 5439404,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 210,
+      "end_min": 240,
+      "partial": false,
+      "samples": 180,
+      "sample_pending_max_B": 2818120,
+      "sample_pending_end_B": 131224,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    },
+    {
+      "start_min": 240,
+      "end_min": 270,
+      "partial": true,
+      "samples": 152,
+      "sample_pending_max_B": 589756,
+      "sample_pending_end_B": 131036,
+      "cumulative_queue_peak_B": 12189732,
+      "cumulative_writer_max_ms": 5202.282
+    }
+  ],
+  "duration_seconds": 15923.5,
+  "queue_capacity_B": 134217728,
+  "queue_peak_B": 12189732,
+  "end_pending_B": 0,
+  "rejected_B": 0,
+  "uncertain_B": 0,
+  "notes": [
+    "Sample maxima differ from full-run cumulative peak.",
+    "Peak stabilized and repeatedly recovered; all accepted TS drained on early stop."
+  ]
+}

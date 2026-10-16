@@ -1,0 +1,37 @@
+RC前r7・5時間予定試験 最終監査レビュー
+
+総合判定: 不合格。15923.500秒（4時間25分23.5秒）で新規PID追加を拒否して終了コード8となり、5時間未完走。
+元のfindings.jsonのpassed=false、problems=[receiver_exit,duration_short]はそのまま保持。
+録画全体を止めるこの制約は、次回必須修正から除外されたIssue#2の部分音声PESとは別に扱う。
+
+停止までの保存済みTS 161,427,717packet / 30,348,410,796Bの全監査は完了。
+CC不連続、TEI、残留scramble、構造異常、PAT/PMT CRC異常はいずれも0。
+全section 2,252,932件のCRC・構造異常0。
+主MPEG2/H264映像と主AAC音声の完全PES・ADTS連続性・FFmpeg終了・stderr検査は正常。
+録画開始・終了境界の不完全PES、初期AAC同期待ち276B、終端部分ADTS166BなどはAV結果で区別し、途中のframing異常を隠していない。
+保存TSの別々の読出しによるSHA-256は一致:
+957ce0865803ed7bb78c010747ef633fad16b73d104d12997e633f3cbe4a9b3a
+
+USB error/timeout0、最大完了間隔196.454ms。認証更新530回。
+TS保存キューpeak12,189,732B（約11.625MiB、128MiB容量の約9.08%）。
+保存拒否0・保存結果不明0・終了pending0、受付済みTSは全量書き込み確認。
+writer write最大5202.282ms、受付からACKまで最大5901.997ms、親poll最大194.724ms。
+キューは一時滞留から回復し、連続増加による満杯は発生していない。5分・30分サンプル集計はqueue-and-accounting-review.json。
+10秒サンプルの窓内最大と全期間の累積瞬間peakは別の量。
+この5時間予定試験中には、前の1時間試験で行った旧証拠データの移動は実行していない。
+
+原因: 最終PMT1008 version13→14、PMT496 version9→10でAAC PID273が追加された。
+program ECM2305は不変。CA descriptor8191はNULL sentinelで新規ECMではない。
+現行missing_routeガードが全ての新規登録を拒否したため、追加音声の登録前に録画全体が停止した。PID273の保存packetは0。
+保存済み区間の品質が正常でも、未録画の残り約34分37秒の品質や追加PIDの入力を検証したとは言わない。
+
+終了後の全所有プロセス群・controller・監査は終了済み。3種ロック解放、独立した機器照会でも状態16。
+録画対象外のnative未消費131072B、TS端数84B、停止drain0は、受付TS未保存とは別。
+全71ソース入力・r7 binary・実行ハーネスSHA不変を再確認。
+
+計測限界: raw未保存で全USB入力の独立AES照合なし。SHAは保存TSの2回読出し照合で入力stream SHAではない。
+C全TS checkerはruntimeと実装を共有し、Python section・FFmpegによる追加検査を行った。電断・fsync耐久は未検証。
+
+対応: 隔離したr8候補で、既存ECMと既存PIDスロットを保つ新規non-ECM PID追加のみを実装・回帰検証中。
+親レビューで、登録済み主音声PIDの一時消失まで拒否する候補の回帰を指摘し、修正・再検証を依頼した。
+実機でのlive-add安全性は未検証。新規受信・同じr7の再試験・RCビルド・公開は行っていない。

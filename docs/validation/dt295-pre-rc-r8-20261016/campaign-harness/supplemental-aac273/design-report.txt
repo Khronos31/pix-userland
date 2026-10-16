@@ -1,0 +1,20 @@
+DT295 PID 273 補助AAC窓監査器 — 実装・合成検証報告
+
+実装:
+- audit-aac-window.py は、呼出し側が明示した saved TS の start_packet (0-based) と packet_count の範囲だけを seek/read する。packet_count は 1..65536 に制限する。
+- frozen parent の audit_av_adts_v2.py から ADTSStream と AACDecodeAudit の処理を読み込み、親ファイルは変更しない。映像デコーダは起動しない。
+- 対象PIDの同期、TEI、scrambling、adaptation length/control、payload continuity、PES prefix/optional header/宣言長、ADTS境界、FFmpeg AACデコーダ終了状態を検査する。
+- 内部切断や不正なPES/ADTS/TSは fail。窓先頭でPUSI前に現れるPID packet数と窓末尾のopen/partial PES数は明示して境界扱いにする。初期ADTS同期の捨てbyte、PCE前frame数/byte数、PCE待ちepoch数は別々に報告する。
+- ES/AACファイルは生成しない。FFmpeg stdoutは /dev/null、stderrは専用private directoryにepochごと1 MiBまで保持し、超過byte数を記録してfailとする。デコード全体は90秒、各decoder終了待ちは10秒で打ち切り、プロセスを終了する。
+- JSON verdict は decoded_pass / absent / inconclusive / fail。ADTS frameをデコードできない窓はpassにならない。CLI exit 0はfail以外、exit 1はfailまたは解析起動エラーを表す。
+
+合成試験:
+- py_compile 成功。
+- test_audit_aac_window.py: 14 tests passed (ffmpegで生成したsynthetic silent AACのみ)。オフセットseek、65536 cap、PID absent、先頭partial PES、完全PES/ADTS decode、内部PES長不一致、内部ADTS破損、TEI/scramble/continuity/adaptation異常、窓末尾open PES、初期同期skip、PCE waitを検証。
+- 実録画TSを開く、コピーする、走査する、デコードする処理は実施していない。
+
+今後の限定利用:
+- 現在の whole-file audit/controller が完了した後に、status-samples.jsonl の phase-2 elapsed_ms/packetsから対象時刻の packet offset を選ぶ。固定ビットレート換算はしない。
+- 1回の実行は最大65536 packet。commit後、PID 1411の既知構成変化付近、commit後30分以降、終端付近をそれぞれ独立窓にする。最初の窓は after_packets の値を start_packet として与えると、commit境界の次packetから読む。
+- PID 1411の構成変化時刻は時間選択の目印のみで、PID 273のPAT/PMT在籍を意味しない。Issue #2の出現/消失境界を評価する場合、対象programの完全PMTが前後窓でPID 273を広告している証拠が必要。遷移を示す窓がないときは unobserved とし、sampled windowsから一時的遷移がなかったとは結論しない。
+- JSON結果は一般にAAC/PES窓の評価であり、全録画の品質合否、USB経路完全性、ハードウェアPID register readback、未観測遷移不存在の証明ではない。

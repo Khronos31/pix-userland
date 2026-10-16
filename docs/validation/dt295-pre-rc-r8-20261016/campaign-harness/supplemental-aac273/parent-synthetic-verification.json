@@ -1,0 +1,18 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "outputs/pix-dt295-20261016/pre-rc-r8-01/supplemental-aac273",
+    "-p",
+    "test_*.py",
+    "-v"
+  ],
+  "tests_run": 14,
+  "exit_code": 0,
+  "observed_result": "OK",
+  "verified_at_parent_turn": true,
+  "code_sha256": "94a0f3161d4868f8cfe09bd08e5bc5244c0940858bd562af9103e7fbda34c337"
+}

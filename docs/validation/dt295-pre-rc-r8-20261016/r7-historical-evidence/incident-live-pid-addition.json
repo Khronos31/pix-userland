@@ -1,0 +1,77 @@
+{
+  "observed_unix": 1792106159.4774551,
+  "event_id": "pre-rc-r7-live-PID273-addition-early-stop",
+  "requested_seconds": 18000,
+  "actual_seconds": 15923.5,
+  "exit_code": 8,
+  "runtime_detail": "broadcast requires an unsupported live PID/ECM route change",
+  "immediate_PMT_changes": [
+    {
+      "pmt_pid": 1008,
+      "packet_1based": 161427378,
+      "from_version": 13,
+      "to_version": 14,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "valid_ECMs_before": [
+        2305
+      ],
+      "valid_ECMs_after": [
+        2305
+      ]
+    },
+    {
+      "pmt_pid": 496,
+      "packet_1based": 161427383,
+      "from_version": 9,
+      "to_version": 10,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "valid_ECMs_before": [
+        2305
+      ],
+      "valid_ECMs_after": [
+        2305
+      ]
+    }
+  ],
+  "source_branch": "src/dt295_capture.c missing_route recording guard",
+  "USB_errors": 0,
+  "USB_timeouts": 0,
+  "USB_max_gap_ms": 196.454,
+  "queue_peak_bytes": 12189732,
+  "rejected_bytes": 0,
+  "uncertain_bytes": 0,
+  "pending_bytes": 0,
+  "whole_saved_TS_CC_errors": 0,
+  "whole_section_AV_hash_audit": "in progress; not yet a final quality result",
+  "post_stop_probe": {
+    "firmware_state": 16,
+    "state_notifications_pending": false
+  },
+  "receiver_group_empty": true,
+  "device_lock_released": true,
+  "audit_processes": [
+    {
+      "pid": 51742,
+      "pgid": 51742,
+      "command": "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python /Users/yunomin61/Documents/Codex/2026-10-03/new-chat/outputs/pix-dt295-20261016/pre-rc-01/audit.py /Users/yunomin61/Documents/Codex/2026-10-03/new-chat/outputs/pix-dt295-20261016/pre-rc-01/stages/recording-5h"
+    }
+  ],
+  "audit_started_unix": 1792105202.2292328,
+  "RC_readiness": false,
+  "no_automatic_retry": true,
+  "classification": "Release-blocking full-recording stop on new AAC PID addition; distinct from deferred Issue2 partial-PES boundary defect."
+}

@@ -1,0 +1,22 @@
+py_compile exit=0
+
+unit_tests exit=0
+..............
+----------------------------------------------------------------------
+Ran 14 tests in 0.506s
+
+OK
+{"verdict": "absent", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 0, "adts_frames_seen": 0, "adts_frames_emitted": 0}
+{"verdict": "decoded_pass", "pid": 273, "start_packet_zero_based": 0, "packets_read": 3, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "decoded_pass", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 4, "complete_pes_count": 2, "adts_frames_seen": 0, "adts_frames_emitted": 0}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 4, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "decoded_pass", "pid": 273, "start_packet_zero_based": 0, "packets_read": 3, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 3, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 1, "complete_pes_count": 1, "adts_frames_seen": 0, "adts_frames_emitted": 0}
+{"verdict": "decoded_pass", "pid": 273, "start_packet_zero_based": 2, "packets_read": 2, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "inconclusive", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 0}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 4, "complete_pes_count": 1, "adts_frames_seen": 39, "adts_frames_emitted": 39}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 0, "adts_frames_seen": 0, "adts_frames_emitted": 0}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}
+{"verdict": "fail", "pid": 273, "start_packet_zero_based": 0, "packets_read": 2, "complete_pes_count": 1, "adts_frames_seen": 13, "adts_frames_emitted": 13}

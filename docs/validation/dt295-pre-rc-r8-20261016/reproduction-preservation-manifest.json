@@ -1,0 +1,205 @@
+{
+  "created_unix": 1792153154.0728111,
+  "development_only": true,
+  "RC_build": false,
+  "files": [
+    {
+      "path": "campaign-harness/inspect_si.py",
+      "bytes": 5183,
+      "sha256": "126458ddc4f92e65a7483b3903565817c041c409d04edae8e718eda9e04f4654"
+    },
+    {
+      "path": "campaign-harness/audit-input-hashes.json",
+      "bytes": 582,
+      "sha256": "112a13e7341c4d584113cf0700ab12492c01641f77f13a07f670993ec4bc7952"
+    },
+    {
+      "path": "campaign-harness/audit.py",
+      "bytes": 5485,
+      "sha256": "c1833e02f85c6813e3664799795e2b3e81a81239279fe57c761e01be9884b2c2"
+    },
+    {
+      "path": "campaign-harness/audit_av_adts_v2.py",
+      "bytes": 18378,
+      "sha256": "58dcc2b7b67193089ab9112f73255257d69adf58f258fb2b1bff2cde2e962db1"
+    },
+    {
+      "path": "campaign-harness/campaign-config.json",
+      "bytes": 1064,
+      "sha256": "fa8915e025d6374e339f22f35da8c12351a028c34315097f0facecd5461ce6d0"
+    },
+    {
+      "path": "campaign-harness/campaign-controller.py",
+      "bytes": 25081,
+      "sha256": "83bbafb89a9d7c6b0f6923f491aa5b5822632c1e9d96eb69612d0d386e71caeb"
+    },
+    {
+      "path": "campaign-harness/campaign-harness-test.py",
+      "bytes": 5712,
+      "sha256": "3473faa86ccddf077dda44e88e7b1e7088187906245f964ddcde15278c05a8c7"
+    },
+    {
+      "path": "campaign-harness/inspect_ts",
+      "bytes": 54904,
+      "sha256": "eb658c978ad1310ad1883ac4cda0ea97908891ae3bc5565a6af5e5b5883e5642"
+    },
+    {
+      "path": "campaign-harness/live-add-evidence-review.py",
+      "bytes": 32151,
+      "sha256": "3ed83601f6c87c010f6c68c5ebed5318d25e734e0eff72642dd87fb790dcc339"
+    },
+    {
+      "path": "campaign-harness/procedure.txt",
+      "bytes": 2312,
+      "sha256": "8355ea2ff185683951c47ce9936fd2440180b9b241f9484358c2e18f2aacb41a"
+    },
+    {
+      "path": "campaign-harness/read_state.py",
+      "bytes": 427,
+      "sha256": "df0bc9e797f50a2c6bb12af7276cce039d85d669eb7b68969853f44ab342e0c7"
+    },
+    {
+      "path": "campaign-harness/source-hashes.json",
+      "bytes": 10624,
+      "sha256": "ca3e3b172796aaf57b9cdabd3b73914564f75b0428f50db095c7ae8448032c6a"
+    },
+    {
+      "path": "campaign-harness/start_once.py",
+      "bytes": 3269,
+      "sha256": "ebbd03423c92257bbc3528a3eaf9080761d7d22e83d333d441a2f5badf86644f"
+    },
+    {
+      "path": "campaign-harness/test_live_add_evidence_review.py",
+      "bytes": 11754,
+      "sha256": "507eee75748874b4777ef47190060e0c5f07ee358ec091b7f106076e692a9168"
+    },
+    {
+      "path": "campaign-harness/campaign-harness-hashes.json",
+      "bytes": 1501,
+      "sha256": "9aa739d842095e9316e2a79ec79674957bdadecfb83ac7142e1da9aecdd31b2c"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/audit-aac-window.py",
+      "bytes": 22376,
+      "sha256": "94a0f3161d4868f8cfe09bd08e5bc5244c0940858bd562af9103e7fbda34c337"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/test_audit_aac_window.py",
+      "bytes": 10077,
+      "sha256": "64f950065c3360f8e6b0bc81d71c4e6f72fb9c1869e171dc7c84bb79c95e6c7d"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/README.md",
+      "bytes": 2573,
+      "sha256": "af0f049a0be1e32b2175045d1e0602a5ce4db2afcdf58140e381e5d444318c90"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/design-report.txt",
+      "bytes": 2984,
+      "sha256": "2b34f1856245d76db6655fe6041161b9e3fe457be86f22af1070e4ff4a8cab46"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/synthetic-tests.json",
+      "bytes": 2867,
+      "sha256": "fb7a20f73b0f07d13b884a9b1e7435380af4537ad0745960a8de8e34872b0cad"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/synthetic-tests.log",
+      "bytes": 2381,
+      "sha256": "456f7b4979f3154d11c7e547a807b07f1df03701b89c696378634b9257db2eca"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/parent-review.json",
+      "bytes": 446,
+      "sha256": "1f0b445f2406ad2356074e8c38979ff8b9c718e523b8460b7919323430616251"
+    },
+    {
+      "path": "campaign-harness/supplemental-aac273/parent-synthetic-verification.json",
+      "bytes": 377,
+      "sha256": "39377b6d1dbf97caa72a8584635ed904a3641c16f94a3e236112e02d4b9ca89f"
+    },
+    {
+      "path": "development-binaries/r8/pix-ts",
+      "bytes": 184184,
+      "sha256": "046b3f37eff44abdef0cd11692209137c16132ceec9ebffe3d76c10e68662778"
+    },
+    {
+      "path": "development-binaries/r7/pix-ts",
+      "bytes": 325816,
+      "sha256": "12a7b6f418c5893cc8512183000ec1acf6abf42377f6744adec9245e1c19d403"
+    },
+    {
+      "path": "r7-historical-evidence/incident-live-pid-addition.json",
+      "bytes": 2238,
+      "sha256": "0958f36aa06738ccbb6cb4ea88230b511605d286b3c4bac6cedb1796bdaa8c2a"
+    },
+    {
+      "path": "r7-historical-evidence/route-change-window-review.json",
+      "bytes": 16630,
+      "sha256": "9c3d5ef460e12cf2f55788eda3a8f8118886ce774bde09c69cb4f9aabb68aab6"
+    },
+    {
+      "path": "r7-historical-evidence/live-pid-addition-design-review.txt",
+      "bytes": 5847,
+      "sha256": "eeaa350d562349a634f11d16dc25591ef4cc1be0053c1d7a1c9a953d14c92da4"
+    },
+    {
+      "path": "r7-historical-evidence/short-results-summary.json",
+      "bytes": 7820,
+      "sha256": "4ba916177c205de2a9773f78c5b502ace775ce1a6ca4a0c6a61ba5f01d885ffc"
+    },
+    {
+      "path": "r7-historical-evidence/short-results-report.txt",
+      "bytes": 2375,
+      "sha256": "95c20b14e276b33a01a6e69c0784ffd0c6d7f21646a4a60bcda3cb1dc1df678a"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/result.json",
+      "bytes": 2002,
+      "sha256": "1756778b9c1c60518b9542137d581f8ccb010a077e8a2f09af7715d897ec6626"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/findings.json",
+      "bytes": 2869,
+      "sha256": "c1e16f8d0f230673920d12c920336f5f898ce4ddcc4e58f8d4d8cf5338935b67"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/integrity.json",
+      "bytes": 590,
+      "sha256": "4f7be3081e82cd07e6a2831795008ccf66e1dd04136c769d453ee144a580d0cc"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/section-audit.json",
+      "bytes": 60064,
+      "sha256": "3b4c1b31a33c7124bc56422010aac6b0bb4dca900ddeccc3355057bfe1a9f1df"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/review-report.txt",
+      "bytes": 3278,
+      "sha256": "f013ce3cac1548cea2ec1a951d36670be858a9424d6f75ab3b8bf0fb37eaaa32"
+    },
+    {
+      "path": "r7-historical-evidence/stages/recording-5h/queue-and-accounting-review.json",
+      "bytes": 17101,
+      "sha256": "aa63c5ce83c0cf835a8ccc3ed359619b8157fa8e14fece0549831fec69ede942"
+    },
+    {
+      "path": "r7-historical-evidence/source-before-r8/src/dt295_capture.c",
+      "bytes": 24031,
+      "sha256": "41ed4335b7c921f57c1c8d6dc59d6bff3071ffe968a7202420b41f47fae7b985"
+    },
+    {
+      "path": "r7-historical-evidence/source-before-r8/tests/test_dt295_capture.c",
+      "bytes": 15190,
+      "sha256": "a0663407ed3f7f16c7d00da2dd5119e975f7f0f90372d0a4adef19fa0f9c53d5"
+    },
+    {
+      "path": "r7-historical-evidence/source-before-r8/tests/test_dt295_routes.c",
+      "bytes": 18563,
+      "sha256": "ea42c49bb2c64dfe0135569bbcfbe29b0d26c2f8595f6f726eeae6a791d2943a"
+    }
+  ],
+  "recording_raw_assets_keys_profiles_included": false,
+  "r7_original_failure_preserved": true,
+  "portability_note": "Harness retains original absolute-path metadata; this is evidence preservation, not a portable release package. Development binary inputs load device assets separately; no device assets are included."
+}

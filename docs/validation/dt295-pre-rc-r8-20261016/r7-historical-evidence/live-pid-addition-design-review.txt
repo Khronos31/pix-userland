@@ -1,0 +1,33 @@
+DT295 live PID addition incident — read-only design review
+Date: 2026-10-16
+Scope: frozen dev-r7 source review only. No product source or binary edits, receiver/controller execution, or hardware access.
+
+Incident and release impact
+---------------------------
+The fixed dev-r7 five-hour recording exited 8 at 15,923.500 seconds (~4 h 25 min) with detail: “broadcast requires an unsupported live PID/ECM route change”. USB error/timeout and runtime TS CC/CRC counters were zero; save rejected/uncertain/pending counters were zero. The device returned to state 16, no residue remained, and the POSIX lock was free. This is a full-recording stop caused by the route policy, not deferred Issue #2 partial additional-audio PES behavior.
+
+The supplied `route-change-window-review.json` identifies complete CRC-valid PMT version updates in the final 100,000-packet window: PMT PID 1008/program 1025 adds AAC PID 273 (version 13→14 at saved packet 161,427,378), and PMT PID 496/program 1024 also adds PID 273 (version 9→10 at packet 161,427,383). Neither reports removed streams or changed CA PID sets. Both continue to advertise actual ECM PID 2305. PID 8191 appears as a sentinel and is not an additional active ECM. The full recording stopped immediately after this new PID requirement was observed; the saved PID 273 packet count was zero.
+
+Code path
+---------
+`src/dt295_capture.c:86-106` implements `missing_route()`. It returns true for every desired route that cannot be matched to an existing PID/role/resolved-ECM-PID. It does not distinguish a new route in an empty slot from an active route whose ECM binding or slot would be changed. Recording checks this at `src/dt295_capture.c:449-455` and exits 8 before applying a route plan.
+
+The planner already supports the needed representation. `src/dt295_routes.c:311-336` assigns a program-level ECM to an elementary stream without an explicit ES-level CA descriptor. `src/dt295_routes.c:948-975` adds new advertised PIDs to a free general slot and resolves their ECM binding from the PMTs; it deduplicates shared PIDs, requiring a consistent binding across programs. Existing ECM slots and route mappings are retained at `:882-917`; active-route binding changes are rejected at `:977-993`.
+
+There is also an additions-only validator. `dt295_routes_plan_ops()` at `src/dt295_routes.c:1066-1098` verifies old active slots are unchanged and emits only additions, with ECM additions before users. `dt295_routes_guard()` at `:1101-1166` rejects duplicate PID registration, active slot replacement, live rebind, and a dependent route referencing an unregistered ECM. The capture `apply_plan()` helper at `src/dt295_capture.c:108-152` validates the complete operation list before hardware writes and commits the software candidate only after all route writes succeed.
+
+Minimal safe policy proposal
+----------------------------
+For recording-time changes, treat a desired route as unchanged when its PID, route role, and resolved ECM PID match a live route. Otherwise allow only a new non-ECM PID assigned to a currently empty slot, and only if it has no ECM binding or references the same already-registered ECM PID at the same live slot. Reject any new ECM registration, duplicate PID/role, existing PID whose role or ECM binding changes, occupied-slot replacement, capacity failure, or primary-program/stream-metadata change. After this classification, use the existing additions-only planner/guard and `apply_plan()` path; do not mutate/commit the live plan if any USB route write fails. Keep the existing CLI and exit classes; unsupported changes continue to stop with exit 8.
+
+This allows the observed AAC PID 273 addition under existing ECM 2305 with a single free-slot route write (PID 273 is advertised in both PMTs but resolves to one shared PID and one binding). It avoids a separate ECM registration and does not require changing any active route. Before treating such a policy as hardware-safe, verify on device that the existing `dt295_route_write()` live write works while reception is active; current synthetic tests do not prove that hardware behavior. Until that check, this is a software design recommendation, not a verified feature claim.
+
+Suggested synthetic regressions
+-------------------------------
+1. Route planner/guard: start from a valid live plan with ECM PID 2305 and no PID 273, feed complete PMTs that add AAC PID 273 under program-level ECM 2305, and assert the desired plan assigns one empty slot, resolves to the existing ECM slot, emits exactly one non-ECM add operation, preserves all previous slots and the ECM inverse map, and yields a valid guarded candidate. Assert the candidate remains uncommitted until the caller explicitly commits it.
+2. Rejection controls: changing an existing PID from clear to ECM-bound or changing it to another ECM must fail; adding a new ECM PID during recording must fail under the proposed policy; duplicate PID, occupied-slot replacement, and capacity exhaustion must fail without returning a partial candidate or issuing hardware writes.
+3. Capture orchestration: a synthetic packet stream transitions a complete PMT to version +1 with only AAC PID 273 added under the existing ECM. Assert one route write occurs, the capture loop remains active, subsequent PID 273 packets are emitted, and shutdown remains clean. Pair this with rebind/new-ECM inputs and assert exit 8 with zero route writes.
+
+Evidence and limits
+-------------------
+This assessment is from source inspection plus the supplied metadata-window report. It does not establish that all five-hour route changes are safe, that the full output passed all-PID quality checks, or that live route writes have been exercised on hardware. The full audit PID 51742 was still running when this report was requested; this review neither duplicated nor waited on it.

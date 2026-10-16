@@ -1,0 +1,19 @@
+{
+  "purpose": "r8 development hardware campaign harness freeze; no RC/package/publish",
+  "files": {
+    "/Users/yunomin61/Documents/Codex/2026-10-03/new-chat/work/pix-dt295-static/inspect_si.py": "126458ddc4f92e65a7483b3903565817c041c409d04edae8e718eda9e04f4654",
+    "audit-input-hashes.json": "112a13e7341c4d584113cf0700ab12492c01641f77f13a07f670993ec4bc7952",
+    "audit.py": "c1833e02f85c6813e3664799795e2b3e81a81239279fe57c761e01be9884b2c2",
+    "audit_av_adts_v2.py": "58dcc2b7b67193089ab9112f73255257d69adf58f258fb2b1bff2cde2e962db1",
+    "campaign-config.json": "fa8915e025d6374e339f22f35da8c12351a028c34315097f0facecd5461ce6d0",
+    "campaign-controller.py": "83bbafb89a9d7c6b0f6923f491aa5b5822632c1e9d96eb69612d0d386e71caeb",
+    "campaign-harness-test.py": "3473faa86ccddf077dda44e88e7b1e7088187906245f964ddcde15278c05a8c7",
+    "inspect_ts": "eb658c978ad1310ad1883ac4cda0ea97908891ae3bc5565a6af5e5b5883e5642",
+    "live-add-evidence-review.py": "3ed83601f6c87c010f6c68c5ebed5318d25e734e0eff72642dd87fb790dcc339",
+    "procedure.txt": "8355ea2ff185683951c47ce9936fd2440180b9b241f9484358c2e18f2aacb41a",
+    "read_state.py": "df0bc9e797f50a2c6bb12af7276cce039d85d669eb7b68969853f44ab342e0c7",
+    "source-hashes.json": "ca3e3b172796aaf57b9cdabd3b73914564f75b0428f50db095c7ae8448032c6a",
+    "start_once.py": "ebbd03423c92257bbc3528a3eaf9080761d7d22e83d333d441a2f5badf86644f",
+    "test_live_add_evidence_review.py": "507eee75748874b4777ef47190060e0c5f07ee358ec091b7f106076e692a9168"
+  }
+}

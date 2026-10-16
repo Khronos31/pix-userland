@@ -1,0 +1,793 @@
+{
+  "initial": {
+    "start_packet_1based": 1,
+    "packets_scanned": 100000,
+    "PMT_transitions": [
+      {
+        "packet_1based": 60,
+        "pmt_pid": 1008,
+        "program": 1025,
+        "version": 22,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "ea45accae74871b28d6480e9ff70031c8080cc4d6a72c4a5b4c2ffff72c4bf61"
+      },
+      {
+        "packet_1based": 62,
+        "pmt_pid": 496,
+        "program": 1024,
+        "version": 18,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "b942fa46a5edacbe6ea9c855f1628a572c639832303161d345ff1476fbd62090"
+      },
+      {
+        "packet_1based": 2413,
+        "pmt_pid": 8136,
+        "program": 1408,
+        "version": 22,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 1535,
+        "ecm_pids": [],
+        "streams": [
+          {
+            "type": 27,
+            "pid": 1409,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 1411,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 1415,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 1408,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 1419,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "f2a2d06318cf4cbb9ef8afbecf8112d41828555f02683637553dd2b0249ddd9d"
+      },
+      {
+        "packet_1based": 7424,
+        "pmt_pid": 7408,
+        "program": 65520,
+        "version": 0,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 8191,
+        "ecm_pids": [],
+        "streams": [
+          {
+            "type": 13,
+            "pid": 7281,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7282,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7283,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7284,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7285,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7286,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7287,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7288,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7264,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7265,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7266,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7267,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "2948611dd81681dbaad49c30819ed3356a22edef8339439ed1269959f6e885c8"
+      }
+    ],
+    "errors": {}
+  },
+  "final": {
+    "start_packet_1based": 161327718,
+    "packets_scanned": 100000,
+    "PMT_transitions": [
+      {
+        "packet_1based": 161328320,
+        "pmt_pid": 8136,
+        "program": 1408,
+        "version": 13,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 1535,
+        "ecm_pids": [],
+        "streams": [
+          {
+            "type": 27,
+            "pid": 1409,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 1411,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 1415,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 1408,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 1419,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "584f0d8751a8f225e31143bad3b9fa209aa53421e87a21820573d8cf944f07b2"
+      },
+      {
+        "packet_1based": 161328333,
+        "pmt_pid": 496,
+        "program": 1024,
+        "version": 9,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "28a6b2b67ec39b5643b5795194b9ac4415c9785588f4d268aff9dc83a08743ca"
+      },
+      {
+        "packet_1based": 161328905,
+        "pmt_pid": 1008,
+        "program": 1025,
+        "version": 13,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "40a6b2d7b514e8972a5848806596827866cb4c2d5cc288adbf68f619df5b53ef"
+      },
+      {
+        "packet_1based": 161332542,
+        "pmt_pid": 7408,
+        "program": 65520,
+        "version": 0,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 8191,
+        "ecm_pids": [],
+        "streams": [
+          {
+            "type": 13,
+            "pid": 7281,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7282,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7283,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7284,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7285,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7286,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7287,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7288,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7264,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7265,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7266,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 7267,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "2948611dd81681dbaad49c30819ed3356a22edef8339439ed1269959f6e885c8"
+      },
+      {
+        "packet_1based": 161427378,
+        "pmt_pid": 1008,
+        "program": 1025,
+        "version": 14,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 273,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "31c87aeaa5d006c90567b86eb4680dcbf3f6a2510d82fc4e1b3f49a26e4a2b8d"
+      },
+      {
+        "packet_1based": 161427383,
+        "pmt_pid": 496,
+        "program": 1024,
+        "version": 10,
+        "section_number": 0,
+        "last_section_number": 0,
+        "pcr_pid": 511,
+        "ecm_pids": [
+          2305,
+          8191
+        ],
+        "streams": [
+          {
+            "type": 2,
+            "pid": 256,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 272,
+            "ecm_pids": []
+          },
+          {
+            "type": 15,
+            "pid": 273,
+            "ecm_pids": []
+          },
+          {
+            "type": 6,
+            "pid": 304,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 6,
+            "pid": 312,
+            "ecm_pids": [
+              8191
+            ]
+          },
+          {
+            "type": 13,
+            "pid": 320,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 352,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 353,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 354,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 368,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 369,
+            "ecm_pids": []
+          },
+          {
+            "type": 13,
+            "pid": 370,
+            "ecm_pids": []
+          }
+        ],
+        "section_sha256": "d9d3ac1a3e2e05a565389e942856bd345eb37828840ff49f1021b7e0075659f2"
+      }
+    ],
+    "errors": {}
+  },
+  "observed_unix": 1792106073.929213,
+  "total_saved_packets": 161427717,
+  "changes_vs_initial": [
+    {
+      "pmt_pid": 1008,
+      "packet_1based": 161427378,
+      "from_version": 22,
+      "to_version": 14,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "old_ecms": [
+        2305,
+        8191
+      ],
+      "new_ecms": [
+        2305,
+        8191
+      ]
+    },
+    {
+      "pmt_pid": 496,
+      "packet_1based": 161427383,
+      "from_version": 18,
+      "to_version": 10,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "old_ecms": [
+        2305,
+        8191
+      ],
+      "new_ecms": [
+        2305,
+        8191
+      ]
+    }
+  ],
+  "limits": [
+    "Only first and final100000-packet windows; not the whole-file section audit.",
+    "Early window section/table acquisition boundary may omit fragments; CRC-valid current PMTs only."
+  ],
+  "immediate_final_window_changes": [
+    {
+      "pmt_pid": 1008,
+      "packet_1based": 161427378,
+      "from_version": 13,
+      "to_version": 14,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "valid_ECMs_before": [
+        2305
+      ],
+      "valid_ECMs_after": [
+        2305
+      ]
+    },
+    {
+      "pmt_pid": 496,
+      "packet_1based": 161427383,
+      "from_version": 9,
+      "to_version": 10,
+      "added_streams": [
+        {
+          "type": 15,
+          "pid": 273,
+          "ecm_pids": []
+        }
+      ],
+      "removed_streams": [],
+      "valid_ECMs_before": [
+        2305
+      ],
+      "valid_ECMs_after": [
+        2305
+      ]
+    }
+  ],
+  "CA_descriptor_8191_note": "NULL sentinel, not an additional valid ECM PID."
+}

@@ -1,0 +1,322 @@
+{
+  "development_only": true,
+  "RC_build": false,
+  "binary_sha256": "12a7b6f418c5893cc8512183000ec1acf6abf42377f6744adec9245e1c19d403",
+  "stages": [
+    {
+      "stage": "external-5m",
+      "passed": true,
+      "duration_seconds": 300.025,
+      "bytes": 600047496,
+      "file_sha256": "2e24da70b28e2bb4c7666b2af801a908f142b0245412ee81de0edcc7589e27f5",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 115.15,
+      "queue_peak_bytes": 3932208,
+      "writer_max_ms": 1845.803,
+      "parent_poll_max_ms": 169.353,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 3191742,
+        "elapsed_ms": 300025,
+        "trailing_bytes": 120,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "internal-5m",
+      "passed": true,
+      "duration_seconds": 300.046,
+      "bytes": 583466836,
+      "file_sha256": "a239cb169aef29e45c9c635ad1fb1fba4b5dc2fb19b27a2c070e362790c17892",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 174.099,
+      "queue_peak_bytes": 262072,
+      "writer_max_ms": 20.967,
+      "parent_poll_max_ms": 174.615,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 3103547,
+        "elapsed_ms": 300046,
+        "trailing_bytes": 172,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "other-T25-60s",
+      "passed": true,
+      "duration_seconds": 60.024,
+      "bytes": 128319400,
+      "file_sha256": "c4ba3c2400595cd22945f71c2ab8a5eb20f16ac84b3effe1c60901a37115e9df",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 273,
+          "audio": 274,
+          "valid": true,
+          "result": "av-273-274/result.json"
+        },
+        {
+          "video": 337,
+          "audio": 338,
+          "valid": true,
+          "result": "av-337-338/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 68.254,
+      "queue_peak_bytes": 196648,
+      "writer_max_ms": 56.667,
+      "parent_poll_max_ms": 170.333,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 682550,
+        "elapsed_ms": 60024,
+        "trailing_bytes": 88,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "restart-05s",
+      "passed": true,
+      "duration_seconds": 5.026,
+      "bytes": 7077824,
+      "file_sha256": "b65c546421710be3dea17c1a9de75012fb779d3d9b551445e5a3619d8422e311",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 114.669,
+      "queue_peak_bytes": 131224,
+      "writer_max_ms": 0.919,
+      "parent_poll_max_ms": 167.376,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 37648,
+        "elapsed_ms": 5026,
+        "trailing_bytes": 64,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "sigint-10s",
+      "passed": true,
+      "duration_seconds": 16.916,
+      "bytes": 30474236,
+      "file_sha256": "0cda85eef45ff9bcbf3d322093030826bedbde064b87216348e2ad97029251ba",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 113.664,
+      "queue_peak_bytes": 131224,
+      "writer_max_ms": 1.175,
+      "parent_poll_max_ms": 166.858,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 162097,
+        "elapsed_ms": 16916,
+        "trailing_bytes": 4,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "sigterm-10s",
+      "passed": true,
+      "duration_seconds": 16.897,
+      "bytes": 32178080,
+      "file_sha256": "559e27f033ffea09f440cec3e523cbba90d4ae55f388eac1d033c03788a4a1fc",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 115.19,
+      "queue_peak_bytes": 131224,
+      "writer_max_ms": 1.275,
+      "parent_poll_max_ms": 165.709,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 171160,
+        "elapsed_ms": 16897,
+        "trailing_bytes": 96,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    },
+    {
+      "stage": "smoke-15s",
+      "passed": true,
+      "duration_seconds": 15.005,
+      "bytes": 27590504,
+      "file_sha256": "8b58ac837d954435f1aa13fdbcd7439973ecc0ec2411cc8274b47187f69b2ce5",
+      "CC": 0,
+      "section_CRC": 0,
+      "main_AV": [
+        {
+          "video": 256,
+          "audio": 272,
+          "valid": true,
+          "result": "av-256-272/result.json"
+        },
+        {
+          "video": 1409,
+          "audio": 1411,
+          "valid": true,
+          "result": "av-1409-1411/result.json"
+        }
+      ],
+      "USB_error": 0,
+      "USB_timeouts": 0,
+      "USB_max_gap_ms": 115.377,
+      "queue_peak_bytes": 262260,
+      "writer_max_ms": 58.226,
+      "parent_poll_max_ms": 170.97,
+      "pending": 0,
+      "rejected": 0,
+      "uncertain": 0,
+      "end": {
+        "event": "end",
+        "exit": 0,
+        "state": 16,
+        "packets": 146758,
+        "elapsed_ms": 15005,
+        "trailing_bytes": 152,
+        "stop_drained_bytes": 0,
+        "tei": 0,
+        "cc": 0,
+        "crc": 0,
+        "native_abandoned": 0
+      }
+    }
+  ]
+}

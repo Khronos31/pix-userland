@@ -1,0 +1,10 @@
+{
+  "reviewed_unix": 1792132901.805415,
+  "code_read": true,
+  "independent_synthetic_tests_passed": 14,
+  "range_limit_packets": 65536,
+  "plaintext_ES_written": false,
+  "scope": "Bounded windows only; not whole secondary audio decode",
+  "separate_Luna_metadata_review": true,
+  "review_conclusion": "No inconsistency found. Retain actual Issue2 boundary partialPES; do not conflate with r7 exit8. No new transport/mainAV blocker observed."
+}
