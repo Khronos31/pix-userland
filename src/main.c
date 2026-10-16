@@ -1,3 +1,4 @@
+#include "dt295_capture.h"
 #include "pid_filter.h"
 #include "channel.h"
 #include "control.h"
@@ -180,6 +181,7 @@ static void usage(FILE *f) {
         f,
         "pix-ts " VERSION " — PIX-DT181-PU0 libusb TS receiver\n"
         "Usage: pix-ts --system terrestrial|bs|cs --channel N [options]\n"
+        "      --model MODEL   dt181 (default) or dt295 (macOS terrestrial target 0)\n"
         "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..62, BS odd 1..23, CS even "
         "2..24)\n"
         "  -s, --system TYPE     terrestrial (default), bs, cs\n"
@@ -317,12 +319,14 @@ int main(int argc, char **argv) {
     const char *channel_text = NULL, *firmware = NULL;
     uint32_t frequency = 0;
     int slot = -1, control = 0, verbose = 0, system_given = 0;
+    int model = USB_MODEL_DT181;
     uint8_t pid_mask[8192] = {0}; int filter_pids = 0;
     int fd = -1, tsid = -1, lna = -1, detach = 0, list = 0, rc = 2;
     const char *assets = "assets", *output = "-", *inspect = NULL, *raw = NULL, *context = NULL;
     const char *diag_dir = NULL, *replay = NULL;
     unsigned replay_chunk = 0;
     static const struct option opts[] = {{"channel", 1, 0, 'c'},
+                                         {"model", 1, 0, 272},
                                          {"freq", 1, 0, 'f'},
                                          {"firmware", 1, 0, 'F'},
                                          {"pid", 1, 0, 'p'},
@@ -354,6 +358,11 @@ int main(int argc, char **argv) {
     unsigned long v;
     while ((c = getopt_long(argc, argv, "c:s:t:o:a:d:f:F:p:vlh", opts, NULL)) != -1) {
         switch (c) {
+        case 272:
+            if (!strcmp(optarg,"dt181")) model=USB_MODEL_DT181;
+            else if (!strcmp(optarg,"dt295")) model=USB_MODEL_DT295;
+            else goto bad;
+            break;
         case 'c':
             channel_text = optarg;
             break;
@@ -477,7 +486,7 @@ int main(int argc, char **argv) {
     if (list) {
         if (channel_text || frequency || control || detach || inspect || raw || context || diag_dir || replay)
             goto bad;
-        return usb_list(list == 2);
+        return usb_list_model(list == 2, model);
     }
     if ((inspect && raw) || (raw && !context) || (context && !raw) ||
         ((inspect || raw) && (channel_text || frequency || control || fd >= 0)))
@@ -504,6 +513,13 @@ int main(int argc, char **argv) {
     }
     if (system == PIXY_TERRESTRIAL && (tsid >= 0 || slot >= 0)) goto bad;
     if (slot >= 0 && tsid >= 0) goto bad;
+    if (model == USB_MODEL_DT295) {
+        if (inspect || raw || replay || control || frequency || system != PIXY_TERRESTRIAL ||
+            tsid >= 0 || slot >= 0 || firmware || lna >= 0 || !channel) {
+            fprintf(stderr,"DT295 supports terrestrial channel capture only; unsupported options rejected before USB access\n");
+            goto bad;
+        }
+    }
     pix_control input = {0};
     if (!inspect && !raw && !replay && !hz && !control) goto bad;
 #ifdef _WIN32
@@ -528,6 +544,13 @@ int main(int argc, char **argv) {
         } else sleep_ms(20);
     }
     if (interrupted) return 0;
+    if (model == USB_MODEL_DT295) {
+        if (!strcmp(output,"-") && os_output_is_terminal(STDOUT_FILENO)) {
+            fprintf(stderr,"Refusing binary TS output to a terminal; use -o FILE or a pipe\n");return 2;
+        }
+        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted};
+        return dt295_capture_run(&cfg);
+    }
     stream *s = calloc(1, sizeof(*s));
     if (!s)
         return 70;

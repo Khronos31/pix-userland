@@ -1,0 +1,42 @@
+PIX-DT295 修正版r8・RCビルド直前検証報告（2026-10-16 JST）
+
+判定: 承認された検証範囲では、RCビルド直前までの準備を完了できる。ユーザーが必須修正から除外した既知Issue #2の追加音声出現・消失時の部分PESは残る。これを解決済み、全音声の全期間デコード済み、無制限なlive route変更に対応したとはしない。RCビルド、版番号更新、配布物作成、タグ、push、公開は実行しない。
+
+固定開発版と互換性
+VERSION 0.1.4を維持。検証したdevelopment-r8/pix-ts SHA256:
+046b3f37eff44abdef0cd11692209137c16132ceec9ebffe3d76c10e68662778
+71入力のSHAを固定し、親レビュー済みLuna実装の3ファイルだけを元repoへ統合した。統合後71入力は実機検証版と完全一致。既存CLIオプション・既定値・DT181既定機種内index/list・明示DT295機種内index・help先頭、および終了分類0/2/3/4/5/7/8/9/10/70の互換性検査は合格。これは開発検証版でありRC成果物ではない。
+
+段階試験
+15.023秒、300.023秒、18000.003秒を各一度だけ実施。各段階の全保存TS、全section、主MPEG-2/H.264映像と主AAC完全PES/ADTS、FFmpeg終了・stderr、保存量と2回読出しSHAの監査が合格。各原findingsはpassed=true、上書きや失敗の除外なし。
+5時間: 194,054,187 packet / 36,482,187,156 byte。全保存TSのCC/TEI/残留scramble/構造エラー0、2,543,070 CRC対象sectionのCRC/構造エラー0。映像256/主音声272、映像1409/主音声1411の全量完全PES監査と各AAC構成epochデコードは正常。
+保存TS SHA256:
+432acaf01d66f9cb15043826d8bd3858127364a2a73411e75decd3d46d7fc677
+
+新規PID273と音声
+開始時の保存PMTには273がなく、録画中after_packets=107,887,245でPID273を空きslot48へ追加したproduction commit診断を1回確認。既存ECM slot63/PID2305は維持。PMT1024/1025と保存PID273の証拠が一致し、保守的な同一C elapsed/status包絡で追加後7,947.878秒の受信継続を確認。補助判定器の整数秒下限は7,947秒で、要求した30分以上を満たす。PID273全84,482 packetも全TS CC/TEI/scramble/構造検査の対象で、PID273を無条件除外していない。
+主AAC全量監査とは別に、明示seek窓（各最大65,536 packet）で出現直後・放送中・消失直前の完全AAC PES/ADTSを検査し、FFmpeg終了0/stderr0、途中PES長・framingエラー0を確認。出現付近は125、264、279、275、276 frame、消失付近は173 frameを正常デコード。これは追加音声の有限窓サンプル検査であり、PID273全期間の完全音声デコードではない。
+出現時には最初のPUSIより前の部分PES 3 packetがある。PMT1008 v2→3（packet114,623,264）、PMT496 v30→31（114,623,837）で273が消失し、ECM2305不変。最後の273は114,627,412。窓末端より前に追加音声が止まり、完全PES 173個の後に最後の部分PES 1個を残す。これは単なる任意窓切断に隠さず、自然消失に対応する既知Issue #2の境界観測として保持する。後刻の30分後/終端窓はPMT・273とも不在であり、音声デコード合格として数えない。サンプル外の再出現不在は証明していない。
+Issue #2: https://github.com/Khronos31/pix-userland/issues/2
+
+USBと保存キュー
+5時間USB error/timeout=0、最大完了間隔173.734ms、native abandoned=0。保存キュー最大9,502,648 byte（約9.06MiB、128MiBの7.08%）、録画中に小さいpendingへ回復。5分/30分窓のサンプルを保存し、継続的な未回復増加は観測されない。終了pending/rejected/uncertain=0。最大子write 4.551735秒、最大pending/ACK待ち4.572075秒、親poll最大166.146msを区別する。USB停止やTS欠落は観測されない。
+5分試験では一時73,007,168 byte（69.625MiB、容量54.4%）まで増加したが、録画中に131,036 byteへ回復し、終了pending/refused/uncertain0。最大子write7.252286秒とACK待ち35.794777秒は同じ指標ではない。保存媒体の根本原因が特定済み、または旧r6滞留の全原因が解決済みとはしない。旧r6補助8MiB gate失敗、r7の4時間25分exit8不合格は元証拠のまま保持する。
+最終USB配信36,482,187,264 byte = 保存36,482,187,156 byte + TS packet未満108 byte。端数108 byteはTS受付後の未保存ではない。stop drain=0、native abandoned=0。予約済みnative pending block8はdropではない。table watcherのbootstrap/rearm CC3と、保存全TS CC0を混同しない。
+
+ソフトウェア・終了確認
+新r8のnative macOS Werror全suite、capture/routesのASan・UBSan、Linux x64 musl全suite実行が合格。Linux ARM64、Windows x64、Android3ABIはクロスコンパイルと形式/依存監査が合格し、各環境での実行テストとは区別する。ARM最初exit143はpinned Zig0.15.1依存取得の中断でcompile前、その後公式SHA照合・ARM再開が合格。r7結果を流用していない。
+最終state16、通知pendingなし、receiver/writer/controller/audit/helper所有process残存なし、device/current/旧controller/legacy lock解放を独立確認。source71・harness14・binary SHA一致。認証更新600回。物理操作は不要。
+
+限界・未実施範囲
+実機はmacOS arm64 / PIX-DT295 target0 / 地上波T27。全チューナー・全放送局・全OSでの実機試験ではない。新ECM、既存slot置換/rebind、容量不足、実primary/codec置換は引き続き安全拒否。既存ECMへのnon-ECM PID空きslot追加のみを対象とする。
+route保持は固定guardとcommit診断/保存PMTによるもので、実機registerの独立readbackや起動slot完全実測ではない。保存TS C checkerはruntimeと同じ実装で、独立実装ではない。保存SHAは2回のファイル読出し一致でありruntime入力stream SHAではない。raw非保存なので全入力AESの独立比較ではない。境界PES/ADTS端数/PCE待ちは各監査に明記。キューの瞬時全履歴はなく約10秒statusと累積最大値による。Issue #2境界は既知・ユーザー除外のまま残す。
+
+証拠
+stages/recording-{15s,5min,5h}/findings.json と各parent-review.json
+stages/recording-5h/{integrity.json,section-audit.json,av-*/result.json,live-add-evidence-review.json,parent-queue-and-accounting-review.json,supplemental-aac273/}
+parent-cross-validation-review.json、source-integration.json、source-after-5h-full-verification.json
+最終ソースSHA・base6c1aee5からのレビュー用差分・文書差分はfinal-source-hashes.json / source-review.patchに保存する。
+
+文書・差分最終化
+README.md / docs/dt295.md を更新・親レビュー済み。base 6c1aee506435759ca42004750ecbc07169e7b5c4 からの変更39ファイルのレビュー用差分を保存し、生成した一時baseコピーへ適用して全変更ファイルのSHA一致を確認した。最終入力73ファイルのSHAを保存。source-review.patch SHA256: 79f0f72246e28d92a3b60d69dc973b05bd3b90db38aafc781a99c334e9ddeb43

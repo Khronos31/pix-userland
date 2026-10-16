@@ -1,0 +1,15 @@
+修正版r8 短期実機検証・長期開始報告
+
+他環境向け検証は全対象合格。macOSとLinux x64は合成テストを実行し、Linux ARM64・Windows x64・Android 3 ABIは開発ビルドと形式・依存監査を行った。後者の実機実行テストは行っていない。ARM64の初回中断はコンパイラ取得段階であり、USB障害や製品コンパイル失敗ではない。固定版Zig 0.15.1の公式archive SHA一致後にARM64だけ再開して合格した。
+
+15秒: 実受信15.023秒、162097packet。終了0・状態16、全所有プロセス終了とdevice lock解放。全TS/section/主映像音声の監査合格。USBエラー/timeout0、最大完了間隔57.697ms、TSキュー最大983052B、拒否・結果不明・終端pending0。
+
+5分: 実受信300.023秒、614399980B。全TSのCC/TEI/残留scramble/構造・全section CRC/構造、主MPEG2/H264映像とAAC完全PES/ADTS/FFmpeg終了およびstderrの監査合格。終了0・状態16、全所有プロセス終了とdevice lock解放、保存ファイル2回読出しSHA一致。USBエラー/timeout0、最大完了間隔114.403ms。
+保存待ちは一時的に増え、最大73007168B（69.625MiB、128MiB容量の約54.4%）となったが、録画中に131036Bまで回復し、終了時pending・拒否・結果不明は0。writer単write最大7.252286秒、受付からACKまでの最大待ち35.794777秒、親poll最大165.831ms。子writer待ちと親側service遅延は別の量である。保存先I/Oの根本原因や旧r6間欠滞留の解決を断定しない。長期で累積peakと5分/30分窓の回復・増加を再評価する。
+
+元repo、固定binary、全71source、14harness入力のSHA不変を確認。実機のlive-addは短期では未観測であり、通常短期動作だけの合格である。保存初期PMTでAAC273は未観測だが、独立したstartup hardware readbackを行ったとはしない。
+
+同じ固定r8で5時間受信へ既存controllerが進行。controller PID57622、5h receiver PID57787、開始unix1792111343.598738、指定18000秒、上限18180秒。重複起動や条件変更、自動再試行は行わない。終了後は全保存TS監査、実際の録画中commitイベント・自然PMT・追加後30分以上の証拠を別に評価する。
+
+限界: raw未保存で全入力独立AES照合はない。SHAは保存ファイル2読出しでruntime input stream SHAではない。C全TS checkerはruntimeと実装を共有する。録画対象外native/late/drain/端数は受付TS未保存と分け、reserved pending blocksを欠落と呼ばない。既知Issue#2の追加音声境界は別評価するがPID273全CCの無条件除外はしない。
+RC準備完了の判定はまだ行っておらず、RCビルド・版番号更新・配布・タグ・push・公開は行っていない。物理操作は現在不要。

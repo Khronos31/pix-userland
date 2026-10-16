@@ -1,0 +1,73 @@
+{
+  "streams": [
+    {
+      "pid": 256,
+      "complete_pes": 8988,
+      "es_bytes": 506595063,
+      "started": true,
+      "broken_pipe": false,
+      "leading_bytes_omitted": 156388,
+      "decode_exit": 0,
+      "error_log_bytes": 0
+    },
+    {
+      "pid": 272,
+      "complete_pes": 14055,
+      "es_bytes": 9585510,
+      "adts": {
+        "epochs": [
+          {
+            "epoch": 0,
+            "signature": [
+              1,
+              1,
+              3,
+              2
+            ],
+            "mpeg_id": 1,
+            "profile": 1,
+            "sample_rate_index": 3,
+            "sample_rate_hz": 48000,
+            "channel_configuration": 2,
+            "first_frame_index": 0,
+            "first_es_byte_offset": 0,
+            "last_frame_index": 14054,
+            "last_es_byte_offset": 9584828,
+            "complete_frames": 14055,
+            "frames_before_pce": 0,
+            "bytes_before_pce": 0,
+            "stream_samples": 14392320,
+            "raw_data_block_counts": {
+              "1": 14055
+            },
+            "pce_frame_index": null,
+            "pce_es_byte_offset": null,
+            "decoder_started": true,
+            "broken_pipe": false,
+            "frames_emitted": 14055,
+            "pce_wait_pending": false,
+            "decode_exit": 0,
+            "error_log_bytes": 0,
+            "broadcast_audio_seconds": 299.84
+          }
+        ],
+        "transitions": [],
+        "frames_seen": 14055,
+        "frames_emitted": 14055,
+        "frames_before_pce": 0,
+        "bytes_before_pce": 0,
+        "initial_sync_bytes_omitted": 0,
+        "trailing_partial_bytes": 0,
+        "decode_failures": [],
+        "framing_error": null
+      }
+    }
+  ],
+  "pes_length_violations": [],
+  "invalid_pes_headers": [],
+  "packets_examined": 3268085,
+  "requested_packets": 3268085,
+  "final_open_pes_omitted": true,
+  "interior_corruption_preserved": true,
+  "valid": true
+}

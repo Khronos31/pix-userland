@@ -12,7 +12,7 @@ struct usb_backend {
     struct libusb_transfer *transfers[TRANSFERS];
     uint8_t buffers[TRANSFERS][32768];
     int pending, stopping, error, failure_exit, claimed, detached;
-    int diagnostic;
+    int diagnostic, model;
     usb_log *log;
     uint64_t completions, short_reads, last_ms, max_gap, next_log;
     unsigned abnormal_logs;
@@ -61,18 +61,23 @@ static int model_state(libusb_device *d) {
     int r = libusb_get_device_descriptor(d, &desc);
     if (r < 0)
         return r;
-    return desc.idVendor == 0x06b8 && desc.idProduct == 0x102b;
+    if (desc.idVendor != 0x06b8) return 0;
+    return desc.idProduct == 0x102b ? USB_MODEL_DT181 :
+           desc.idProduct == 0x103b ? USB_MODEL_DT295 : 0;
 }
-static void device_info(libusb_device *device, unsigned index, usb_device_info *out) {
+static void device_info(libusb_device *device, unsigned index, int model, usb_device_info *out) {
     memset(out, 0, sizeof(*out));
     out->index = index;
+    out->product = model == USB_MODEL_DT295 ? 0x103b : 0x102b;
     out->bus = libusb_get_bus_number(device);
     out->address = libusb_get_device_address(device);
     int count = libusb_get_port_numbers(device, out->ports, sizeof(out->ports));
     if (count > 0)
         out->port_count = (unsigned)count;
 }
-int usb_list(int json) {
+int usb_list_model(int json, int expected_model) {
+    if (expected_model != USB_MODEL_DT181 && expected_model != USB_MODEL_DT295)
+        return 70;
     libusb_context *ctx = NULL;
     int initialized = init(&ctx, -1);
     if (initialized) return open_failure(initialized);
@@ -98,8 +103,8 @@ int usb_list(int json) {
             free(found); libusb_free_device_list(list, 1); libusb_exit(ctx);
             return open_failure(model);
         }
-        if (model) {
-            device_info(list[i], count, &found[count]);
+        if (model == expected_model) {
+            device_info(list[i], count, expected_model, &found[count]);
             count++;
         }
     }
@@ -111,11 +116,12 @@ int usb_list(int json) {
         fprintf(stderr, "Cannot write USB device list\n");
     return result ? 70 : 0;
 }
-int usb_open(usb_backend **result, const usb_selector *selector, int fd, int detach) {
+int usb_list(int json) { return usb_list_model(json, USB_MODEL_DT181); }
+int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, int detach, int expected_model) {
     if (!result)
         return 70;
     *result = NULL;
-    if (fd < 0 && !selector)
+    if ((expected_model != USB_MODEL_DT181 && expected_model != USB_MODEL_DT295) || (fd < 0 && !selector))
         return 70;
     usb_backend *b = calloc(1, sizeof(*b));
     if (!b)
@@ -134,11 +140,14 @@ int usb_open(usb_backend **result, const usb_selector *selector, int fd, int det
             open_usb_error(b, r, "read USB descriptor");
             goto error;
         }
-        if (!r) {
-            fprintf(stderr, "USB fd is not a PIX-DT181-PU0\n");
+        if (r != expected_model) {
+            fprintf(stderr, expected_model == USB_MODEL_DT181
+                                ? "USB fd is not a PIX-DT181-PU0\n"
+                                : "USB fd is not a PIX-DT295\n");
             backend_fail(b, 3);
             goto error;
         }
+        b->model = r;
     } else {
         libusb_device **list;
         ssize_t n = libusb_get_device_list(b->ctx, &list);
@@ -155,11 +164,12 @@ int usb_open(usb_backend **result, const usb_selector *selector, int fd, int det
                     scan_error = open_failure(model);
                 continue;
             }
-            if (model) {
+            if (model == expected_model) {
                 usb_device_info info;
-                device_info(list[i], index++, &info);
+                device_info(list[i], index++, expected_model, &info);
                 if (usb_selector_matches(selector, info.index, info.bus, info.address,
                                          info.ports, info.port_count)) {
+                    b->model = model;
                     open_usb_error(b, libusb_open(list[i], &b->handle), "open tuner");
                     break;
                 }
@@ -167,7 +177,9 @@ int usb_open(usb_backend **result, const usb_selector *selector, int fd, int det
         }
         libusb_free_device_list(list, 1);
         if (!b->handle) {
-            fprintf(stderr, "Selected PIX-DT181-PU0 not accessible\n");
+            fprintf(stderr, expected_model == USB_MODEL_DT181
+                                ? "Selected PIX-DT181-PU0 not accessible\n"
+                                : "Selected PIX-DT295 not accessible\n");
             backend_fail(b, scan_error ? scan_error : 3);
             goto error;
         }
@@ -203,6 +215,12 @@ error:;
     usb_close(b);
     return code ? code : 70;
 }
+int usb_open(usb_backend **out, const usb_selector *selector, int fd, int detach) {
+    return usb_open_model(out, selector, fd, detach, USB_MODEL_DT181);
+}
+int usb_model(const usb_backend *b) { return b ? b->model : 0; }
+void *usb_native_context(usb_backend *b) { return b ? b->ctx : NULL; }
+void *usb_native_handle(usb_backend *b) { return b ? b->handle : NULL; }
 static int bulk(void *v, uint8_t ep, uint8_t *p, size_t *n, unsigned timeout) {
     usb_backend *b = v;
     int actual = 0;

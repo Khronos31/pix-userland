@@ -1,0 +1,63 @@
+{
+  "observed_unix": 1792111046.124009,
+  "passed": true,
+  "stage": "recording-15s",
+  "duration_seconds": 15.023,
+  "packets": 162097,
+  "bytes": 30474236,
+  "file_sha256": "b46c859b3d384a95a5505ada8cf19789e560662bc58ab3cf368b0d7c360d6a51",
+  "integrity": {
+    "packets": 162097,
+    "tei": 0,
+    "scrambled": 0,
+    "cc_errors": 0,
+    "invalid": 0,
+    "pat_pmt_crc_errors": 0,
+    "pat": 150,
+    "pmt": 345
+  },
+  "section_count": 2087,
+  "section_crc_failures": 0,
+  "section_errors": {},
+  "main_AV": [
+    {
+      "video": 256,
+      "audio": 272,
+      "valid": true
+    },
+    {
+      "video": 1409,
+      "audio": 1411,
+      "valid": true
+    }
+  ],
+  "USB": {
+    "usb_error": 0,
+    "usb_timeouts": 0,
+    "usb_max_gap_ns": 57697000
+  },
+  "queue": {
+    "queue_peak_bytes": 983052,
+    "pending_bytes": 0,
+    "rejected_bytes": 0,
+    "uncertain_bytes": 0,
+    "writer_write_ns_max": 409956000,
+    "max_parent_poll_gap_ns": 166086000
+  },
+  "end": {
+    "event": "end",
+    "exit": 0,
+    "state": 16,
+    "packets": 162097,
+    "elapsed_ms": 15023,
+    "trailing_bytes": 4,
+    "stop_drained_bytes": 0,
+    "tei": 0,
+    "cc": 0,
+    "crc": 0,
+    "native_abandoned": 0
+  },
+  "safe_cleanup": true,
+  "live_add_fix_path": "unobserved; ordinary short-stage health only",
+  "RC_ready": false
+}

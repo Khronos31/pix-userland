@@ -1,0 +1,251 @@
+{
+  "created_unix": 1792153022.9976692,
+  "purpose": "Private remote preservation of reviewed source and numeric validation summaries; no RC build or release",
+  "source_campaign": "/Users/yunomin61/Documents/Codex/2026-10-03/new-chat/outputs/pix-dt295-20261016/pre-rc-r8-01",
+  "files": [
+    {
+      "path": "readiness-report-ja.txt",
+      "bytes": 7219,
+      "sha256": "fb6f05558131d5014cb3fc7886b87fccd8f8f51d7a6356655362d3dab75a146d"
+    },
+    {
+      "path": "final-source-hashes.json",
+      "bytes": 11355,
+      "sha256": "235e044d88827ac7e7a2ec3d240d0012b2ead24dabc11c9765c38cc148b39be8"
+    },
+    {
+      "path": "source-review.patch",
+      "bytes": 387645,
+      "sha256": "79f0f72246e28d92a3b60d69dc973b05bd3b90db38aafc781a99c334e9ddeb43"
+    },
+    {
+      "path": "readiness-checklist.json",
+      "bytes": 2313,
+      "sha256": "bdcee0324fcb9238ddb7613adfca94674e6813e4c98ea91a08acfe88f2b185c9"
+    },
+    {
+      "path": "parent-cross-validation-review.json",
+      "bytes": 1394,
+      "sha256": "953a1924c96215aae0df981b70c4961fd24d0da50c1c6232d375787a8c0873cf"
+    },
+    {
+      "path": "source-integration.json",
+      "bytes": 1093,
+      "sha256": "812697f49c5e8599debfcc21e64989fab1d5698ea74c7ac47a95dde06d1fe7ff"
+    },
+    {
+      "path": "documentation-integration.json",
+      "bytes": 938,
+      "sha256": "dd0dcacb80ddc879e60cdff2eb89232f6f182f1af49b878f31ef44c89e8726cb"
+    },
+    {
+      "path": "source-after-5h-full-verification.json",
+      "bytes": 255,
+      "sha256": "efa5666f426dc76cc5e3c843aa4cd14f4f67d193f3f4c93111d730f4a1f8aa02"
+    },
+    {
+      "path": "short-results-report.txt",
+      "bytes": 2903,
+      "sha256": "af74d2640d41806b8e0f356ba3ca39511082577628ff0f873a0a66992335d39f"
+    },
+    {
+      "path": "stages/recording-15s/result.json",
+      "bytes": 1917,
+      "sha256": "5ac50ea618d8408b5b280fa512752f648c8555a37157f521b023743f5a92c5e1"
+    },
+    {
+      "path": "stages/recording-15s/findings.json",
+      "bytes": 2758,
+      "sha256": "658702eb056ef29462e0d2a5c3cd8473dd83631f27b81a1e0412ece6da33de73"
+    },
+    {
+      "path": "stages/recording-15s/integrity.json",
+      "bytes": 453,
+      "sha256": "030e978190de3c0772ec06e49aa3f623a3a1f7cde1869e5fd51b3f3a3174b8dc"
+    },
+    {
+      "path": "stages/recording-15s/diagnostic-counter-check.json",
+      "bytes": 347,
+      "sha256": "04f9a15a71d04279ed20f95416ebf6d45a18945ff540a4ed9d85fb7d4fb3dd93"
+    },
+    {
+      "path": "stages/recording-15s/parent-review.json",
+      "bytes": 1312,
+      "sha256": "836ad995f256e5977c4a78c31ccd21add500566884b969f92af1522d6a7d439a"
+    },
+    {
+      "path": "stages/recording-15s/section-audit.json",
+      "bytes": 9381,
+      "sha256": "7b827d29f49df3ed1ecc81412e27ad9a6b761a68cc9489b0bd17c6eadcea5ea0"
+    },
+    {
+      "path": "stages/recording-15s/av-1409-1411/result.json",
+      "bytes": 1935,
+      "sha256": "fe42ddb445fde8199e56b24aca82c3db603962be930d26c2117a03ff9854c319"
+    },
+    {
+      "path": "stages/recording-15s/av-256-272/result.json",
+      "bytes": 1920,
+      "sha256": "68a16151c92278c9828aa6ee766a9ab0e7a848ff37e5fad38f9ea454e514f4ef"
+    },
+    {
+      "path": "stages/recording-5min/result.json",
+      "bytes": 1947,
+      "sha256": "a4dac1b9892f567e3d88520051c4d699ab992b7df97ee91653d0ea6775358a8c"
+    },
+    {
+      "path": "stages/recording-5min/findings.json",
+      "bytes": 2791,
+      "sha256": "dfb975ca6a46dcc57450afd7580e0f9e51264544793b0d077fd0c386df5dad5a"
+    },
+    {
+      "path": "stages/recording-5min/integrity.json",
+      "bytes": 519,
+      "sha256": "491acbf1663a32298ceaf703fabf6c9f459de60674d605f37a5a7635c5bb7781"
+    },
+    {
+      "path": "stages/recording-5min/diagnostic-counter-check.json",
+      "bytes": 354,
+      "sha256": "3626f876416517a205857eadeaf5b6f6f0536f94e2903147aa9a0dce4ce7d3ba"
+    },
+    {
+      "path": "stages/recording-5min/parent-review.json",
+      "bytes": 2253,
+      "sha256": "a1231a638648ee48e588df3cd7c74eb26c4b05a45511a01404c054cee69d8992"
+    },
+    {
+      "path": "stages/recording-5min/section-audit.json",
+      "bytes": 9914,
+      "sha256": "085c31e83f57b7bc1cb64fc48112a1f2141a639da34f7c77d173f8dceacecf09"
+    },
+    {
+      "path": "stages/recording-5min/av-1409-1411/result.json",
+      "bytes": 1946,
+      "sha256": "c1374a1d4337f7eab64a837160cbecfa0d1c3ab2c7999efe4090fa6ee6faffe5"
+    },
+    {
+      "path": "stages/recording-5min/av-256-272/result.json",
+      "bytes": 1942,
+      "sha256": "c06532824ba73ca8cb6bba0ca220ed4a6b91093cbb0dbcfd6752a40c7c6f8b98"
+    },
+    {
+      "path": "stages/recording-5h/result.json",
+      "bytes": 1970,
+      "sha256": "5b401bac0ceea53405a9e7996816d0ac7075b285da092a781fd98d7a26f4bfaa"
+    },
+    {
+      "path": "stages/recording-5h/findings.json",
+      "bytes": 2825,
+      "sha256": "7537c7d65ebd698c42a7935119ca4b9d4f64e39a80e9ed86af1a16c36494056f"
+    },
+    {
+      "path": "stages/recording-5h/integrity.json",
+      "bytes": 603,
+      "sha256": "822bd4575c74e855e8ea2240cf4245902ec296cf86ecd16dc94a07fa2b8cf4a2"
+    },
+    {
+      "path": "stages/recording-5h/diagnostic-counter-check.json",
+      "bytes": 365,
+      "sha256": "14a43d09e1335eb89fc593e244174bc1dc18620dc3ffbe2a8a9bf11c01052394"
+    },
+    {
+      "path": "stages/recording-5h/parent-review.json",
+      "bytes": 5495,
+      "sha256": "ef70d085f97167814910d87e03e88c9660a4cb0784ad2e99a4d6689450934fab"
+    },
+    {
+      "path": "stages/recording-5h/section-audit.json",
+      "bytes": 51694,
+      "sha256": "0a03975be595141be0014c25b38ae49290bce1ee21264093a3254c62e03ab918"
+    },
+    {
+      "path": "stages/recording-5h/av-1409-1411/result.json",
+      "bytes": 4886,
+      "sha256": "eb29daf3e954dbe0f23dade902aaf16f6981d7243c7fd8863c9a40bbaebb6b8d"
+    },
+    {
+      "path": "stages/recording-5h/av-256-272/result.json",
+      "bytes": 1974,
+      "sha256": "0c75aa9655335f4764cb8f95b21d7a3f6bd98e4dffb1ce5079d31cce8c1adea2"
+    },
+    {
+      "path": "stages/recording-5h/live-add-evidence-review.json",
+      "bytes": 209233,
+      "sha256": "016318cb466a9a6034728635ab6001ba66154b64510933761cea974860559f6f"
+    },
+    {
+      "path": "stages/recording-5h/parent-final-quality-summary.json",
+      "bytes": 1370,
+      "sha256": "8ef86df1467d52565ca9d38b8860de4b440c018bf97e342bbe21f9b9781a7c5f"
+    },
+    {
+      "path": "stages/recording-5h/parent-queue-and-accounting-review.json",
+      "bytes": 20115,
+      "sha256": "f342487f467686a5d41e6a453dfcdcea40279146fa8fe61a96e87de560914bcf"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/summary.json",
+      "bytes": 3772,
+      "sha256": "1e3d6099f1f4ef46cd00b4f8178dd8ac8525ad21e37ec5103815751ce568c895"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/disappearance-review.json",
+      "bytes": 2535,
+      "sha256": "b8bfc89accaaf027c91409a7359bf3e579e6c540aae634a77615f109a9f4e7bd"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/plan.json",
+      "bytes": 1334,
+      "sha256": "bfb097e0a0440d276b328760a72214f46cae8cc471ebf79b5e2c407275c8705c"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/disappearance-boundary/result.json",
+      "bytes": 3018,
+      "sha256": "91eabe4bb1a86153b99a019b77b8ecf1cb63a6370a978f07dfd99a4a5970b432"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/active-mid/result.json",
+      "bytes": 3019,
+      "sha256": "c8185a945772b7eb639b71a98cca89e8d483a252dd6f977ccb15de70475ae95a"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/post-add/result.json",
+      "bytes": 3007,
+      "sha256": "0836ebfde7a5bd7adf4ce0f960c1673d590b71492c5078b82d07739b910b2936"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/post-30min/result.json",
+      "bytes": 2061,
+      "sha256": "c54ee0b26ecb5e9445d2102d4888e53abf8cbd3fbf2b6b12459cc150b97b0acd"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/after-config-end/result.json",
+      "bytes": 2061,
+      "sha256": "dc98bf5dde600dc125c5cb0b2008dc69aaa279acf3760114f5ca97c9bfe30f3d"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/terminal/result.json",
+      "bytes": 2061,
+      "sha256": "9e22783b4a687724633960e255caa0e75984fdd17148b6fb23dfdde0efac174c"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/add-boundary/result.json",
+      "bytes": 3018,
+      "sha256": "5c36ff869149f197890fd569e573a0be13346d3e87938341039423ce865237bd"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/near-config-end/result.json",
+      "bytes": 3007,
+      "sha256": "5f27aca06602d0bae3e539f651322d5c509d8ce738d959896ed1accd675ef880"
+    },
+    {
+      "path": "stages/recording-5h/supplemental-aac273/post-add-later/result.json",
+      "bytes": 3007,
+      "sha256": "b24641a1d93f04dc81d3fd7297144f075af6810bd2b1cd0acd0db42144d2bfac"
+    }
+  ],
+  "recordings_raw_assets_keys_profiles_included": false,
+  "large_recording_remote_backup_pending_destination": false,
+  "limits": "Primary whole-file TS/main AV audits and bounded secondary AAC samples; known Issue2 boundary partial PES retained. Read original readiness report for scope.",
+  "large_recording_remote_backup": "Not requested: user explicitly declined remote preservation of recordings/raw data"
+}

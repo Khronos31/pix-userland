@@ -1,0 +1,96 @@
+{
+  "schema": "dt295-bounded-aac-window-v1",
+  "verdict": "decoded_pass",
+  "analysis_valid": true,
+  "input": {
+    "ts_name": "capture.ts",
+    "pid": 273,
+    "start_packet_zero_based": 111243874,
+    "packet_count_requested": 65536,
+    "packet_count_cap": 65536
+  },
+  "window": {
+    "packet_total": 194054187,
+    "selected_pid_packets": 792,
+    "selected_pid_payload_packets": 792,
+    "selected_pid_pusi_packets": 276,
+    "selected_pid_first_packet_1based": 111243921,
+    "selected_pid_last_packet_1based": 111309368,
+    "leading_partial_pes_packets_omitted": 2,
+    "complete_pes_count": 275,
+    "invalid_pes_headers": [],
+    "pes_length_violations": [],
+    "interior_pes_errors": [],
+    "final_open_pes_count": 1,
+    "final_partial_pes_count": 1,
+    "maximum_pes_bytes": 540,
+    "ts_packet_errors": [],
+    "global_sync_errors_in_window": 0,
+    "continuity_window_initial_pid_packet_unchecked": true
+  },
+  "audio": {
+    "es_bytes": 106162,
+    "epochs": [
+      {
+        "epoch": 0,
+        "signature": [
+          1,
+          1,
+          3,
+          2
+        ],
+        "mpeg_id": 1,
+        "profile": 1,
+        "sample_rate_index": 3,
+        "sample_rate_hz": 48000,
+        "channel_configuration": 2,
+        "first_frame_index": 0,
+        "first_es_byte_offset": 0,
+        "last_frame_index": 274,
+        "last_es_byte_offset": 105776,
+        "complete_frames": 275,
+        "frames_before_pce": 0,
+        "bytes_before_pce": 0,
+        "stream_samples": 281600,
+        "raw_data_block_counts": {
+          "1": 275
+        },
+        "pce_frame_index": null,
+        "pce_es_byte_offset": null,
+        "decoder_started": true,
+        "broken_pipe": false,
+        "frames_emitted": 275,
+        "pce_wait_pending": false,
+        "decode_exit": 0,
+        "error_log_bytes": 0,
+        "error_log_truncated_bytes": 0,
+        "stderr_total_bytes": 0,
+        "broadcast_audio_seconds": 5.866666666666666
+      }
+    ],
+    "transitions": [],
+    "frames_seen": 275,
+    "frames_emitted": 275,
+    "frames_before_pce": 0,
+    "bytes_before_pce": 0,
+    "initial_sync_bytes_omitted": 0,
+    "trailing_partial_bytes": 0,
+    "decode_failures": [],
+    "decoder_timed_out": false,
+    "pce_wait_pending_epoch_count": 0,
+    "framing_error": null
+  },
+  "verdict_basis": {
+    "no_frames_never_pass": true,
+    "decoded_pass_requires_complete_PES_ADTS_frames_and_clean_decoder": true,
+    "leading_partial_PES_is_reported_as_window_boundary": true,
+    "final_open_or_partial_PES_is_reported_as_window_boundary": true,
+    "full_run_issue2_absence_or_presence_not_inferred_from_one_window": true
+  },
+  "limitations": [
+    "Only the explicit packet window was read; no whole-file walk was performed.",
+    "Initial PID continuity before this window is unknown.",
+    "This reports one stream window and cannot establish that no unobserved PMT transition occurred elsewhere.",
+    "A clean AAC decode is not a full recording quality or route/register readback verdict."
+  ]
+}

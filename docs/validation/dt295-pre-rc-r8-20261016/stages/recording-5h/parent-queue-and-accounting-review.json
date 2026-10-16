@@ -1,0 +1,719 @@
+{
+  "reviewed_unix": 1792131414.8398762,
+  "sample_interval_about_seconds": 10,
+  "sample_bins": [
+    {
+      "window_seconds": 300,
+      "start_seconds": 0,
+      "samples": 31,
+      "first_pending_bytes": 0,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 0
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 300,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 600,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 327684,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 900,
+      "samples": 30,
+      "first_pending_bytes": 327684,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 524332,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 1200,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 786404,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 1500,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 1638420,
+      "sample_min_pending_bytes": 65612
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 1800,
+      "samples": 30,
+      "first_pending_bytes": 1703844,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 1769456,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 2100,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 2097140,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 2400,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 2097140,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 2700,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 3014580,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 3000,
+      "samples": 30,
+      "first_pending_bytes": 589756,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 3145804,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 3300,
+      "samples": 30,
+      "first_pending_bytes": 458908,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 3604524,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 3600,
+      "samples": 30,
+      "first_pending_bytes": 2031716,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 3670136,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 3900,
+      "samples": 30,
+      "first_pending_bytes": 393296,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 4128668,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 4200,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 2490436,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 4500,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 4718612,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 4800,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 5111908,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 5100,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 5177332,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 5400,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 720792,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 5700,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 5898312,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 6000,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 6357032,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 6300,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 1638232,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 6600,
+      "samples": 29,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 6900,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 7200,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 4194280,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 7500,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 2817932,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 7800,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 1572808,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 8100,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 720792,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 8400,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 65612
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 8700,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 2424824,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 9000,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 9300,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 9600,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 9900,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 10200,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 327684,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 10500,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 10800,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 11100,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 11400,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 11700,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 12000,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 786404,
+      "sample_max_pending_bytes": 786404,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 12300,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 12600,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 12900,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 13200,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 13500,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 13800,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 14100,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 14400,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 14700,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 15000,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 15300,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 15600,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 15900,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 16200,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 16500,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 16800,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 393108,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 17100,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 17400,
+      "samples": 30,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 17700,
+      "samples": 30,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 300,
+      "start_seconds": 18000,
+      "samples": 1,
+      "first_pending_bytes": 0,
+      "last_pending_bytes": 0,
+      "sample_max_pending_bytes": 0,
+      "sample_min_pending_bytes": 0
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 0,
+      "samples": 181,
+      "first_pending_bytes": 0,
+      "last_pending_bytes": 131224,
+      "sample_max_pending_bytes": 1638420,
+      "sample_min_pending_bytes": 0
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 1800,
+      "samples": 180,
+      "first_pending_bytes": 1703844,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 3604524,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 3600,
+      "samples": 180,
+      "first_pending_bytes": 2031716,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 5177332,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 5400,
+      "samples": 179,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 6357032,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 7200,
+      "samples": 180,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 4194280,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 9000,
+      "samples": 180,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 327684,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 10800,
+      "samples": 180,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 786404,
+      "sample_min_pending_bytes": 65424
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 12600,
+      "samples": 180,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 14400,
+      "samples": 180,
+      "first_pending_bytes": 131224,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 131224,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 16200,
+      "samples": 180,
+      "first_pending_bytes": 131036,
+      "last_pending_bytes": 131036,
+      "sample_max_pending_bytes": 393108,
+      "sample_min_pending_bytes": 131036
+    },
+    {
+      "window_seconds": 1800,
+      "start_seconds": 18000,
+      "samples": 1,
+      "first_pending_bytes": 0,
+      "last_pending_bytes": 0,
+      "sample_max_pending_bytes": 0,
+      "sample_min_pending_bytes": 0
+    }
+  ],
+  "cumulative_final_status": {
+    "model": "DT295",
+    "phase": 3,
+    "packets": 194054187,
+    "elapsed_ms": 18000003,
+    "renewals": 600,
+    "usb_bytes": 36482187264,
+    "usb_delivered_bytes": 36482187264,
+    "usb_late_actual_bytes": 0,
+    "usb_pending_blocks": 8,
+    "usb_active_transfers": 0,
+    "usb_peak_pending_blocks": 13,
+    "usb_cancellations": 8,
+    "usb_last_error_status": 0,
+    "usb_last_error_actual": 0,
+    "usb_error": 0,
+    "usb_timeouts": 0,
+    "confirmed_bytes": 36482187156,
+    "pending_bytes": 0,
+    "rejected_bytes": 0,
+    "uncertain_bytes": 0,
+    "have_pat": 1,
+    "have_cat": 1,
+    "program_count": 4,
+    "missing_pmts": 0,
+    "tables_ready": 1,
+    "invalid_sections": 0,
+    "continuity_errors": 3,
+    "unsupported_tables": 0,
+    "usb_max_gap_ns": 173734000,
+    "queue_peak_bytes": 9502648,
+    "writer_child_pid": 57788,
+    "writer_warning": 0,
+    "writer_stalled": 0,
+    "writer_error": 0,
+    "writer_write_ns_total": 900135225000,
+    "writer_write_ns_max": 4551735000,
+    "writer_write_records": 556674,
+    "max_pending_age_ns": 4572075000,
+    "oldest_pending_age_ns": 0,
+    "max_parent_poll_gap_ns": 166146000,
+    "max_parent_ack_gap_ns": 4572063000,
+    "send_eagain_count": 22901,
+    "ack_eagain_count": 1116985,
+    "zero_poll_budget_exhaustions": 211
+  },
+  "final_end": {
+    "event": "end",
+    "exit": 0,
+    "state": 16,
+    "packets": 194054187,
+    "elapsed_ms": 18000003,
+    "trailing_bytes": 108,
+    "stop_drained_bytes": 0,
+    "tei": 0,
+    "cc": 0,
+    "crc": 0,
+    "native_abandoned": 0
+  },
+  "capacity_bytes": 134217728,
+  "queue_peak_capacity_fraction": 0.07080024480819702,
+  "queue_recovered_during_recording": true,
+  "continuous_unbounded_growth_observed": false,
+  "interpretation": "Five/30-minute sampled pending bytes return to small baseline; cumulative peak is distinct from sampled maxima. Child maximum write duration 4.551735s, parent poll gap 166.146ms; underlying storage cause not localized. No refused/uncertain/final pending. Reserved native pending blocks and final108B fragment are not unsaved accepted TS.",
+  "quality_findings_pending": true
+}

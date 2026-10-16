@@ -1,0 +1,18 @@
+{
+  "integrated_unix": 1792133190.414898,
+  "files": {
+    "README.md": {
+      "original_sha256": "4fbfa3742b8775d9675dec43ab017a66bcfe6f8859f7e60a7c84d1d7c9bebbf1",
+      "candidate_sha256": "47cff99f1d9fc5870d87cd3e2d9806180a18d316cfa754328fdf59cadd0f3885",
+      "changed": true
+    },
+    "docs/dt295.md": {
+      "original_sha256": "8ae514266b2e3b6f4e61053d5b58260551970fc159f7e4510acfabb7b19670ed",
+      "candidate_sha256": "f870beb35c3bf86048a8e6563f7d5efa904e9b500e1fcb5e166e8b15d026667f",
+      "changed": true
+    },
+    "scope": "Luna documentation candidate, parent reviewed and editorially finalized; original baseline verified before integration."
+  },
+  "parent_review": "Stale long-run note corrected; CRC applies to section audit, not AAC PID; bounded secondary audio and known Issue2 limitations explicit. Parent removed unfinished-readiness draft statement and corrected Japanese duplication.",
+  "RC_build": false
+}

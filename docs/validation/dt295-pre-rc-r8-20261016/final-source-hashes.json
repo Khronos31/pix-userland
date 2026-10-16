@@ -1,0 +1,346 @@
+{
+  "created_unix": 1792133237.509601,
+  "base_commit": "6c1aee506435759ca42004750ecbc07169e7b5c4",
+  "version": "0.1.4",
+  "development_binary_sha256": "046b3f37eff44abdef0cd11692209137c16132ceec9ebffe3d76c10e68662778",
+  "product_inputs_match_tested_r8": true,
+  "files": [
+    {
+      "path": "Makefile",
+      "sha256": "7897ee3448bcf68f10288641e4ad1f4e165d3478bcc93f61f1bbf3f1c43e1bfd"
+    },
+    {
+      "path": "include/channel.h",
+      "sha256": "243625f205c0501de3dfcfae65758404878101e95891ea2588e99e820d09ea4b"
+    },
+    {
+      "path": "include/control.h",
+      "sha256": "f3a19f46dbca6d75b11ea5fc7eedb67165e90b7712673ad9e66323be12c6404d"
+    },
+    {
+      "path": "include/crypto.h",
+      "sha256": "927eb4fcd3c33d8f4aa9808550c305ee5185061e9e2bb4d61b4ba518528c4f0b"
+    },
+    {
+      "path": "include/diagnostic.h",
+      "sha256": "b91fa89f3d2843c9a975d4d14cd1a8a26bb58422dccafd96a69643f21130e68b"
+    },
+    {
+      "path": "include/dt295.h",
+      "sha256": "aea52ad0314af2a8594149fc0361aa60250b26a948a39779faa91f17223bbda2"
+    },
+    {
+      "path": "include/dt295_capture.h",
+      "sha256": "5b818974185dc0e1a7bbad68d4e2a62aeb42b30da01afd277d68aa371fb9fe14"
+    },
+    {
+      "path": "include/dt295_routes.h",
+      "sha256": "bdccac5ab343271a305121b0397d9316f1b0f5a37385df4957970146eb22858e"
+    },
+    {
+      "path": "include/dt295_stream.h",
+      "sha256": "2e7aedddf36439bd6fd023913f26ce5037679e933a4112970c5e26ac889e406f"
+    },
+    {
+      "path": "include/os.h",
+      "sha256": "3e4e0f53c823d544e9e5ca1309460390a71facfad28e28175e406e0d7ec822b2"
+    },
+    {
+      "path": "include/pid_filter.h",
+      "sha256": "73bc6ffe415dd684aa2dbec348c17a4718c90c5eb6ea9ed8f4d737c8464a3505"
+    },
+    {
+      "path": "include/pixy.h",
+      "sha256": "43a7063f4cd03bf8167292882fbddcac75d390817d7b6e129ee3500c838a6212"
+    },
+    {
+      "path": "include/transport.h",
+      "sha256": "464c8c2141cff91eae3261d42eeef4db2867b8cb6e3f05725fa220184342a186"
+    },
+    {
+      "path": "include/ts_output.h",
+      "sha256": "059b95b66da485c2ef94abeb675e80a1027db3d28f9b06d5fbfaa2ff9365e50e"
+    },
+    {
+      "path": "include/usb_backend.h",
+      "sha256": "7da426feda4c364928b87dbc8705bb6c9a0268a1cf1808108988d429a6fb4fee"
+    },
+    {
+      "path": "include/usb_listing.h",
+      "sha256": "2cbdb031738476a53cec70b87a6c15355caa80807f85b0143ab16b434126eb47"
+    },
+    {
+      "path": "include/usb_log.h",
+      "sha256": "7bc8dc1844af8bd609fe9f6bef2d9379cf07c9f9dcbe5694ea637f5d121e17cb"
+    },
+    {
+      "path": "include/usb_selector.h",
+      "sha256": "ea1300f83ba54dc8a65e18964a999d61feefbdab2733bdb9b717bc36aaf2da33"
+    },
+    {
+      "path": "include/version.h",
+      "sha256": "fafaaf52d95ec4eefd4f9d043a6c405823424f0f15ad8d6c5061daafa6d7168c"
+    },
+    {
+      "path": "src/channel.c",
+      "sha256": "e5cf29936e46d7f1d60efbfe9b3d18ed7425b3c024cb139fe31eba263c075ea1"
+    },
+    {
+      "path": "src/control.c",
+      "sha256": "ff2627afc2b2df2cb93000dc5d89507609add9514c24f5b15d56412ad86f98c8"
+    },
+    {
+      "path": "src/crypto.c",
+      "sha256": "5b479846e852eae2cd6113897c0b04ae2c2b6cd4cecb04a2ed411c058bb056be"
+    },
+    {
+      "path": "src/diagnostic.c",
+      "sha256": "0fbb21a88d4d10866024b6a19254304dfef0783403e2a2339785e2a1b842309e"
+    },
+    {
+      "path": "src/dt295.c",
+      "sha256": "c8fa7f3693f9ce99c7dbcebd72b1dab2334ca55e4b8c4e6ec1467da05a92a6ff"
+    },
+    {
+      "path": "src/dt295_capture.c",
+      "sha256": "df37197e8a0dc0ea56f1eae96f41625fd1ee79ab06dd3d1e48c0e0098eaae6b1"
+    },
+    {
+      "path": "src/dt295_crypto.c",
+      "sha256": "38636dac169aa2ce3c5001d8a7c7da15e19835280446375039618ed8deedc323"
+    },
+    {
+      "path": "src/dt295_crypto.h",
+      "sha256": "06b7a293ebb5a55da7b6cd24c935c815e348ccbe90afbc07c075966be08ff5c5"
+    },
+    {
+      "path": "src/dt295_routes.c",
+      "sha256": "645a045cece907f386cd678af1be6894f0873c63478f4a0efbcb89d0056361c0"
+    },
+    {
+      "path": "src/dt295_stream.c",
+      "sha256": "433e7658bfff15e26df95de3cc843282b721720e67c8739db1a7d5cfbb169d24"
+    },
+    {
+      "path": "src/main.c",
+      "sha256": "c9cd39d30d98de87fad79a35b56d965cc9d3950fbe967768d9615905cbde2f65"
+    },
+    {
+      "path": "src/pid_filter.c",
+      "sha256": "81586131044bcae718c9dbd10824eec00b4a5aa0082a41a739910066582082be"
+    },
+    {
+      "path": "src/platform.c",
+      "sha256": "958b7da905985e3e787783b9564ee6b0bf099c096d3a2fa1bc3d94d85f2b38a1"
+    },
+    {
+      "path": "src/protocol.c",
+      "sha256": "1d715cef4510582d088b947fe2bd00596b14faa800a80dd59e5d1183864fe29e"
+    },
+    {
+      "path": "src/transport.c",
+      "sha256": "986093137923deb341a3f5b0cb2c90702b90d87a1887b06dc0168aec5bc25d06"
+    },
+    {
+      "path": "src/ts_output.c",
+      "sha256": "16d184dac14acb12c13a2ad67736d067dfc535580c8b10dd98354e7fe584540c"
+    },
+    {
+      "path": "src/usb_libusb.c",
+      "sha256": "35533af160d97b40d45873e8d8bbd34611b7573cf189eb66e6f9903dcb15d513"
+    },
+    {
+      "path": "src/usb_listing.c",
+      "sha256": "fc8eb3b45c3c4dd14ea5ae81baab3933de47f883e616831347c282f10a24f1b3"
+    },
+    {
+      "path": "src/usb_log.c",
+      "sha256": "5b7978ec8a3974ec8d1fec8b59161294cdd02f6e30b1024e6f1ee8ee4987ab6e"
+    },
+    {
+      "path": "src/usb_selector.c",
+      "sha256": "b631370d586a9a8e0425beba408d7a24f4856a67532593fcfdf506fac7fc9a47"
+    },
+    {
+      "path": "tests/test_cli.sh",
+      "sha256": "51ce290ae85c5045da893c22c024275e0b7acc706121d28ef1b08223a6130e28"
+    },
+    {
+      "path": "tests/test_cli_compat.sh",
+      "sha256": "42e3039f9bc20998e5df60563dc9e21d0dae5d544f214b65ac59354cebbc79ab"
+    },
+    {
+      "path": "tests/test_compat.c",
+      "sha256": "f3506a5d517ac1b0c7a0c8a60c277e0f4353a0723b0c0518fd21e9d665c8a596"
+    },
+    {
+      "path": "tests/test_crypto.c",
+      "sha256": "dc8e024ef774fccd4f6b0b30e8498ffa040be9b3f5b7c9f95f755ffba02b5f58"
+    },
+    {
+      "path": "tests/test_diagnostic.c",
+      "sha256": "4360109b2946702b717d9f94699ffa0f3d5224cb838adb10cb909cd7619f8984"
+    },
+    {
+      "path": "tests/test_dt295.c",
+      "sha256": "f14272597ae55c3255abfdfa3b19b145864a0c8c525d2b39f8e5fd0ed017f2a7"
+    },
+    {
+      "path": "tests/test_dt295_assets.py",
+      "sha256": "1813d8822513301a9f6d8174a2d4e6d3bd9b6cd2d53a145878e96915f5956a51"
+    },
+    {
+      "path": "tests/test_dt295_capture.c",
+      "sha256": "4c3a03a22635acf39af4ccb2e86d785919f60ae23d0f7250e4733af7a1d2c6d2"
+    },
+    {
+      "path": "tests/test_dt295_independent.py",
+      "sha256": "166ac144b16a622031c0e1d8424110b2eddbafc4d3eeca98b202dc5e72ad600e"
+    },
+    {
+      "path": "tests/test_dt295_packaging.py",
+      "sha256": "5dc8506429d343a2d848d9c34bddcd5e377fbd855609019f18ebba080334945b"
+    },
+    {
+      "path": "tests/test_dt295_protocol.c",
+      "sha256": "efd67b3cec9f27a99b29813231db4a946ade3184e20d412bbf1f801fdf6087cb"
+    },
+    {
+      "path": "tests/test_dt295_routes.c",
+      "sha256": "15fb908bf55ee89c00afde055b36d580278b5e7c7dafefd5e1f53d4e51c9626c"
+    },
+    {
+      "path": "tests/test_dt295_stream.c",
+      "sha256": "ba442bc1c24878aaad70d5877d6904263c7683ba6538d58e5c608f3a734f2b71"
+    },
+    {
+      "path": "tests/test_mdev.sh",
+      "sha256": "2b9a30a82be2e44be7dad307ba43bfa733475c92df74dc57264188e23f63453d"
+    },
+    {
+      "path": "tests/test_transport.c",
+      "sha256": "9c78d744d5c63ee1735f6c04f6dbeb396fa6bc960797910f57633a5909dd5ae6"
+    },
+    {
+      "path": "tests/test_ts_output.c",
+      "sha256": "316b8b45afaa05832b970b89f765b4571b498fed169fa186705ddafaec118b8d"
+    },
+    {
+      "path": "tests/test_usb_listing.c",
+      "sha256": "358fcebd6ce30c599799f8f90e18dbef8f67c15b3d908f787ac1f053890fdd12"
+    },
+    {
+      "path": "tests/test_usb_log.c",
+      "sha256": "1f5b22722a8893183d4ddca325a2f84f5ce02868df3b33df6fc19324375b9371"
+    },
+    {
+      "path": "tests/test_usb_restart.c",
+      "sha256": "0d3b580bf876d27273d05ca0cc440cb5d37cd91fbb450cba2870a577d6ae673d"
+    },
+    {
+      "path": "tests/test_usb_selector.c",
+      "sha256": "8d5be95bcaefffe04923f80d510f04d84c413777af6411fc81972c6a37cbd6e4"
+    },
+    {
+      "path": "tests/vectors.h",
+      "sha256": "c7f06820d63196414e851a54079ca30d5bea5b0da79f66ba904c44436289b65f"
+    },
+    {
+      "path": "tools/assets-bundle.py",
+      "sha256": "07743443ca77ad30428430b63a4228653d730f180b6c59c0a86a96d8ac4ec076"
+    },
+    {
+      "path": "tools/audit-binary.py",
+      "sha256": "0f05b44e43f3777e68a1cd46dd34c6e801cfbcaf51b4254a5b60d0d30c2b428b"
+    },
+    {
+      "path": "tools/build-portable.sh",
+      "sha256": "11d42a6f969a2c1c5b58153b0828b1131aa3cfcca0e0a7c26a232b9621853aaa"
+    },
+    {
+      "path": "tools/build-windows.sh",
+      "sha256": "c697953fb69a883d2eae93d4c9c022e35f661ed03a320c1dd370b6953d04f41f"
+    },
+    {
+      "path": "tools/check-private.sh",
+      "sha256": "346df552fd2024eb077ccd876bd3a11591421af11e9b63b75eab5cbe379069bb"
+    },
+    {
+      "path": "tools/finalize-private-release.py",
+      "sha256": "b5fc24d9df622501ce40b378b239bab68106f260d43abf80983a5786269b992f"
+    },
+    {
+      "path": "tools/package-release.py",
+      "sha256": "8dbb5a5e3d7e8f83435d2f93cf5bc9458a651f426ff91818184468ffdbf03909"
+    },
+    {
+      "path": "tools/package-source.sh",
+      "sha256": "ae2c7cc44d654dec0263e8057f5c860fad303113b29b9c3c03face4942bc16a5"
+    },
+    {
+      "path": "tools/prepare-assets.py",
+      "sha256": "4c00c6e2c3894b354507e93b5ab49e7e3ed85714bab2cb3b8acb6ba45eef4178"
+    },
+    {
+      "path": "tools/prepare-dt295-assets.py",
+      "sha256": "8a05ec79c3faf1fd5fb0b748c461ba3762d636420242a4c78c4170f2f628d55c"
+    },
+    {
+      "path": "tools/verify-release.py",
+      "sha256": "f7e39c69301009617dab409fd2510d9a57d7eb8f9048b08026abc38704177f63"
+    },
+    {
+      "path": "README.md",
+      "sha256": "47cff99f1d9fc5870d87cd3e2d9806180a18d316cfa754328fdf59cadd0f3885"
+    },
+    {
+      "path": "docs/dt295.md",
+      "sha256": "f870beb35c3bf86048a8e6563f7d5efa904e9b500e1fcb5e166e8b15d026667f"
+    }
+  ],
+  "source_review_patch_sha256": "79f0f72246e28d92a3b60d69dc973b05bd3b90db38aafc781a99c334e9ddeb43",
+  "changed_paths": [
+    ".gitignore",
+    "Makefile",
+    "README.md",
+    "include/usb_backend.h",
+    "include/usb_listing.h",
+    "src/main.c",
+    "src/usb_libusb.c",
+    "src/usb_listing.c",
+    "tests/test_cli.sh",
+    "tests/test_usb_listing.c",
+    "tests/test_usb_restart.c",
+    "tools/build-portable.sh",
+    "tools/build-windows.sh",
+    "tools/finalize-private-release.py",
+    "tools/verify-release.py",
+    "docs/dt295.md",
+    "include/dt295.h",
+    "include/dt295_capture.h",
+    "include/dt295_routes.h",
+    "include/dt295_stream.h",
+    "include/ts_output.h",
+    "src/dt295.c",
+    "src/dt295_capture.c",
+    "src/dt295_crypto.c",
+    "src/dt295_crypto.h",
+    "src/dt295_routes.c",
+    "src/dt295_stream.c",
+    "src/ts_output.c",
+    "tests/test_cli_compat.sh",
+    "tests/test_dt295.c",
+    "tests/test_dt295_assets.py",
+    "tests/test_dt295_capture.c",
+    "tests/test_dt295_independent.py",
+    "tests/test_dt295_packaging.py",
+    "tests/test_dt295_protocol.c",
+    "tests/test_dt295_routes.c",
+    "tests/test_dt295_stream.c",
+    "tests/test_ts_output.c",
+    "tools/prepare-dt295-assets.py"
+  ],
+  "patch_bytes": 387645,
+  "patch_applies_to_base_and_reproduces_all_changed_files": true,
+  "RC_build": false
+}

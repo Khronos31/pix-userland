@@ -1,0 +1,655 @@
+{
+  "tables": [
+    {
+      "pid": 0,
+      "table_id": "0x0",
+      "sections": 2999
+    },
+    {
+      "pid": 1,
+      "table_id": "0x1",
+      "sections": 30
+    },
+    {
+      "pid": 16,
+      "table_id": "0x40",
+      "sections": 300
+    },
+    {
+      "pid": 17,
+      "table_id": "0x42",
+      "sections": 150
+    },
+    {
+      "pid": 18,
+      "table_id": "0x4e",
+      "sections": 1200
+    },
+    {
+      "pid": 18,
+      "table_id": "0x50",
+      "sections": 1510
+    },
+    {
+      "pid": 18,
+      "table_id": "0x51",
+      "sections": 320
+    },
+    {
+      "pid": 18,
+      "table_id": "0x58",
+      "sections": 350
+    },
+    {
+      "pid": 18,
+      "table_id": "0x59",
+      "sections": 320
+    },
+    {
+      "pid": 20,
+      "table_id": "0x73",
+      "sections": 60
+    },
+    {
+      "pid": 35,
+      "table_id": "0xc3",
+      "sections": 2
+    },
+    {
+      "pid": 36,
+      "table_id": "0xc4",
+      "sections": 300
+    },
+    {
+      "pid": 39,
+      "table_id": "0x4e",
+      "sections": 800
+    },
+    {
+      "pid": 40,
+      "table_id": "0xc3",
+      "sections": 2
+    },
+    {
+      "pid": 41,
+      "table_id": "0xc8",
+      "sections": 3
+    },
+    {
+      "pid": 320,
+      "table_id": "0x3b",
+      "sections": 529
+    },
+    {
+      "pid": 320,
+      "table_id": "0x3c",
+      "sections": 4407
+    },
+    {
+      "pid": 320,
+      "table_id": "0x3d",
+      "sections": 281
+    },
+    {
+      "pid": 352,
+      "table_id": "0x3b",
+      "sections": 588
+    },
+    {
+      "pid": 352,
+      "table_id": "0x3c",
+      "sections": 10744
+    },
+    {
+      "pid": 352,
+      "table_id": "0x3d",
+      "sections": 300
+    },
+    {
+      "pid": 353,
+      "table_id": "0x3b",
+      "sections": 190
+    },
+    {
+      "pid": 353,
+      "table_id": "0x3c",
+      "sections": 189
+    },
+    {
+      "pid": 354,
+      "table_id": "0x3b",
+      "sections": 344
+    },
+    {
+      "pid": 354,
+      "table_id": "0x3c",
+      "sections": 343
+    },
+    {
+      "pid": 368,
+      "table_id": "0x3b",
+      "sections": 541
+    },
+    {
+      "pid": 368,
+      "table_id": "0x3c",
+      "sections": 3628
+    },
+    {
+      "pid": 369,
+      "table_id": "0x3b",
+      "sections": 379
+    },
+    {
+      "pid": 369,
+      "table_id": "0x3c",
+      "sections": 762
+    },
+    {
+      "pid": 370,
+      "table_id": "0x3b",
+      "sections": 600
+    },
+    {
+      "pid": 496,
+      "table_id": "0x2",
+      "sections": 3000
+    },
+    {
+      "pid": 1008,
+      "table_id": "0x2",
+      "sections": 2998
+    },
+    {
+      "pid": 1408,
+      "table_id": "0x3b",
+      "sections": 620
+    },
+    {
+      "pid": 1408,
+      "table_id": "0x3c",
+      "sections": 1890
+    },
+    {
+      "pid": 1419,
+      "table_id": "0x3b",
+      "sections": 599
+    },
+    {
+      "pid": 7265,
+      "table_id": "0x3b",
+      "sections": 5
+    },
+    {
+      "pid": 7265,
+      "table_id": "0x3c",
+      "sections": 315
+    },
+    {
+      "pid": 7408,
+      "table_id": "0x2",
+      "sections": 309
+    },
+    {
+      "pid": 8136,
+      "table_id": "0x2",
+      "sections": 600
+    }
+  ],
+  "unique_sections": 850,
+  "unique_crc_failures": 0,
+  "errors": {},
+  "pat": [
+    {
+      "tsid": 32736,
+      "version": 7,
+      "programs": [
+        [
+          0,
+          16
+        ],
+        [
+          1024,
+          496
+        ],
+        [
+          1025,
+          1008
+        ],
+        [
+          1408,
+          8136
+        ],
+        [
+          65520,
+          7408
+        ]
+      ]
+    }
+  ],
+  "pmt": [
+    {
+      "pid": 496,
+      "program": 1024,
+      "version": 13,
+      "pcr_pid": 511,
+      "streams": [
+        {
+          "type": 2,
+          "pid": 256
+        },
+        {
+          "type": 15,
+          "pid": 272
+        },
+        {
+          "type": 6,
+          "pid": 304
+        },
+        {
+          "type": 6,
+          "pid": 312
+        },
+        {
+          "type": 13,
+          "pid": 320
+        },
+        {
+          "type": 13,
+          "pid": 352
+        },
+        {
+          "type": 13,
+          "pid": 353
+        },
+        {
+          "type": 13,
+          "pid": 354
+        },
+        {
+          "type": 13,
+          "pid": 368
+        },
+        {
+          "type": 13,
+          "pid": 369
+        },
+        {
+          "type": 13,
+          "pid": 370
+        }
+      ]
+    },
+    {
+      "pid": 1008,
+      "program": 1025,
+      "version": 17,
+      "pcr_pid": 511,
+      "streams": [
+        {
+          "type": 2,
+          "pid": 256
+        },
+        {
+          "type": 15,
+          "pid": 272
+        },
+        {
+          "type": 6,
+          "pid": 304
+        },
+        {
+          "type": 6,
+          "pid": 312
+        },
+        {
+          "type": 13,
+          "pid": 320
+        },
+        {
+          "type": 13,
+          "pid": 352
+        },
+        {
+          "type": 13,
+          "pid": 353
+        },
+        {
+          "type": 13,
+          "pid": 354
+        },
+        {
+          "type": 13,
+          "pid": 368
+        },
+        {
+          "type": 13,
+          "pid": 369
+        },
+        {
+          "type": 13,
+          "pid": 370
+        }
+      ]
+    },
+    {
+      "pid": 8136,
+      "program": 1408,
+      "version": 17,
+      "pcr_pid": 1535,
+      "streams": [
+        {
+          "type": 27,
+          "pid": 1409
+        },
+        {
+          "type": 15,
+          "pid": 1411
+        },
+        {
+          "type": 6,
+          "pid": 1415
+        },
+        {
+          "type": 13,
+          "pid": 1408
+        },
+        {
+          "type": 13,
+          "pid": 1419
+        }
+      ]
+    },
+    {
+      "pid": 7408,
+      "program": 65520,
+      "version": 0,
+      "pcr_pid": 8191,
+      "streams": [
+        {
+          "type": 13,
+          "pid": 7281
+        },
+        {
+          "type": 13,
+          "pid": 7282
+        },
+        {
+          "type": 13,
+          "pid": 7283
+        },
+        {
+          "type": 13,
+          "pid": 7284
+        },
+        {
+          "type": 13,
+          "pid": 7285
+        },
+        {
+          "type": 13,
+          "pid": 7286
+        },
+        {
+          "type": 13,
+          "pid": 7287
+        },
+        {
+          "type": 13,
+          "pid": 7288
+        },
+        {
+          "type": 13,
+          "pid": 7264
+        },
+        {
+          "type": 13,
+          "pid": 7265
+        },
+        {
+          "type": 13,
+          "pid": 7266
+        },
+        {
+          "type": 13,
+          "pid": 7267
+        }
+      ]
+    }
+  ],
+  "sdt_services": [
+    [
+      32736,
+      32736,
+      1024
+    ],
+    [
+      32736,
+      32736,
+      1025
+    ],
+    [
+      32736,
+      32736,
+      1408
+    ]
+  ],
+  "eit_services": [
+    [
+      32736,
+      32736,
+      1024
+    ],
+    [
+      32736,
+      32736,
+      1025
+    ],
+    [
+      32736,
+      32736,
+      1408
+    ]
+  ],
+  "unique_events": 952,
+  "packets_examined": 3268085,
+  "all_crc_sections": 42507,
+  "crc_failures": [],
+  "checked": [
+    {
+      "pid": 0,
+      "table_id": 0,
+      "sections": 2999
+    },
+    {
+      "pid": 1,
+      "table_id": 1,
+      "sections": 30
+    },
+    {
+      "pid": 16,
+      "table_id": 64,
+      "sections": 300
+    },
+    {
+      "pid": 17,
+      "table_id": 66,
+      "sections": 150
+    },
+    {
+      "pid": 18,
+      "table_id": 78,
+      "sections": 1200
+    },
+    {
+      "pid": 18,
+      "table_id": 80,
+      "sections": 1510
+    },
+    {
+      "pid": 18,
+      "table_id": 81,
+      "sections": 320
+    },
+    {
+      "pid": 18,
+      "table_id": 88,
+      "sections": 350
+    },
+    {
+      "pid": 18,
+      "table_id": 89,
+      "sections": 320
+    },
+    {
+      "pid": 20,
+      "table_id": 115,
+      "sections": 60
+    },
+    {
+      "pid": 35,
+      "table_id": 195,
+      "sections": 2
+    },
+    {
+      "pid": 36,
+      "table_id": 196,
+      "sections": 300
+    },
+    {
+      "pid": 39,
+      "table_id": 78,
+      "sections": 800
+    },
+    {
+      "pid": 40,
+      "table_id": 195,
+      "sections": 2
+    },
+    {
+      "pid": 41,
+      "table_id": 200,
+      "sections": 3
+    },
+    {
+      "pid": 320,
+      "table_id": 59,
+      "sections": 529
+    },
+    {
+      "pid": 320,
+      "table_id": 60,
+      "sections": 4407
+    },
+    {
+      "pid": 320,
+      "table_id": 61,
+      "sections": 281
+    },
+    {
+      "pid": 352,
+      "table_id": 59,
+      "sections": 588
+    },
+    {
+      "pid": 352,
+      "table_id": 60,
+      "sections": 10744
+    },
+    {
+      "pid": 352,
+      "table_id": 61,
+      "sections": 300
+    },
+    {
+      "pid": 353,
+      "table_id": 59,
+      "sections": 190
+    },
+    {
+      "pid": 353,
+      "table_id": 60,
+      "sections": 189
+    },
+    {
+      "pid": 354,
+      "table_id": 59,
+      "sections": 344
+    },
+    {
+      "pid": 354,
+      "table_id": 60,
+      "sections": 343
+    },
+    {
+      "pid": 368,
+      "table_id": 59,
+      "sections": 541
+    },
+    {
+      "pid": 368,
+      "table_id": 60,
+      "sections": 3628
+    },
+    {
+      "pid": 369,
+      "table_id": 59,
+      "sections": 379
+    },
+    {
+      "pid": 369,
+      "table_id": 60,
+      "sections": 762
+    },
+    {
+      "pid": 370,
+      "table_id": 59,
+      "sections": 600
+    },
+    {
+      "pid": 496,
+      "table_id": 2,
+      "sections": 3000
+    },
+    {
+      "pid": 1008,
+      "table_id": 2,
+      "sections": 2998
+    },
+    {
+      "pid": 1408,
+      "table_id": 59,
+      "sections": 620
+    },
+    {
+      "pid": 1408,
+      "table_id": 60,
+      "sections": 1890
+    },
+    {
+      "pid": 1419,
+      "table_id": 59,
+      "sections": 599
+    },
+    {
+      "pid": 7265,
+      "table_id": 59,
+      "sections": 5
+    },
+    {
+      "pid": 7265,
+      "table_id": 60,
+      "sections": 315
+    },
+    {
+      "pid": 7408,
+      "table_id": 2,
+      "sections": 309
+    },
+    {
+      "pid": 8136,
+      "table_id": 2,
+      "sections": 600
+    }
+  ]
+}

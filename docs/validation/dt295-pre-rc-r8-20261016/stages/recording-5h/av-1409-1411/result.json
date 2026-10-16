@@ -1,0 +1,176 @@
+{
+  "streams": [
+    {
+      "pid": 1409,
+      "complete_pes": 54442,
+      "es_bytes": 439480987,
+      "started": true,
+      "broken_pipe": false,
+      "leading_bytes_omitted": 5881,
+      "decode_exit": 0,
+      "error_log_bytes": 0
+    },
+    {
+      "pid": 1411,
+      "complete_pes": 174609,
+      "es_bytes": 125717560,
+      "adts": {
+        "epochs": [
+          {
+            "epoch": 0,
+            "signature": [
+              1,
+              1,
+              6,
+              2
+            ],
+            "mpeg_id": 1,
+            "profile": 1,
+            "sample_rate_index": 6,
+            "sample_rate_hz": 24000,
+            "channel_configuration": 2,
+            "first_frame_index": 0,
+            "first_es_byte_offset": 252,
+            "last_frame_index": 235536,
+            "last_es_byte_offset": 70189922,
+            "complete_frames": 235537,
+            "frames_before_pce": 0,
+            "bytes_before_pce": 0,
+            "stream_samples": 241189888,
+            "raw_data_block_counts": {
+              "1": 235537
+            },
+            "pce_frame_index": null,
+            "pce_es_byte_offset": null,
+            "decoder_started": true,
+            "broken_pipe": false,
+            "frames_emitted": 235537,
+            "pce_wait_pending": false,
+            "decode_exit": 0,
+            "error_log_bytes": 0,
+            "broadcast_audio_seconds": 10049.578666666666
+          },
+          {
+            "epoch": 1,
+            "signature": [
+              1,
+              1,
+              6,
+              0
+            ],
+            "mpeg_id": 1,
+            "profile": 1,
+            "sample_rate_index": 6,
+            "sample_rate_hz": 24000,
+            "channel_configuration": 0,
+            "first_frame_index": 235537,
+            "first_es_byte_offset": 70190220,
+            "last_frame_index": 249831,
+            "last_es_byte_offset": 74450382,
+            "complete_frames": 14295,
+            "frames_before_pce": 0,
+            "bytes_before_pce": 0,
+            "stream_samples": 14638080,
+            "raw_data_block_counts": {
+              "1": 14295
+            },
+            "pce_frame_index": 235537,
+            "pce_es_byte_offset": 70190220,
+            "decoder_started": true,
+            "broken_pipe": false,
+            "frames_emitted": 14295,
+            "pce_wait_pending": false,
+            "decode_exit": 0,
+            "error_log_bytes": 0,
+            "broadcast_audio_seconds": 609.92
+          },
+          {
+            "epoch": 2,
+            "signature": [
+              1,
+              1,
+              6,
+              2
+            ],
+            "mpeg_id": 1,
+            "profile": 1,
+            "sample_rate_index": 6,
+            "sample_rate_hz": 24000,
+            "channel_configuration": 2,
+            "first_frame_index": 249832,
+            "first_es_byte_offset": 74450680,
+            "last_frame_index": 421867,
+            "last_es_byte_offset": 125717110,
+            "complete_frames": 172036,
+            "frames_before_pce": 0,
+            "bytes_before_pce": 0,
+            "stream_samples": 176164864,
+            "raw_data_block_counts": {
+              "1": 172036
+            },
+            "pce_frame_index": null,
+            "pce_es_byte_offset": null,
+            "decoder_started": true,
+            "broken_pipe": false,
+            "frames_emitted": 172036,
+            "pce_wait_pending": false,
+            "decode_exit": 0,
+            "error_log_bytes": 0,
+            "broadcast_audio_seconds": 7340.202666666667
+          }
+        ],
+        "transitions": [
+          {
+            "frame_index": 235537,
+            "es_byte_offset": 70190220,
+            "broadcast_audio_time_seconds": 10049.578667,
+            "from_signature": [
+              1,
+              1,
+              6,
+              2
+            ],
+            "to_signature": [
+              1,
+              1,
+              6,
+              0
+            ]
+          },
+          {
+            "frame_index": 249832,
+            "es_byte_offset": 74450680,
+            "broadcast_audio_time_seconds": 10659.498667,
+            "from_signature": [
+              1,
+              1,
+              6,
+              0
+            ],
+            "to_signature": [
+              1,
+              1,
+              6,
+              2
+            ]
+          }
+        ],
+        "frames_seen": 421868,
+        "frames_emitted": 421868,
+        "frames_before_pce": 0,
+        "bytes_before_pce": 0,
+        "initial_sync_bytes_omitted": 252,
+        "trailing_partial_bytes": 152,
+        "decode_failures": [],
+        "framing_error": null
+      }
+    }
+  ],
+  "pes_length_violations": [],
+  "invalid_pes_headers": [],
+  "packets_examined": 194054187,
+  "requested_packets": 194054187,
+  "final_open_pes_omitted": true,
+  "interior_corruption_preserved": true,
+  "valid": true
+}

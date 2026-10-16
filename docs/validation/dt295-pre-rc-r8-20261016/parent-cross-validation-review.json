@@ -1,0 +1,32 @@
+{
+  "observed_unix": 1792110961.699713,
+  "passed": true,
+  "cross_report": "/Users/yunomin61/Documents/Codex/2026-10-03/new-chat/outputs/pix-dt295-20261016/pre-rc-01/live-add-candidate-r8/cross-validation/cross-validation-complete.json",
+  "cross_report_sha256": "d774c67c23ad8b2689a461a2cf3dc59483d52982ac93c5e527d10cedaeae82f1",
+  "logs": {
+    "linux-x64.log": {
+      "sha256": "7e8e7c4485a1f31a4b55eec76dd677b31cdfb46f5f1b39e3428edf4ba2e8159d",
+      "bytes": 27552
+    },
+    "linux-arm64-resume.log": {
+      "sha256": "f6a23978db78576c382ce1cbb5c5a220173199b2163ceed6ffad2613152e979e",
+      "bytes": 12949
+    },
+    "windows-x64.log": {
+      "sha256": "362eed8790800abaff8977a8884c8646ef68d8dda462a54f34d2f7de1f50248e",
+      "bytes": 10850
+    },
+    "android.log": {
+      "sha256": "e37914d0a0a67334a6e8519056ca9e5d28d816eb744cb57845e61889cae13433",
+      "bytes": 63123
+    }
+  },
+  "seven_targets": "native macOS and Linux x64 tests executed; Linux ARM64/Windows x64/Android3ABIs cross-compiled and audited",
+  "original_71_repo_inputs_unchanged": true,
+  "fixed_71_source_inputs_verified": true,
+  "fixed_binary_and_14_harness_inputs_verified": true,
+  "r7_report_preserved": true,
+  "ARM_initial_attempt": "dependency fetch interruption before compilation; resumed exact pinned toolchain; both attempts preserved",
+  "RC_build": false,
+  "hardware_launch_authorized": true
+}

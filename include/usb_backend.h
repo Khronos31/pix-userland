@@ -4,6 +4,13 @@
 #include "usb_selector.h"
 typedef struct usb_backend usb_backend;
 typedef int (*usb_sink)(void *, const uint8_t *, size_t);
+enum { USB_MODEL_DT181 = 181, USB_MODEL_DT295 = 295 };
+int usb_model(const usb_backend *);
+void *usb_native_context(usb_backend *);
+void *usb_native_handle(usb_backend *);
+int usb_open_model(usb_backend **, const usb_selector *, int fd, int detach, int expected_model);
+/* Enumerate only one requested model. usb_list() remains the legacy DT181-only API. */
+int usb_list_model(int json, int expected_model);
 void usb_diagnostics(usb_backend *, int enabled);
 int usb_list(int json);
 /* Returns 0, or a shared CLI exit class: 3 absent, 4 busy/kernel-bound,

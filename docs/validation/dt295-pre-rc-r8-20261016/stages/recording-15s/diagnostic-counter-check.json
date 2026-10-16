@@ -1,0 +1,15 @@
+{
+  "consistent": true,
+  "capture_size_bytes": 30474236,
+  "capture_packets": 162097,
+  "confirmed_bytes": 30474236,
+  "end_packets": 162097,
+  "end_state": 16,
+  "usb_delivered_bytes": 30474240,
+  "trailing_bytes": 4,
+  "stop_drained_bytes": 0,
+  "pending_bytes": 0,
+  "rejected_bytes": 0,
+  "uncertain_bytes": 0,
+  "usb_max_gap_ns": 57697000
+}

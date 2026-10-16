@@ -1,0 +1,23 @@
+{
+  "integrated_unix": 1792132718.214049,
+  "files": [
+    "src/dt295_capture.c",
+    "tests/test_dt295_capture.c",
+    "tests/test_dt295_routes.c"
+  ],
+  "before": {
+    "src/dt295_capture.c": "41ed4335b7c921f57c1c8d6dc59d6bff3071ffe968a7202420b41f47fae7b985",
+    "tests/test_dt295_capture.c": "a0663407ed3f7f16c7d00da2dd5119e975f7f0f90372d0a4adef19fa0f9c53d5",
+    "tests/test_dt295_routes.c": "ea42c49bb2c64dfe0135569bbcfbe29b0d26c2f8595f6f726eeae6a791d2943a"
+  },
+  "after": {
+    "src/dt295_capture.c": "df37197e8a0dc0ea56f1eae96f41625fd1ee79ab06dd3d1e48c0e0098eaae6b1",
+    "tests/test_dt295_capture.c": "4c3a03a22635acf39af4ccb2e86d785919f60ae23d0f7250e4733af7a1d2c6d2",
+    "tests/test_dt295_routes.c": "15fb908bf55ee89c00afde055b36d580278b5e7c7dafefd5e1f53d4e51c9626c"
+  },
+  "source_inputs_verified": 71,
+  "source_exactly_matches_tested_r8": true,
+  "RC_build": false,
+  "version": "0.1.4",
+  "notes": "Parent integrated exactly reviewed/tested frozen three-file Luna implementation. No rebuild or new hardware run needed to establish source identity; docs reviewed separately."
+}

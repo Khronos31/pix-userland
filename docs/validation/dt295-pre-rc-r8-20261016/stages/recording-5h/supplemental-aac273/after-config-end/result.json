@@ -1,0 +1,61 @@
+{
+  "schema": "dt295-bounded-aac-window-v1",
+  "verdict": "absent",
+  "analysis_valid": true,
+  "input": {
+    "ts_name": "capture.ts",
+    "pid": 273,
+    "start_packet_zero_based": 114876590,
+    "packet_count_requested": 65536,
+    "packet_count_cap": 65536
+  },
+  "window": {
+    "packet_total": 194054187,
+    "selected_pid_packets": 0,
+    "selected_pid_payload_packets": 0,
+    "selected_pid_pusi_packets": 0,
+    "selected_pid_first_packet_1based": null,
+    "selected_pid_last_packet_1based": null,
+    "leading_partial_pes_packets_omitted": 0,
+    "complete_pes_count": 0,
+    "invalid_pes_headers": [],
+    "pes_length_violations": [],
+    "interior_pes_errors": [],
+    "final_open_pes_count": 0,
+    "final_partial_pes_count": 0,
+    "maximum_pes_bytes": 0,
+    "ts_packet_errors": [],
+    "global_sync_errors_in_window": 0,
+    "continuity_window_initial_pid_packet_unchecked": true
+  },
+  "audio": {
+    "es_bytes": 0,
+    "epochs": [],
+    "transitions": [],
+    "frames_seen": 0,
+    "frames_emitted": 0,
+    "frames_before_pce": 0,
+    "bytes_before_pce": 0,
+    "initial_sync_bytes_omitted": 0,
+    "trailing_partial_bytes": 0,
+    "decode_failures": [
+      "no-adts-sync"
+    ],
+    "decoder_timed_out": false,
+    "pce_wait_pending_epoch_count": 0,
+    "framing_error": "no initial ADTS synchronization found"
+  },
+  "verdict_basis": {
+    "no_frames_never_pass": true,
+    "decoded_pass_requires_complete_PES_ADTS_frames_and_clean_decoder": true,
+    "leading_partial_PES_is_reported_as_window_boundary": true,
+    "final_open_or_partial_PES_is_reported_as_window_boundary": true,
+    "full_run_issue2_absence_or_presence_not_inferred_from_one_window": true
+  },
+  "limitations": [
+    "Only the explicit packet window was read; no whole-file walk was performed.",
+    "Initial PID continuity before this window is unknown.",
+    "This reports one stream window and cannot establish that no unobserved PMT transition occurred elsewhere.",
+    "A clean AAC decode is not a full recording quality or route/register readback verdict."
+  ]
+}

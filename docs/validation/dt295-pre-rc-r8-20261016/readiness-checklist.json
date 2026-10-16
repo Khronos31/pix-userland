@@ -1,0 +1,35 @@
+{
+  "updated_unix": 1792133269.17975,
+  "complete": true,
+  "RC_readiness": true,
+  "version": "0.1.4",
+  "RC_build": false,
+  "checks": {
+    "r8_source_and_parent_review": "passed; source-hashes.json, parent-harness-review.json",
+    "CLI_and_exit_compatibility": "passed; B/live-add-candidate-r8/parent-development-build.json",
+    "native_and_linux_tests": "passed; native Werror+ASanUBSan and Linux x64 full suite",
+    "seven_development_targets": "passed; parent-cross-validation-review.json; other ABI runtime not performed",
+    "15s_hardware_and_whole_TS": "passed; stages/recording-15s/parent-review.json",
+    "5min_hardware_and_whole_TS": "passed; substantial queue growth recovered before end; parent-review.json",
+    "5h_hardware_and_whole_TS": "passed; 18000.003s, whole194054187 packets, section/mainAV/SHA clean",
+    "actual_live_PID_addition_and_post_add_30min": "observed_pass; conservative7947.878s, bounded secondaryAAC decode clean, Issue2 partial-PES boundaries retained",
+    "source_integration_and_documentation": "passed; exact tested71 inputs integrated, README/docs reviewed",
+    "source_patch_and_final_Japanese_readiness_report": "passed; final-source-hashes.json / source-review.patch / readiness-report-ja.txt"
+  },
+  "deferred_issue": "https://github.com/Khronos31/pix-userland/issues/2",
+  "constraints": [
+    "No RC/release/package/version bump/tag/push/publication performed",
+    "Original repository now matches tested r8 source71 inputs; documentation updated",
+    "Frozen campaign source/binary/harness unchanged throughout execution"
+  ],
+  "limits": [
+    "Only macOS arm64 DT295 terrestrial target0 real hardware tested",
+    "Linux x64 synthetic tests executed; ARM64 Windows Android cross compile and ABI audits only",
+    "No full-input independent AES verification; raw not saved",
+    "Saved TS SHA compares two file reads; runtime input-stream SHA is not available",
+    "Saved TS C checker reuses runtime implementation; sections and FFmpeg add checks",
+    "Unsafe new ECM/rebind/primary replacement remains explicitly unsupported"
+  ],
+  "readiness_scope": "Approved tested scope, with explicitly deferred Issue2 partial-PES boundaries and documented platform/secondary-audio coverage limits; no new blocker observed.",
+  "automation_status": "PAUSED"
+}

@@ -1,0 +1,99 @@
+{
+  "steps": [
+    {
+      "start_packet_zero_based": 114659589,
+      "packet_count": 65536,
+      "pid273_present_in_PMT1024": false
+    },
+    {
+      "start_packet_zero_based": 114551088,
+      "packet_count": 65536,
+      "pid273_present_in_PMT1024": true
+    },
+    {
+      "start_packet_zero_based": 114605338,
+      "packet_count": 65536,
+      "pid273_present_in_PMT1024": true
+    },
+    {
+      "start_packet_zero_based": 114632463,
+      "packet_count": 65536,
+      "pid273_present_in_PMT1024": false
+    }
+  ],
+  "final_start_packet_zero_based": 114588954,
+  "exit_code": 0,
+  "verdict": "decoded_pass",
+  "transitions": [
+    {
+      "program": 1024,
+      "present": true,
+      "version": 30,
+      "packet_1based": 114589416,
+      "ecm_pids": [
+        2305
+      ]
+    },
+    {
+      "program": 1024,
+      "present": false,
+      "version": 31,
+      "packet_1based": 114623837,
+      "ecm_pids": [
+        2305
+      ]
+    },
+    {
+      "program": 1025,
+      "present": true,
+      "version": 2,
+      "packet_1based": 114589439,
+      "ecm_pids": [
+        2305
+      ]
+    },
+    {
+      "program": 1025,
+      "present": false,
+      "version": 3,
+      "packet_1based": 114623264,
+      "ecm_pids": [
+        2305
+      ]
+    }
+  ],
+  "window": {
+    "packet_total": 194054187,
+    "selected_pid_packets": 551,
+    "selected_pid_payload_packets": 551,
+    "selected_pid_pusi_packets": 174,
+    "selected_pid_first_packet_1based": 114589032,
+    "selected_pid_last_packet_1based": 114627412,
+    "leading_partial_pes_packets_omitted": 2,
+    "complete_pes_count": 173,
+    "invalid_pes_headers": [],
+    "pes_length_violations": [],
+    "interior_pes_errors": [],
+    "final_open_pes_count": 1,
+    "final_partial_pes_count": 1,
+    "maximum_pes_bytes": 752,
+    "ts_packet_errors": [],
+    "global_sync_errors_in_window": 0,
+    "continuity_window_initial_pid_packet_unchecked": true
+  },
+  "audio": {
+    "es_bytes": 80722,
+    "transitions": [],
+    "frames_seen": 173,
+    "frames_emitted": 173,
+    "frames_before_pce": 0,
+    "bytes_before_pce": 0,
+    "initial_sync_bytes_omitted": 0,
+    "trailing_partial_bytes": 0,
+    "decode_failures": [],
+    "decoder_timed_out": false,
+    "pce_wait_pending_epoch_count": 0,
+    "framing_error": null
+  },
+  "limits": "One finite PMT-removal neighborhood; no full secondary audio decode, no assumption of absent transitions elsewhere. Final partial PES may coincide with actual broadcast removal and must not be described only as arbitrary window clipping."
+}

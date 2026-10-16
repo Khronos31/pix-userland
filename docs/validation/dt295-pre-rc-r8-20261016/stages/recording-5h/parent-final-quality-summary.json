@@ -1,0 +1,20 @@
+{
+  "analysis_valid": true,
+  "fix_path_verdict": "observed_pass",
+  "live_add_count": 1,
+  "minimum_post_add_seconds_observed": 7947,
+  "runtime_basis": "post-add duration uses conservative DT295 status elapsed time only; PCR differences are metadata cross-checks and cannot independently satisfy 30 minutes",
+  "route_ecm_limit": "preservation is based on fixed source guard and committed diagnostic event, not tuner register readback",
+  "startup_slot_limit": "initial PMT inventory is observational and cannot establish exact startup slots",
+  "scan_limit": "Only initial, event-adjacent, and terminal windows were scanned; no full TS/raw scan was performed.",
+  "reviewed_unix": 1792132956.593717,
+  "full_saved_TS_CC_TEI_scramble_structure_errors": 0,
+  "all_sections_CRC_structure_errors": 0,
+  "main_AV_complete_PES_decodes": "passed",
+  "supplemental_secondary_audio": "bounded clean complete PES/ADTS decode; whole secondary audio decode not performed",
+  "deferred_Issue2": "Actual appearance leading partial PES and natural disappearance last partial PES retained; user excluded from next mandatory fixes; no blanket PID273 CC exclusion",
+  "generic_findings_preserved": true,
+  "independent_metadata_review_agent": "/root/dt295_routes",
+  "conservative_elapsed_status_envelope_seconds_precise": 7947.878,
+  "helper_minimum_seconds_is_integer_floor": true
+}

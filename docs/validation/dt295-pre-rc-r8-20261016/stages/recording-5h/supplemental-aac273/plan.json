@@ -1,0 +1,49 @@
+{
+  "parent_reviewed_unix": 1792132616.727966,
+  "source_sha256": "94a0f3161d4868f8cfe09bd08e5bc5244c0940858bd562af9103e7fbda34c337",
+  "synthetic_tests_independently_rerun": 14,
+  "whole_audit_finished": true,
+  "windows": [
+    {
+      "label": "add-boundary",
+      "start_packet_zero_based": 107854477,
+      "packet_count": 65536
+    },
+    {
+      "label": "post-add",
+      "start_packet_zero_based": 107887245,
+      "packet_count": 65536
+    },
+    {
+      "label": "post-add-later",
+      "start_packet_zero_based": 107952781,
+      "packet_count": 65536
+    },
+    {
+      "label": "active-mid",
+      "start_packet_zero_based": 111243874,
+      "packet_count": 65536
+    },
+    {
+      "label": "near-config-end",
+      "start_packet_zero_based": 114442588,
+      "packet_count": 65536
+    },
+    {
+      "label": "after-config-end",
+      "start_packet_zero_based": 114876590,
+      "packet_count": 65536
+    },
+    {
+      "label": "post-30min",
+      "start_packet_zero_based": 127200844,
+      "packet_count": 65536
+    },
+    {
+      "label": "terminal",
+      "start_packet_zero_based": 193988651,
+      "packet_count": 65536
+    }
+  ],
+  "limits": "Explicit finite windows only; primary AV all-run audit and global TS integrity separate. PID1411 time is only a selection hint, not evidence of PID273 membership."
+}

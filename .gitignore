@@ -27,3 +27,12 @@ __pycache__/
 /tests/test-usb-listing
 
 tests/test-usb-restart
+
+/tests/test-dt295
+/tests/test-dt295-routes
+/tests/test-dt295-stream
+/tests/test-ts-output
+
+/tests/test-dt295-capture
+
+/tests/test-dt295-protocol

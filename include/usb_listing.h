@@ -6,8 +6,9 @@ typedef struct {
     unsigned index, bus, address;
     uint8_t ports[USB_SELECTOR_MAX_PORTS];
     unsigned port_count;
+    uint16_t product; /* zero preserves legacy DT181 synthetic callers. */
 } usb_device_info;
-/* DT181 descriptor enumeration only; never claims the receiver or reads serials.
+/* DT181/DT295 descriptor enumeration only; never claims the receiver or reads serials.
  * Unknown paths are null in JSON. "ready" describes the known receiver layout,
  * not successful interface claiming or signal reception. */
 int usb_listing_write(FILE *, const usb_device_info *, size_t count, int json);

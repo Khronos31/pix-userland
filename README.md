@@ -7,7 +7,7 @@
 
 pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御し、188 バイトの MPEG-TS パケットを出力する C11 実装のユーザー空間 CLI ツール（`pix-ts`）です。
 
-単一チューナーを制御し、選択した伝送ストリーム全体の TS パケットを出力します。
+単一チューナーを制御して TS パケットを出力します。DT181は選択した伝送ストリーム全体、開発中のDT295は番組表から計画した有限の広告PIDとSIが対象です。
 
 なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。
 
@@ -18,10 +18,10 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 - **CaptyTV Hi-Vision PIX-DT181-PU0**
   - USB VID:PID: `06b8:102b`
   - 対応放送波: 地上デジタル放送、BS デジタル放送、110 度 CS デジタル放送
-  - 本ツールで動作を確認している唯一の実機対応モデルです。
+  - 既存のリリースで実機対応を確認しているモデルです。
 
 > [!NOTE]
-> PIX-DT141、PIX-DT195、PIX-DT295 など、他の CaptyTV や StationTV シリーズは未対応かつ未検証です。製品名が同じでも、この実装での動作は未確認です。
+> PIX-DT141、PIX-DT195 など、他の CaptyTV や StationTV シリーズは未対応かつ未検証です。PIX-DT295 の C 経路は開発中で、macOS arm64・地上波 T27・ターゲット0では 15 秒、5 分、5 時間の受信と保存 TS 検査を確認しました。5 時間の TS は 194,054,187 パケット（36,482,187,156 バイト）で、CC、TEI、scramble、invalid、section CRC の各異常は 0 件でした。PID 273 の追加イベントも実機診断で確認しました（機器レジスター readback は未実施）。追加音声の出現・消失境界における部分 PES の Issue #2 は未解決です。DT295 はまだ RC や配布パッケージに含まれません。各 OS の検証範囲と制限は[DT295 の状況](docs/dt295.md)を参照してください。
 
 ### 配布ターゲットと検証状況
 
@@ -31,14 +31,16 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 |---|---|---|
 | **darwin-arm64** (macOS) | OS 標準ライブラリに動的依存 | DT181 実機にて C 版による地上・BS・110 度 CS の選局・受信・TS 復元を確認済み。CI 単体テストを通過。 |
 | **linux-x86_64** | musl 完全静的（glibc / musl 両対応） | Latitude上で実機受信を確認。v0.1.3採用コードで地上波25ch・5時間2回を合格。詳細は[検証記録](docs/validation.md)。 |
-| **linux-aarch64** | musl 完全静的（glibc / musl 両対応） | ビルドおよび検査範囲のみ。実機未検証。CI 単体テストを通過。 |
-| **android-aarch64** | Android NDK r27d / API 24（Bionic 動的依存） | Termux 向け CLI。クロスビルドと ELF 検査のみ確認、実機未検証。 |
-| **android-armv7a** | Android NDK r27d / API 24（Bionic 動的依存） | 同上。 |
-| **android-x86_64** | Android NDK r27d / API 24（Bionic 動的依存） | 同上。 |
-| **windows-x64** | OS 標準 DLL（Win32 API）に動的依存 | ビルドおよび検査範囲のみ。別途 libusb DLL は不要ですが機器への WinUSB ドライバ設定が必須。CI 単体テストを通過。 |
+| **linux-aarch64** | musl 完全静的（glibc / musl 両対応） | r8 はクロスビルドと ELF 形式・依存関係検査のみ。実行・実機未検証。 |
+| **android-aarch64** | Android NDK r27d / API 24（Bionic 動的依存） | Termux 向け CLI。r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
+| **android-armv7a** | Android NDK r27d / API 24（Bionic 動的依存） | r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
+| **android-x86_64** | Android NDK r27d / API 24（Bionic 動的依存） | r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
+| **windows-x64** | OS 標準 DLL（Win32 API）に動的依存 | r8 はクロスビルドと PE 形式・依存関係検査のみ。実行・実機未検証。別途 libusb DLL は不要ですが機器への WinUSB ドライバ設定が必須。 |
+
+r8 の7ターゲット確認では、native macOS と Linux x64 でテストを実行しました。Linux ARM64、Windows x64、Android の3 ABI はクロスビルドと形式・依存関係検査のみで、各バイナリは実行していません。これは既存 Release の対応範囲を変更するものではありません。
 
 - **注意事項・未検証項目**:
-  - 長時間受信の確認範囲はLinux x86_64・地上波25chの5時間2回です。受信中の USB ケーブル抜去、スリープからの復帰処理は未検証です。
+  - 既存 DT181 の長時間受信確認は Linux x86_64・地上波 T25 の5時間録画2回です（詳細は[検証記録](docs/validation.md)）。DT295 r8 の macOS arm64・T27・ターゲット0の5時間録画は上記の別試験です。受信中の USB ケーブル抜去、スリープからの復帰処理はいずれも未検証です。
   - Linux 向けの udev / mdev 設定例を用意していますが、新規権限ルールによる実機でのホットプラグ動作は未検証です。
   - Android 向けは Termux の端末環境で動かす CLI バイナリであり、Android アプリ（APK）ではありません。実行には Termux 上で `Termux:API` アプリと `termux-api` パッケージ（`termux-usb` コマンドを含む）が必要です。
 
@@ -65,6 +67,8 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 ```sh
 python3 tools/prepare-assets.py --app '/path/to/StationTV LE.app' --fpga '/path/to/pixy_fpga_102b.bin'
 ```
+
+DT295用C経路は専用の `dt295.assets` を使います。DT181の3ファイルとは互換性がありません。DT295の構成、必要入力、実機確認範囲と制約については[DT295 の状況](docs/dt295.md)を参照してください。
 
 ### 実行時ライブラリ
 
@@ -235,7 +239,8 @@ pix-ts --system terrestrial|bs|cs --channel N [options]
 | `--tsid` | `N` | 衛星放送の TSID を 10 進数または 16 進数（`0x...`）で指定します。省略時は最初に検出した TS を選択します。 |
 | `-t, --time` | `SECONDS` | 受信時間を秒単位で指定します。`-` または省略時は SIGINT / SIGTERM で停止するまで継続受信します。 |
 | `-o, --output` | `PATH` | 出力先ファイルパスを指定します。既存ファイルは上書きします。省略時または `-` の場合は標準出力に出力します。 |
-| `-a, --assets` | `DIR` | 機器データ（`fpga.bin`, `bootstrap.bin`, `validation.bin`）のあるディレクトリを指定します（既定値: `./assets`）。 |
+| `--model` | `dt181 / dt295` | 機種を指定します（既定値: `dt181`）。実験的 DT295 は macOS・地上波・ターゲット0のみです。 |
+| `-a, --assets` | `DIR` | 機器データのあるディレクトリを指定します（既定値: `./assets`）。DT181 は3ファイル、実験的 DT295 は `dt295.assets` を読み込みます。 |
 | `-d, --device` | `SPEC` | インデックス（既定値: `0`）、`BUS:ADDRESS`、`BUS-PORT[.PORT...]` を指定します。 |
 | `--fd` | `FD` | Android / Termux から渡された借用 USB ファイルディスクリプタを指定します（引数末尾の整数でも指定可能）。Windows では未対応です。`--list` や 0 以外の `--device` とは併用できません。 |
 | `--lna` | `on / off` | 内部受信増幅器（LNA）を設定します（既定値: 地上波は `off`、BS/CS は `on`）。LNB 電源ではありません。 |

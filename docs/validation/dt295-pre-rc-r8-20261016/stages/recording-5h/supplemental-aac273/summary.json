@@ -1,0 +1,140 @@
+{
+  "results": [
+    {
+      "label": "add-boundary",
+      "start_packet_zero_based": 107854477,
+      "exit_code": 0,
+      "started_unix": 1792132616.732397,
+      "ended_unix": 1792132617.0178611,
+      "verdict": "decoded_pass",
+      "selected_pid_packets": 396,
+      "complete_pes": 125,
+      "frames_seen": 125,
+      "frames_emitted": 125,
+      "framing_error": null,
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": [
+        1024,
+        1025
+      ]
+    },
+    {
+      "label": "post-add",
+      "start_packet_zero_based": 107887245,
+      "exit_code": 0,
+      "started_unix": 1792132617.017876,
+      "ended_unix": 1792132617.1965408,
+      "verdict": "decoded_pass",
+      "selected_pid_packets": 812,
+      "complete_pes": 264,
+      "frames_seen": 264,
+      "frames_emitted": 264,
+      "framing_error": null,
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": [
+        1024,
+        1025
+      ]
+    },
+    {
+      "label": "post-add-later",
+      "start_packet_zero_based": 107952781,
+      "exit_code": 0,
+      "started_unix": 1792132617.196556,
+      "ended_unix": 1792132617.3741179,
+      "verdict": "decoded_pass",
+      "selected_pid_packets": 826,
+      "complete_pes": 279,
+      "frames_seen": 279,
+      "frames_emitted": 279,
+      "framing_error": null,
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": [
+        1024,
+        1025
+      ]
+    },
+    {
+      "label": "active-mid",
+      "start_packet_zero_based": 111243874,
+      "exit_code": 0,
+      "started_unix": 1792132617.374136,
+      "ended_unix": 1792132617.6134558,
+      "verdict": "decoded_pass",
+      "selected_pid_packets": 792,
+      "complete_pes": 275,
+      "frames_seen": 275,
+      "frames_emitted": 275,
+      "framing_error": null,
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": [
+        1024,
+        1025
+      ]
+    },
+    {
+      "label": "near-config-end",
+      "start_packet_zero_based": 114442588,
+      "exit_code": 0,
+      "started_unix": 1792132617.613472,
+      "ended_unix": 1792132617.849727,
+      "verdict": "decoded_pass",
+      "selected_pid_packets": 814,
+      "complete_pes": 276,
+      "frames_seen": 276,
+      "frames_emitted": 276,
+      "framing_error": null,
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": [
+        1024,
+        1025
+      ]
+    },
+    {
+      "label": "after-config-end",
+      "start_packet_zero_based": 114876590,
+      "exit_code": 0,
+      "started_unix": 1792132617.849747,
+      "ended_unix": 1792132618.0369148,
+      "verdict": "absent",
+      "selected_pid_packets": 0,
+      "complete_pes": 0,
+      "frames_seen": 0,
+      "frames_emitted": 0,
+      "framing_error": "no initial ADTS synchronization found",
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": []
+    },
+    {
+      "label": "post-30min",
+      "start_packet_zero_based": 127200844,
+      "exit_code": 0,
+      "started_unix": 1792132618.036931,
+      "ended_unix": 1792132618.220596,
+      "verdict": "absent",
+      "selected_pid_packets": 0,
+      "complete_pes": 0,
+      "frames_seen": 0,
+      "frames_emitted": 0,
+      "framing_error": "no initial ADTS synchronization found",
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": []
+    },
+    {
+      "label": "terminal",
+      "start_packet_zero_based": 193988651,
+      "exit_code": 0,
+      "started_unix": 1792132618.2206101,
+      "ended_unix": 1792132618.405747,
+      "verdict": "absent",
+      "selected_pid_packets": 0,
+      "complete_pes": 0,
+      "frames_seen": 0,
+      "frames_emitted": 0,
+      "framing_error": "no initial ADTS synchronization found",
+      "interior_pes_errors": [],
+      "PMT_pid273_programs": []
+    }
+  ],
+  "whole_secondary_audio_decoded": false
+}
