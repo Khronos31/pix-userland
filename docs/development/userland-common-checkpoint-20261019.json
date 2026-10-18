@@ -1,13 +1,15 @@
 {
-  "kind": "reviewed-increment-source-checkpoint",
+  "kind": "work-in-progress-source-checkpoint-review-pending",
   "branch": "wip/userland-common-20261017",
   "upstream_main": "af57d4c2824635caa46f57aa873e3b4c3ca4320b",
-  "snapshot_source": "/config/.work/userland-common-20261017/implementation/pix-dt181-receiver-adapter",
-  "snapshot_file_count": 316,
+  "snapshot_source": "/config/.work/userland-common-20261017/implementation/pix-dt181-public-runtime-pinned",
+  "snapshot_file_count": 327,
   "snapshot_file_sha256": {
-    "CMakeLists.txt": "ebdebc10113ae7f2ff80c76bddf1a13f0f805b8b95d9496e32c8c2ceca7cdfb1",
+    "CMakeLists.txt": "ba533818232e545e1576256acfffdf9c0cf503f001d86c62d0ee2112f1d8e0e6",
     "COPYING.libusb": "5df07007198989c622f5d41de8d703e7bef3d0e79d62e24332ee739a452af62a",
     "Makefile": "5eccba573a4d87499337905f6b74466ac74ba793b4e8cb0e0f35604cee41735b",
+    "cmake/dtv-userland-core.revision": "7e1b4c3f6abf79caadf049d0f26887539a49f4732f1bdbb8a789f8c580ef9b58",
+    "cmake/px4-userland.revision": "9ee5ae4b8cf45118f6867d287b62eeb3344058cc381537b090458cd206fffe82",
     "common-union-source-manifest.sha256": "28ee0472eb2dd6f8ed3b3759825fb38c5ec09addef8a142b4f2e18c2b6604425",
     "common-union/.gitignore": "f2ffe9e89874ecc4599184fa0724445f8526d0af10bc3360cfc7c26d4386d73c",
     "common-union/AGENTS.md": "3c86264081f42936cfd56d26ac0d6dfc291fa9e2903a892f52ec1aa9f074219d",
@@ -249,6 +251,13 @@
     "old-control-source/siano-capture-consumer/write-policy.h": "b5bafc0e57c18caf1bd2013a57361a75beb6c818c1096579becee90f4a2a50b1",
     "pix-capture-consumer.cpp": "586ab6b5ca6921c329fced625026c1315cdf96cf509215896bd44758175346c1",
     "pix-capture-consumer.h": "166df21770c091b94814dc7156258cb3a32bd4bb8db058539eeac33fb0790d2b",
+    "pix-dt181-consumer.cpp": "12ca5d4ed06852dbd2052194734433b8ada09e1e0fce16a7a0746f93878b8c8d",
+    "pix-dt181-consumer.h": "b14be7f5d5c470a44ccf5e7d3d243a594d0b9cb0a5c49927f8c8953700efa573",
+    "pix-dt181-receiver-adapter.cpp": "caf17096fbc0bc1779f8341fc2ac5e7b2ee0389049e80f64e919786c764b671b",
+    "pix-dt181-receiver-adapter.h": "fbf06cccf5997fbb34c5548cba6fdce68450b8dd29c45cec21c7f8f85e2fc8a0",
+    "pix_runtime.cpp": "5a76f862e76dfbb08666037d6cad61d91ececcd72482875585644db11f6fde3c",
+    "pix_runtime.h": "c5622b8ccb914bfb37cbd14c241b1cd4f192167ed7bf7ffca750dbe8b72a16d9",
+    "pixd.cpp": "92ba7bbcf658ace4a1f823d8921a5e1b0cc95fd4c4a7f545a35f221512e599e5",
     "src/channel.c": "e5cf29936e46d7f1d60efbfe9b3d18ed7425b3c024cb139fe31eba263c075ea1",
     "src/control.c": "ff2627afc2b2df2cb93000dc5d89507609add9514c24f5b15d56412ad86f98c8",
     "src/crypto.c": "5b479846e852eae2cd6113897c0b04ae2c2b6cd4cecb04a2ed411c058bb056be",
@@ -285,8 +294,14 @@
     "tests/dt295_common_sink_adapter.cpp": "b220215600a0b27c658d06d829ae62e8187dd67f77baa788e7c8baf9fef7e91e",
     "tests/dt295_consumer_proof.cpp": "6a218e8e656afc726a9341aa63bf321b87a0c2bdcb4d1a07127f81b41f3437a5",
     "tests/dt295_stream_native_proof.c": "b7ba78b7a58ea66857fc1a1a314d63f415c6c53737b1a026af2aa6f170ab3edf",
+    "tests/pix-public-runtime-bottom.c": "1da59cfc18321ce40c4af0351d94d7fe5afba67e7ffdba8571d726f978d4e220",
+    "tests/pix-public-runtime-libusb-bottom.c": "c9bbb5829bef7a319cc3beed752773ed85222f3e6bf5ae13bd43edd670546e0e",
+    "tests/pix-runtime-vectors.h": "c7f06820d63196414e851a54079ca30d5bea5b0da79f66ba904c44436289b65f",
     "tests/pix_capture_characterization_shim.c": "73d557a05dd6965ecd45e62cbd0e6537323ee5c85b3a8d59c144f96af0c7b404",
+    "tests/pix_dt181_receiver_adapter_proof.cpp": "c73ab37f065038b2ccaa49ef366232d4eef16b57c16850e4a5ae9dc51920a77d",
     "tests/pix_libusb_bottom.c": "c9bbb5829bef7a319cc3beed752773ed85222f3e6bf5ae13bd43edd670546e0e",
+    "tests/pix_public_runtime_proof.cpp": "fe9bd80cce3f28533b9a5a5b902b28f304ec59c1e570193a8ae9c7af73ec3be5",
+    "tests/pix_runtime_list_proof.cpp": "2c57fdd1e8c86fb7557dd01d1b103e78899f93fe51d5f1428d66cc1db6ae7188",
     "tests/pix_session_baseline.json": "bdf7db76c45b5107843699a9f3ea00ee1261ed5a6ee06cf0bfa4d6279747b877",
     "tests/pix_session_fake.c": "c488242c628bb9b02ec6fb7455d1d75900eea525cda92eee6d3866510e4cbbb8",
     "tests/run_dt181_capture_bridge.py": "a38525acab738dd88fc9cc2cb2150bb7fb65f7ce05d375450e196eb2bde6bfa9",
@@ -316,11 +331,7 @@
     "tests/test_usb_restart.c": "0d3b580bf876d27273d05ca0cc440cb5d37cd91fbb450cba2870a577d6ae673d",
     "tests/test_usb_selector.c": "8d5be95bcaefffe04923f80d510f04d84c413777af6411fc81972c6a37cbd6e4",
     "tests/vectors.h": "c7f06820d63196414e851a54079ca30d5bea5b0da79f66ba904c44436289b65f",
-    "pix-dt181-consumer.cpp": "12ca5d4ed06852dbd2052194734433b8ada09e1e0fce16a7a0746f93878b8c8d",
-    "pix-dt181-consumer.h": "b14be7f5d5c470a44ccf5e7d3d243a594d0b9cb0a5c49927f8c8953700efa573",
-    "pix-dt181-receiver-adapter.cpp": "caf17096fbc0bc1779f8341fc2ac5e7b2ee0389049e80f64e919786c764b671b",
-    "pix-dt181-receiver-adapter.h": "fbf06cccf5997fbb34c5548cba6fdce68450b8dd29c45cec21c7f8f85e2fc8a0",
-    "tests/pix_dt181_receiver_adapter_proof.cpp": "c73ab37f065038b2ccaa49ef366232d4eef16b57c16850e4a5ae9dc51920a77d"
+    "userland/tools/pix_ts.cpp": "44dca911a5c2459c2b873af4d22cb26dabfa45d5280e9b06b106c39fbbec23d8"
   },
   "retained_upstream_files_outside_snapshot": [
     ".clang-format",
@@ -469,12 +480,18 @@
     "tools/prepare-dt295-assets.py",
     "tools/verify-release.py"
   ],
-  "overlay_policy": "最新mainへ受入スナップショットの内容を重ねた。manifest外の既存upstream fileは保持した。このmetadata file自体は受入sourceスナップショットの範囲外。",
+  "overlay_policy": "固定済み製品layout/default-fetch候補を専用branchへ保全。manifest外のupstream fileは保持。runtime独立review待ちでrelease/全機能受入ではない。metadata自体はsnapshot外。",
   "acceptance_scope": [
-    "DT295 actual-pipelineのoffline限定受入を保持。DT181 receiver adapterを追加し、衛星未指定写像/status容量/held callback gateを修正後、親がnormal/SANを実行してexit0。",
-    "公開pixd/pix-ts、実USB/RF、全OSの認定とは別。DT295 Issue4とLSan4976byte/6allocの失敗記録を保持する。"
+    "製品layout/実pin増分は親限定確認。実取得P293file/common86fileと固定入力が一致し、親が別process実clientのruntime proofを再実行してexit0。",
+    "元DT181 runtimeのGLM独立reviewは限定READY。製品layout/実pinは親限定確認。全CLI/全OS/実機/最終配布/RCを認定するものではない。"
   ],
   "acceptance_index": "https://github.com/Khronos31/agent-workspace/blob/design/userland-common-contract-20261017/implementation/accepted-source-index.md",
   "ci_policy": "このソース保全コミットは[skip ci]を含む。リリース・tag・mainへの反映は別の判断とする。",
-  "known_followups": []
+  "known_followups": [],
+  "previous_checkpoint_commit": "ccd97dd6050e360f58335acded94d08bb01b43ca",
+  "runtime_dependencies": {
+    "px4-userland": "a5b72256e612995f0c3766ac31949ca7a7e485a5",
+    "dtv-userland-core": "80ccc7b7e9ccad7c9b3656f02a28d12f003c45a0",
+    "default_fetch": "SSH repositories, full immutable commit locks; source override remains explicit development input"
+  }
 }
