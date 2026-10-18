@@ -5,7 +5,7 @@ if(NOT DTV_USERLAND_CORE_SOURCE_DIR)
     message(FATAL_ERROR "Pass the explicit DTV_USERLAND_CORE_SOURCE_DIR source override")
 endif()
 set(DTV_USERLAND_BUILD_CAPTURE ON CACHE BOOL "Build packet capture storage" FORCE)
-set(DTV_USERLAND_BUILD_RECEIVER OFF CACHE BOOL "Do not build receiver engine" FORCE)
+set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
 add_subdirectory(${DTV_USERLAND_CORE_SOURCE_DIR} core-capture)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -137,3 +137,39 @@ target_link_options(dt295_actual_old_pipeline PRIVATE
     -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
     -Wl,--wrap=now_ms -Wl,--wrap=sleep_ms
     -Wl,--wrap=random_bytes -Wl,--wrap=ts_output_submit)
+
+add_library(pix_dt181_c_backend STATIC
+    src/pid_filter.c src/control.c src/channel.c src/crypto.c src/platform.c
+    src/protocol.c src/transport.c src/usb_selector.c src/usb_listing.c
+    src/usb_libusb.c src/usb_log.c src/diagnostic.c
+    src/dt181_capture_bridge.c src/dt181_session.c src/dt181_capture_host.c)
+target_compile_definitions(pix_dt181_c_backend PRIVATE
+    _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64 PIX_CAPTURE_BRIDGE_EXTERNAL)
+target_include_directories(pix_dt181_c_backend PUBLIC include src)
+target_link_libraries(pix_dt181_c_backend PUBLIC PkgConfig::LIBUSB Threads::Threads)
+
+add_library(pix_dt181_composition STATIC
+    pix-dt181-consumer.cpp pix-dt181-receiver-adapter.cpp)
+target_compile_features(pix_dt181_composition PUBLIC cxx_std_17)
+target_include_directories(pix_dt181_composition PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(pix_dt181_composition PUBLIC
+    dtv::receiver dtv::capture pix_dt181_c_backend)
+target_compile_options(pix_dt181_composition PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+
+add_executable(pix_dt181_receiver_adapter_proof
+    tests/pix_dt181_receiver_adapter_proof.cpp tests/pix_libusb_bottom.c)
+target_include_directories(pix_dt181_receiver_adapter_proof PRIVATE
+    include src tests)
+target_compile_definitions(pix_dt181_receiver_adapter_proof PRIVATE
+    _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL)
+target_compile_options(pix_dt181_receiver_adapter_proof PRIVATE
+    -fno-exceptions -fno-rtti)
+target_link_libraries(pix_dt181_receiver_adapter_proof PRIVATE
+    pix_dt181_composition Threads::Threads)
+target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
+    -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
+    -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
+    -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
+    -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
+    -Wl,--wrap=pthread_mutex_lock)
