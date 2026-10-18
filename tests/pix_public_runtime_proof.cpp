@@ -12,6 +12,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <string_view>
 #include <memory>
 #include <new>
 #include <string>
@@ -31,6 +32,10 @@ unsigned pix_test_shutdown_count(void);
 #include <unistd.h>
 
 namespace {
+
+#ifndef PIXCTL_PATH
+#error "PIXCTL_PATH must name the built pixctl client"
+#endif
 
 bool write_file(const std::string& path, const std::uint8_t* bytes, std::size_t length)
 {
@@ -101,6 +106,117 @@ std::vector<std::uint8_t> read_file(const std::string& path)
     return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), {});
 }
 
+int run_status(const std::string& runtime_dir, std::string& output, bool log_argv = true)
+{
+    if (log_argv) {
+        std::fprintf(stderr, "PROOF status_argv=%s --runtime-dir %s status\n",
+                     PIXCTL_PATH, runtime_dir.c_str());
+    }
+    int output_pipe[2];
+    if (::pipe(output_pipe) != 0) return -1;
+    const pid_t pid = ::fork();
+    if (pid == 0) {
+        (void)::close(output_pipe[0]);
+        if (::dup2(output_pipe[1], STDOUT_FILENO) < 0) _exit(127);
+        (void)::close(output_pipe[1]);
+        const char* argv[] = {PIXCTL_PATH, "--runtime-dir", runtime_dir.c_str(),
+                              "status", nullptr};
+        ::execv(PIXCTL_PATH, const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    (void)::close(output_pipe[1]);
+    std::array<char, 4096U> buffer{};
+    ssize_t count = 0;
+    while ((count = ::read(output_pipe[0], buffer.data(), buffer.size())) > 0)
+        output.append(buffer.data(), static_cast<std::size_t>(count));
+    (void)::close(output_pipe[0]);
+    int status = 0;
+    if (pid < 0 || ::waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status);
+}
+
+bool check_status(std::string_view json, const char* receiver_state, bool leased,
+                  const char* tune_revision)
+{
+    const std::size_t epoch_key = json.find("\"epoch\":\"");
+    if (epoch_key == std::string_view::npos || epoch_key + 42U > json.size()) return false;
+    const std::size_t epoch_start = epoch_key + 9U;
+    if (json[epoch_start + 32U] != '"') return false;
+    for (std::size_t i = 0U; i < 32U; ++i) {
+        const char c = json[epoch_start + i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    const std::size_t instance_key = json.find("\"instance\":\"");
+    if (instance_key == std::string_view::npos || instance_key + 12U >= json.size() ||
+        json[instance_key + 12U] == '"') return false;
+    return json.size() > 2U && json.front() == '{' && json.back() == '\n' &&
+           json.find("\"name\":\"userland.status\"") != std::string_view::npos &&
+           json.find("\"product\":\"pix-userland\"") != std::string_view::npos &&
+           json.find("\"version\":\"0.0.0-dev\"") != std::string_view::npos &&
+           json.find("\"instance\":\"") != std::string_view::npos &&
+           json.find("\"descriptor\":{\"id\":\"0\"") != std::string_view::npos &&
+           json.find(std::string("\"state\":\"") + receiver_state + "\"") !=
+               std::string_view::npos &&
+           json.find(std::string("\"leased\":") + (leased ? "true" : "false")) !=
+               std::string_view::npos &&
+           json.find(std::string("\"tune_revision\":\"") + tune_revision + "\"") !=
+               std::string_view::npos &&
+           json.find("\"measurements\":{}") != std::string_view::npos &&
+           json.find("\"readers\":[]") != std::string_view::npos;
+}
+
+std::string json_string(std::string_view json, const char* name)
+{
+    const std::string key = std::string("\"") + name + "\":\"";
+    const std::size_t start = json.find(key);
+    if (start == std::string_view::npos) return {};
+    const std::size_t value_start = start + key.size();
+    const std::size_t end = json.find('"', value_start);
+    if (end == std::string_view::npos) return {};
+    return std::string(json.substr(value_start, end - value_start));
+}
+
+bool wait_streaming_status(const std::string& runtime_dir, const std::string& epoch,
+                           const std::string& instance, std::string& status,
+                           unsigned& attempts)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        ++attempts;
+        status.clear();
+        if (run_status(runtime_dir, status, false) == 0 &&
+            check_status(status, "streaming", true, "1") &&
+            json_string(status, "epoch") == epoch &&
+            json_string(status, "instance") == instance) return true;
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (true);
+    return false;
+}
+
+bool write_text(const std::string& path, std::string_view value)
+{
+    const int fd = ::open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    if (fd < 0) return false;
+    std::size_t offset = 0U;
+    while (offset < value.size()) {
+        const ssize_t count = ::write(fd, value.data() + offset, value.size() - offset);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { (void)::close(fd); return false; }
+        offset += static_cast<std::size_t>(count);
+    }
+    return ::close(fd) == 0;
+}
+
+std::size_t line_count(const std::string& path)
+{
+    std::ifstream file(path);
+    std::size_t count = 0U;
+    std::string line;
+    while (std::getline(file, line)) ++count;
+    return count;
+}
+
 }  // namespace
 
 int main()
@@ -131,9 +247,50 @@ int main()
         return 4;
     }
 
+    std::string idle_status;
+    const std::size_t idle_tunes = line_count(tune_log);
+    if (run_status(root, idle_status) != 0 ||
+        !check_status(idle_status, "free", false, "0") ||
+        !write_text(root + "/status-idle.json", idle_status) ||
+        line_count(tune_log) != idle_tunes) {
+        std::fprintf(stderr, "PROOF idle status failed: %s", idle_status.c_str());
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 23;
+    }
+    const std::string idle_epoch = json_string(idle_status, "epoch");
+    const std::string idle_instance = json_string(idle_status, "instance");
+
     const pid_t client = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--freq", "473142857", "--time", "1",
+        {"--device", "usb:1-2", "--freq", "473142857", "--time", "3",
          "--output", output_path, "--runtime-dir", root}, root + "/pix-ts.log");
+    std::string streaming_ready_status;
+    unsigned readiness_attempts = 0U;
+    const bool capture_ready = client > 0 &&
+        wait_streaming_status(root, idle_epoch, idle_instance, streaming_ready_status,
+                              readiness_attempts);
+    std::fprintf(stderr, "PROOF streaming_readiness=actual_status attempts=%u ready=%u\n",
+                 readiness_attempts, capture_ready ? 1U : 0U);
+    std::string streaming_status;
+    const std::size_t stream_tunes = line_count(tune_log);
+    if (!capture_ready || !write_text(root + "/status-streaming-ready.json",
+                                      streaming_ready_status) ||
+        stream_tunes == 0U ||
+        run_status(root, streaming_status) != 0 ||
+        !check_status(streaming_status, "streaming", true, "1") ||
+        json_string(streaming_status, "epoch") != idle_epoch ||
+        json_string(streaming_status, "instance") != idle_instance ||
+        !write_text(root + "/status-streaming.json", streaming_status) ||
+        line_count(tune_log) != stream_tunes) {
+        std::fprintf(stderr, "PROOF streaming status failed: %s", streaming_status.c_str());
+        (void)::kill(client, SIGTERM);
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(client, nullptr, 0);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 24;
+    }
+    std::fprintf(stderr, "PROOF observation_invariants=tune_count:%zu->%zu lease:true tune_revision:1\n",
+                 stream_tunes, line_count(tune_log));
     int client_status = 0;
     if (client <= 0 || ::waitpid(client, &client_status, 0) != client ||
         !WIFEXITED(client_status) || WEXITSTATUS(client_status) != 0) {

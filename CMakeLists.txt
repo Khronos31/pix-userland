@@ -271,6 +271,14 @@ target_compile_features(pixd PRIVATE cxx_std_17)
 target_link_libraries(pixd PRIVATE pix_dt181_runtime)
 target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
+add_executable(pixctl ${PX4_ROOT}/tools/px4ctl.cpp)
+target_compile_definitions(pixctl PRIVATE
+    PX4CTL_TOOL_NAME="pixctl" PX4CTL_PRODUCT_SLUG="pix-userland"
+    PX4CTL_PRODUCT_ENUM=pix PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
+target_compile_features(pixctl PRIVATE cxx_std_17)
+target_link_libraries(pixctl PRIVATE pix_px4_runtime dtv::json dtv::identity)
+target_compile_options(pixctl PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+
 add_executable(pix-ts userland/tools/pix_ts.cpp
     ${PX4_ROOT}/tools/px4_ts_core.cpp ${PX4_ROOT}/tools/px4_ts_posix.cpp)
 target_include_directories(pix-ts PRIVATE ${PX4_ROOT}/include ${PX4_ROOT}/tools)
@@ -306,7 +314,8 @@ add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
 target_include_directories(pix_public_runtime_proof PRIVATE tests
     ${PX4_ROOT}/include ${PX4_ROOT}/tools include src)
 target_compile_definitions(pix_public_runtime_proof PRIVATE _POSIX_C_SOURCE=200809L
-    PIXD_PATH="$<TARGET_FILE:pixd_fixture>" PIXTS_PATH="$<TARGET_FILE:pix-ts>")
+    PIXD_PATH="$<TARGET_FILE:pixd_fixture>" PIXTS_PATH="$<TARGET_FILE:pix-ts>"
+    PIXCTL_PATH="$<TARGET_FILE:pixctl>")
 target_compile_features(pix_public_runtime_proof PRIVATE cxx_std_17)
 target_link_libraries(pix_public_runtime_proof PRIVATE pix_dt181_runtime Threads::Threads)
 target_link_options(pix_public_runtime_proof PRIVATE
@@ -316,4 +325,4 @@ target_link_options(pix_public_runtime_proof PRIVATE
     -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
     -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
     -Wl,--wrap=pthread_create)
-add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts)
+add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
