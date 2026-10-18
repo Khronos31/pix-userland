@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(dtv_userland_records_consumer LANGUAGES CXX)
+find_package(dtv_userland_core CONFIG REQUIRED)
+add_executable(records_consumer main.cpp)
+target_compile_features(records_consumer PRIVATE cxx_std_17)
+target_link_libraries(records_consumer PRIVATE dtv::core dtv::wire)

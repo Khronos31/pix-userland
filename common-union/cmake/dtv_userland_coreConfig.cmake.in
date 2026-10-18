@@ -1,0 +1,25 @@
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/dtv_userland_coreTargets.cmake")
+# Optional component: the internal receiver engine and its Threads dependency.
+foreach(_dtv_userland_component IN LISTS dtv_userland_core_FIND_COMPONENTS)
+    if(_dtv_userland_component STREQUAL "receiver" AND
+       EXISTS "${CMAKE_CURRENT_LIST_DIR}/dtv_userland_receiverTargets.cmake")
+        include(CMakeFindDependencyMacro)
+        find_dependency(Threads)
+        include("${CMAKE_CURRENT_LIST_DIR}/dtv_userland_receiverTargets.cmake")
+        set(dtv_userland_core_receiver_FOUND TRUE)
+    elseif(_dtv_userland_component STREQUAL "capture" AND
+           EXISTS "${CMAKE_CURRENT_LIST_DIR}/dtv_userland_captureTargets.cmake")
+        include(CMakeFindDependencyMacro)
+        find_dependency(Threads)
+        include("${CMAKE_CURRENT_LIST_DIR}/dtv_userland_captureTargets.cmake")
+        set(dtv_userland_core_capture_FOUND TRUE)
+    elseif(_dtv_userland_component STREQUAL "control" AND TARGET dtv::control)
+        set(dtv_userland_core_control_FOUND TRUE)
+    elseif(_dtv_userland_component STREQUAL "card" AND TARGET dtv::card)
+        set(dtv_userland_core_card_FOUND TRUE)
+    else()
+        set(dtv_userland_core_${_dtv_userland_component}_FOUND FALSE)
+    endif()
+endforeach()
+check_required_components(dtv_userland_core)

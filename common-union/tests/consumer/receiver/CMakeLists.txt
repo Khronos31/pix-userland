@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(dtv_userland_receiver_consumer LANGUAGES CXX)
+find_package(dtv_userland_core CONFIG REQUIRED COMPONENTS receiver)
+add_executable(receiver_consumer main.cpp)
+target_compile_features(receiver_consumer PRIVATE cxx_std_17)
+target_link_libraries(receiver_consumer PRIVATE dtv::receiver)

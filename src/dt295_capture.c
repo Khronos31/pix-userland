@@ -3,6 +3,7 @@
 #endif
 /* SPDX-License-Identifier: MIT */
 #include "dt295_capture.h"
+#include "dt295_capture_host.h"
 #include "dt295.h"
 #include "dt295_routes.h"
 #include "dt295_stream.h"
@@ -15,6 +16,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
 #ifndef _WIN32
@@ -341,13 +343,39 @@ static int capture_status(ts_output *diag, unsigned phase, uint64_t packets, uin
 }
 
 #endif
-int dt295_capture_run(const dt295_capture_config *cfg) {
+#ifdef DT295_CAPTURE_TESTING
+typedef int (*dt295_capture_stream_stop_hook)(dt295_stream *, unsigned);
+static dt295_capture_stream_stop_hook capture_stream_stop_hook;
+void dt295_capture_test_set_stream_stop_hook(dt295_capture_stream_stop_hook hook) {
+    capture_stream_stop_hook = hook;
+}
+static int capture_stream_stop(dt295_stream *stream, unsigned timeout_ms) {
+    return capture_stream_stop_hook
+               ? capture_stream_stop_hook(stream, timeout_ms)
+               : dt295_stream_stop(stream, timeout_ms);
+}
+#else
+#define capture_stream_stop dt295_stream_stop
+#endif
+static int dt295_capture_run_impl(const dt295_capture_config *cfg,
+                                  dt295_capture_packet_sink sink, void *sink_context,
+                                  _Atomic sig_atomic_t *interrupted, int *native_quiesced,
+                                  void (*started)(void *), void *started_context,
+                                  const char *runtime_directory) {
+    if (native_quiesced)
+        *native_quiesced = 1;
 #if !defined(__APPLE__) && !defined(DT295_CAPTURE_TESTING)
     (void)cfg;
+    (void)sink;
+    (void)sink_context;
+    (void)interrupted;
+    (void)started;
+    (void)started_context;
+    (void)runtime_directory;
     fprintf(stderr, "DT295 capture currently supports macOS terrestrial target 0 only\n");
     return 2;
 #else
-    if (!cfg || !cfg->assets || !cfg->output || cfg->channel < 13 || cfg->channel > 62)
+    if (!cfg || !cfg->assets || (!cfg->output && !sink) || cfg->channel < 13 || cfg->channel > 62)
         return 2;
     char error[256] = {0}, stop_error[256] = {0}, shutdown_error[256] = {0},
          diag_path[4096];
@@ -374,9 +402,15 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         rc = 10;
         goto done;
     }
-    char lock_path[160];
-    snprintf(lock_path, sizeof(lock_path), "/tmp/pix-userland-dt295-%lu.lock",
-             (unsigned long)getuid());
+    char lock_path[4096];
+    const char *lock_directory = runtime_directory ? runtime_directory : "/tmp";
+    int lock_path_size = snprintf(lock_path, sizeof(lock_path), "%s/pix-userland-dt295-%lu.lock",
+                                  lock_directory, (unsigned long)getuid());
+    if (lock_path_size < 0 || (size_t)lock_path_size >= sizeof(lock_path)) {
+        rc = 4;
+        snprintf(error, sizeof(error), "DT295 recording lock path is too long");
+        goto done;
+    }
     lock_fd = open(lock_path, O_WRONLY | O_CREAT | O_NOFOLLOW, 0600);
     struct stat lock_info;
     struct flock lock_request = {0};
@@ -394,32 +428,37 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         goto done;
     }
     /* Both helpers must be created before libusb can create internal threads. */
-    int e = ts_output_open(cfg->output, STDOUT_FILENO, NULL, &output);
-    if (e) {
-        rc = output_exit(e);
-        snprintf(error, sizeof(error), "TS output: %s", strerror(e));
-        goto done;
-    }
-    const char *diag_name = "-";
-    if (cfg->diagnostic) {
-        if (mkdir(cfg->diagnostic, 0700)) {
-            rc = 70;
-            snprintf(error, sizeof(error), "diagnostic directory: %s", strerror(errno));
+    int e = 0;
+    if (!sink) {
+        e = ts_output_open(cfg->output, STDOUT_FILENO, NULL, &output);
+        if (e) {
+            rc = output_exit(e);
+            snprintf(error, sizeof(error), "TS output: %s", strerror(e));
             goto done;
         }
-        int n = snprintf(diag_path, sizeof(diag_path), "%s/status.jsonl", cfg->diagnostic);
-        if (n < 0 || (size_t)n >= sizeof(diag_path)) {
+    }
+    if (!sink || cfg->diagnostic) {
+        const char *diag_name = "-";
+        if (cfg->diagnostic) {
+            if (mkdir(cfg->diagnostic, 0700)) {
+                rc = 70;
+                snprintf(error, sizeof(error), "diagnostic directory: %s", strerror(errno));
+                goto done;
+            }
+            int n = snprintf(diag_path, sizeof(diag_path), "%s/status.jsonl", cfg->diagnostic);
+            if (n < 0 || (size_t)n >= sizeof(diag_path)) {
+                rc = 70;
+                goto done;
+            }
+            diag_name = diag_path;
+        }
+        ts_output_config diag_config = {0};
+        diag_config.capacity_bytes = 8 * 1024 * 1024;
+        e = ts_output_open(diag_name, STDERR_FILENO, &diag_config, &diag);
+        if (e) {
             rc = 70;
             goto done;
         }
-        diag_name = diag_path;
-    }
-    ts_output_config diag_config = {0};
-    diag_config.capacity_bytes = 8 * 1024 * 1024;
-    e = ts_output_open(diag_name, STDERR_FILENO, &diag_config, &diag);
-    if (e) {
-        rc = 70;
-        goto done;
     }
     rc = usb_open_model(&u.usb, &cfg->selector, cfg->fd, cfg->detach, USB_MODEL_DT295);
     if (rc)
@@ -468,10 +507,13 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         snprintf(error, sizeof(error), "native USB start error %d", e);
         goto done;
     }
+    if (started)
+        started(started_context);
     uint64_t preparation_start = now_ms(), last_input = preparation_start,
              next_status = preparation_start;
     uint8_t data[65536 + 188], out[65536 + 188];
-    while (!cfg->interrupted || !*cfg->interrupted) {
+    while (!(interrupted ? atomic_load(interrupted)
+                         : (cfg->interrupted && *cfg->interrupted))) {
         uint64_t now = now_ms();
         if (recording) {
             elapsed = now - record_start;
@@ -482,8 +524,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             snprintf(error, sizeof(error), "incomplete initial PAT/PMT/CAT after 30 seconds");
             break;
         }
-        e = ts_output_poll(output, 0);
-        if (!e)
+        e = output ? ts_output_poll(output, 0) : 0;
+        if (!e && diag)
             e = ts_output_poll(diag, 0);
         if (e) {
             rc = output_exit(e);
@@ -531,10 +573,15 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             break;
         remainder = total - length;
         memmove(data, data + length, remainder);
-        if (emitted && (e = ts_output_submit(output, out, emitted, NULL))) {
-            rc = output_exit(e);
-            snprintf(error, sizeof(error), "TS enqueue: %s", strerror(e));
-            break;
+        if (emitted) {
+            e = sink ? sink(sink_context, out, emitted)
+                     : ts_output_submit(output, out, emitted, NULL);
+            if (e) {
+                int output_error = e < 0 ? -e : e;
+                rc = output_exit(output_error);
+                snprintf(error, sizeof(error), "TS enqueue: %s", strerror(output_error));
+                break;
+            }
         }
         dt295_routes_snapshot snapshot;
         dt295_routes_snapshot_get(tables, &snapshot);
@@ -600,13 +647,22 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 rc = 7;
                 break;
             }
-            if (dt295_stream_stop(u.stream, 3000) || dt295_stream_destroy(u.stream)) {
+            int stop = capture_stream_stop(u.stream, 3000);
+            if (stop) {
+                if (!rc)
+                    rc = 7;
+                if (sink)
+                    stop = capture_stream_stop(u.stream, 3000);
+            }
+            if (stop || dt295_stream_destroy(u.stream)) {
                 native_abandoned = 1;
                 rc = 7;
                 snprintf(error, sizeof(error), "bootstrap USB cancellation did not quiesce");
                 break;
             }
             u.stream = NULL;
+            if (rc)
+                break;
             if (dt295_reprepare_plan(d, &full, error, sizeof(error)) ||
                 dt295_start(d, error, sizeof(error))) {
                 rc = 7;
@@ -625,7 +681,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             ts_check_init(check);
         }
         now = now_ms();
-        if (now >= next_status) {
+        if (diag && now >= next_status) {
             e = capture_status(diag, recording ? 2 : 1, packets, elapsed, renewals, u.stream,
                                output, NULL, tables);
             if (e) {
@@ -643,7 +699,13 @@ done:
         dt295_stop(d, &drained, stop_error, sizeof(stop_error)) && !rc)
         rc = 7;
     if (u.stream && !native_abandoned) {
-        int stop = dt295_stream_stop(u.stream, 3000);
+        int stop = capture_stream_stop(u.stream, 3000);
+        if (stop) {
+            if (!rc)
+                rc = 7;
+            if (sink)
+                stop = capture_stream_stop(u.stream, 3000);
+        }
         dt295_stream_snapshot(u.stream, &final_usb);
         if (stop || dt295_stream_destroy(u.stream)) {
             native_abandoned = 1;
@@ -697,11 +759,11 @@ done:
         if (e && !rc)
             rc = 70;
     }
-    if (!diag && error[0])
+    if (!sink && !diag && error[0])
         fprintf(stderr, "DT295: %s\n", error);
-    if (!diag && stop_error[0])
+    if (!sink && !diag && stop_error[0])
         fprintf(stderr, "DT295 stop cleanup: %s\n", stop_error);
-    if (!diag && shutdown_error[0])
+    if (!sink && !diag && shutdown_error[0])
         fprintf(stderr, "DT295 shutdown cleanup: %s\n", shutdown_error);
     if (ts_output_destroy(output) && !rc)
         rc = 70;
@@ -716,7 +778,29 @@ done:
         close(lock_fd);
     if (!native_abandoned)
         dt295_assets_free(assets);
+    if (native_quiesced)
+        *native_quiesced = !native_abandoned;
     free(check);
+#ifdef DT295_CAPTURE_TESTING
+    if (rc)
+        fprintf(stderr, "DT295 actual_capture_failed rc=%d error=%s stop=%s shutdown=%s\n",
+                rc, error, stop_error, shutdown_error);
+#endif
     return rc;
 #endif
+}
+
+int dt295_capture_run_to_sink(const dt295_capture_config *cfg,
+                              dt295_capture_packet_sink sink, void *sink_context,
+                              _Atomic sig_atomic_t *interrupted, int *native_quiesced,
+                              void (*started)(void *), void *started_context,
+                              const char *runtime_directory) {
+    if (!sink)
+        return 2;
+    return dt295_capture_run_impl(cfg, sink, sink_context, interrupted, native_quiesced,
+                                  started, started_context, runtime_directory);
+}
+
+int dt295_capture_run(const dt295_capture_config *cfg) {
+    return dt295_capture_run_impl(cfg, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 }

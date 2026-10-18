@@ -1,0 +1,373 @@
+{
+  "source": {
+    "path": "shared/examples/json-records.json",
+    "sha256": "6faa56eb8c0d6ac45873ced1fa5c94ad30868e1edf9cc0f332fccb872034c575"
+  },
+  "documents": {
+    "cardless_status_supported_but_unknown_cnr": {
+      "schema": {
+        "name": "userland.status",
+        "major": 1,
+        "minor": 0
+      },
+      "producer": {
+        "product": "pix-userland",
+        "version": "design-example",
+        "core_version": null
+      },
+      "context": {
+        "epoch": "22222222222222222222222222222222",
+        "instance": "example",
+        "state": "ready",
+        "last_error": null
+      },
+      "snapshot": {
+        "sequence": "1",
+        "observed_at_ns": "1000000000"
+      },
+      "scope": {
+        "kind": "enclosure",
+        "id": null
+      },
+      "enclosure": {
+        "id": "0",
+        "model": {
+          "id": "example-receiver",
+          "name": "Synthetic receiver profile"
+        },
+        "identity": {
+          "serial": null,
+          "serial_state": "unknown",
+          "uniqueness": "unknown"
+        },
+        "limits": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "topology": {
+        "state": "complete",
+        "expected_function_count": 1
+      },
+      "usb_functions": [
+        {
+          "id": "0",
+          "vid": "06b8",
+          "pid": "102b",
+          "mode": "runtime",
+          "location": {
+            "usb_path": "1-2",
+            "bus": 1,
+            "address": 4
+          },
+          "serial": {
+            "state": "not_queried",
+            "value": null
+          },
+          "identification": {
+            "model": {
+              "id": "example-receiver",
+              "name": "Synthetic receiver profile"
+            },
+            "reason": null
+          },
+          "present": true,
+          "last_error": null
+        }
+      ],
+      "receivers": [
+        {
+          "descriptor": {
+            "id": "0",
+            "systems": [
+              "isdb-t"
+            ],
+            "binding": {
+              "function_id": "0",
+              "local_id": "0"
+            },
+            "capabilities": {
+              "ts": {
+                "scope": "multiplex",
+                "pid_filter": null
+              },
+              "controls": {},
+              "measurements": {
+                "lock": {
+                  "unit": "boolean"
+                },
+                "cnr_mdb": {
+                  "unit": "milli_dB"
+                }
+              }
+            }
+          },
+          "present": true,
+          "state": "streaming",
+          "operation": "idle",
+          "leased": true,
+          "tune_revision": "1",
+          "current_tune": {
+            "revision": "1",
+            "system": "isdb-t",
+            "frequency_hz": 473142857,
+            "programmed_hz": null,
+            "selection": {
+              "kind": "auto"
+            },
+            "verification": "commands"
+          },
+          "last_successful_tune": {
+            "revision": "1",
+            "system": "isdb-t",
+            "frequency_hz": 473142857,
+            "programmed_hz": null,
+            "selection": {
+              "kind": "auto"
+            },
+            "verification": "commands"
+          },
+          "stream": {
+            "id": "1",
+            "tune_revision": "1",
+            "phase": "active"
+          },
+          "last_stream": null,
+          "measurements": {
+            "lock": {
+              "value": false,
+              "sampled_at_ns": "1000000000",
+              "reason": null
+            },
+            "cnr_mdb": {
+              "value": null,
+              "sampled_at_ns": null,
+              "reason": "not_sampled"
+            }
+          },
+          "statistics": {
+            "receiver": {
+              "captured_packets": {
+                "value": "12000",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              }
+            },
+            "stream": {
+              "transmitted_packets": {
+                "value": "12000",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              },
+              "queue_dropped_packets": {
+                "value": "0",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              }
+            }
+          },
+          "last_error": null
+        }
+      ],
+      "readers": []
+    },
+    "starting_with_unknown_topology": {
+      "schema": {
+        "name": "userland.status",
+        "major": 1,
+        "minor": 0
+      },
+      "producer": {
+        "product": "asicen-userland",
+        "version": "design-example",
+        "core_version": null
+      },
+      "context": {
+        "epoch": "55555555555555555555555555555555",
+        "instance": "example",
+        "state": "starting",
+        "last_error": null
+      },
+      "snapshot": {
+        "sequence": "1",
+        "observed_at_ns": "0"
+      },
+      "scope": {
+        "kind": "enclosure",
+        "id": null
+      },
+      "enclosure": null,
+      "topology": {
+        "state": "unknown",
+        "expected_function_count": null
+      },
+      "usb_functions": [
+        {
+          "id": "0",
+          "vid": "1738",
+          "pid": "5211",
+          "mode": "cold",
+          "location": {
+            "usb_path": "1-2",
+            "bus": 1,
+            "address": 4
+          },
+          "serial": {
+            "state": "not_queried",
+            "value": null
+          },
+          "identification": {
+            "model": null,
+            "reason": "cold_model"
+          },
+          "present": true,
+          "last_error": null
+        }
+      ]
+    },
+    "receiver_scope_not_empty_readers": {
+      "schema": {
+        "name": "userland.status",
+        "major": 1,
+        "minor": 0
+      },
+      "producer": {
+        "product": "pix-userland",
+        "version": "design-example",
+        "core_version": null
+      },
+      "context": {
+        "epoch": "22222222222222222222222222222222",
+        "instance": "example",
+        "state": "ready",
+        "last_error": null
+      },
+      "snapshot": {
+        "sequence": "1",
+        "observed_at_ns": "1000000000"
+      },
+      "scope": {
+        "kind": "receiver",
+        "id": "0"
+      },
+      "enclosure": {
+        "id": "0",
+        "model": {
+          "id": "example-receiver",
+          "name": "Synthetic receiver profile"
+        },
+        "identity": {
+          "serial": null,
+          "serial_state": "unknown",
+          "uniqueness": "unknown"
+        },
+        "limits": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "topology": {
+        "state": "complete",
+        "expected_function_count": 1
+      },
+      "receivers": [
+        {
+          "descriptor": {
+            "id": "0",
+            "systems": [
+              "isdb-t"
+            ],
+            "binding": {
+              "function_id": "0",
+              "local_id": "0"
+            },
+            "capabilities": {
+              "ts": {
+                "scope": "multiplex",
+                "pid_filter": null
+              },
+              "controls": {},
+              "measurements": {
+                "lock": {
+                  "unit": "boolean"
+                },
+                "cnr_mdb": {
+                  "unit": "milli_dB"
+                }
+              }
+            }
+          },
+          "present": true,
+          "state": "streaming",
+          "operation": "idle",
+          "leased": true,
+          "tune_revision": "1",
+          "current_tune": {
+            "revision": "1",
+            "system": "isdb-t",
+            "frequency_hz": 473142857,
+            "programmed_hz": null,
+            "selection": {
+              "kind": "auto"
+            },
+            "verification": "commands"
+          },
+          "last_successful_tune": {
+            "revision": "1",
+            "system": "isdb-t",
+            "frequency_hz": 473142857,
+            "programmed_hz": null,
+            "selection": {
+              "kind": "auto"
+            },
+            "verification": "commands"
+          },
+          "stream": {
+            "id": "1",
+            "tune_revision": "1",
+            "phase": "active"
+          },
+          "last_stream": null,
+          "measurements": {
+            "lock": {
+              "value": false,
+              "sampled_at_ns": "1000000000",
+              "reason": null
+            },
+            "cnr_mdb": {
+              "value": null,
+              "sampled_at_ns": null,
+              "reason": "not_sampled"
+            }
+          },
+          "statistics": {
+            "receiver": {
+              "captured_packets": {
+                "value": "12000",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              }
+            },
+            "stream": {
+              "transmitted_packets": {
+                "value": "12000",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              },
+              "queue_dropped_packets": {
+                "value": "0",
+                "sampled_at_ns": "1000000000",
+                "reason": null,
+                "overflow": false
+              }
+            }
+          },
+          "last_error": null
+        }
+      ]
+    }
+  }
+}

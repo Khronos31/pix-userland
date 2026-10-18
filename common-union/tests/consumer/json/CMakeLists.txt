@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(dtv_userland_json_consumer LANGUAGES CXX)
+find_package(dtv_userland_core CONFIG REQUIRED)
+add_executable(json_consumer main.cpp)
+target_compile_features(json_consumer PRIVATE cxx_std_17)
+target_link_libraries(json_consumer PRIVATE dtv::json)

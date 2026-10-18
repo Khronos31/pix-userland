@@ -1,0 +1,692 @@
+#include "dt295_capture.h"
+#include "pid_filter.h"
+#include "channel.h"
+#include "control.h"
+#include "usb_selector.h"
+#include "diagnostic.h"
+#include "os.h"
+#include "pixy.h"
+#include "transport.h"
+#include "usb_backend.h"
+#include "dt181_session.h"
+#include "dt181_capture_bridge.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <limits.h>
+#ifndef _WIN32
+#include <poll.h>
+#endif
+#include "version.h"
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifndef PIX_CAPTURE_BRIDGE_EXTERNAL
+#include "dt181_capture_bridge.c"
+#endif
+static volatile sig_atomic_t interrupted;
+static void on_signal(int s) {
+    (void)s;
+    interrupted = 1;
+}
+typedef dt181_capture_bridge stream;
+static int write_ts(void *u, const uint8_t *p, size_t n) {
+    stream *s = u;
+    uint8_t filtered[32768 + 564];
+    if (s->filter_pids) {
+        if (n > sizeof(filtered)) return -1;
+        memcpy(filtered, p, n);
+        if (pix_pid_filter(filtered, &n, s->pid_mask)) return -1;
+        p = filtered;
+    }
+    uint64_t deadline = now_ms() + 3000;
+    while (n) {
+#ifdef _WIN32
+        os_mutex_lock(&s->mutex);
+        s->write_started = now_ms();
+        os_mutex_unlock(&s->mutex);
+#endif
+        ssize_t r = write(s->output, p, n);
+#ifdef _WIN32
+        os_mutex_lock(&s->mutex);
+        s->write_started = 0;
+        os_mutex_unlock(&s->mutex);
+#endif
+        if (r > 0) {
+            p += r;
+            n -= (size_t)r;
+            deadline = now_ms() + 3000;
+            continue;
+        }
+#ifndef _WIN32
+        if (r < 0 && errno == EINTR)
+            continue;
+#endif
+        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (now_ms() >= deadline) {
+                fprintf(stderr, "TS output stalled for 3 seconds\n");
+                return stream_fail(s, 8);
+            }
+#ifdef _WIN32
+            sleep_ms(50);
+#else
+            struct pollfd fd = {s->output, POLLOUT, 0};
+            if (poll(&fd, 1, 50) < 0 && errno != EINTR)
+                return stream_fail(s, 70);
+#endif
+            continue;
+        }
+        fprintf(stderr, "TS write: %s\n", strerror(errno));
+        return stream_fail(s, 70);
+    }
+    return 0;
+}
+static int number(const char *p, unsigned long max, unsigned long *out) {
+    char *end;
+    errno = 0;
+    if (!p || !*p || *p == '-' || *p == '+')
+        return -1;
+    unsigned long v = strtoul(p, &end, 0);
+    if (errno || *end || v > max)
+        return -1;
+    *out = v;
+    return 0;
+}
+static void usage(FILE *f) {
+    fprintf(
+        f,
+        "pix-ts " VERSION " — PIX-DT181-PU0 libusb TS receiver\n"
+        "Usage: pix-ts --system terrestrial|bs|cs --channel N [options]\n"
+        "      --model MODEL   dt181 (default) or dt295 (macOS terrestrial target 0)\n"
+        "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..62, BS odd 1..23, CS even "
+        "2..24)\n"
+        "  -s, --system TYPE     terrestrial (default), bs, cs\n"
+        "      --tsid N          satellite TSID, decimal or 0xhex; default first detected\n"
+        "  -t, --time SECONDS    N seconds; '-' or omitted: until SIGINT/SIGTERM\n"
+        "  -o, --output PATH     file (overwrite existing); default stdout, '-' also stdout\n"
+        "  -a, --assets DIR      fpga.bin, bootstrap.bin, validation.bin (default ./assets)\n"
+        "  -d, --device SPEC    index, bus:address, or bus-port.path (default 0)\n"
+        "      --fd FD          borrowed USB fd from Android/Termux (or final integer argument)\n"
+        "      --lna on|off     internal receive amplifier; default terrestrial off, BS/CS on\n"
+        "      --detach-kernel-driver   explicitly detach a bound interface\n"
+        "  -l, --list           list devices in enclosure/receiver key=value format\n"
+        "      --list-json      list the same devices as one JSON document\n"
+        "  -f, --freq HZ        tune frequency in Hz (exclusive with --channel)\n"
+        "  -F, --firmware PATH  FPGA file; other assets still come from --assets\n"
+        "  -p, --pid PID        output only this PID (repeatable; 8192 = all)\n"
+        "  -v, --verbose        log control retuning\n"
+        "      --control        stdin: channel N|T27|BS01_0, tune HZ, quit\n"
+        "      --fail-on-drop   queue overflow is always fatal in pix-ts\n"
+        "      --slot 0..7      satellite slot, resolved from live TSID table\n"
+        "      --inspect FILE   validate an existing 188-byte TS (no USB/assets required)\n"
+        "      --decode RAW --context FILE  offline USB-transfer decode; use -o for output\n"
+        "      --diagnostic DIR  independent stream/CC capture in a new private directory (<200 "
+        "MiB)\n"
+        "      --replay-diagnostic FILE  replay a trusted same-build .pixdiag segment\n"
+        "      --replay-chunk-bytes N  split saved frames into at most N bytes (1..32768)\n"
+        "      --version        show version\n"
+        "  -h, --help           show help\n"
+        "TS goes to stdout; all diagnostics and final JSON statistics go to stderr.\n"
+        "This model does not provide LNB power. LNA is a separate internal amplifier.\n");
+}
+static int load_allocation_failed;
+static uint8_t *load_file(const char *dir, const char *name, size_t expected) {
+    char path[4096];
+    if (snprintf(path, sizeof(path), "%s%s%s",
+                 (name[0] == '/' || (strlen(name) > 2 && name[1] == ':')) ? "" : dir,
+                 (name[0] == '/' || (strlen(name) > 2 && name[1] == ':')) ? "" : "/",
+                 name) >= (int)sizeof(path))
+        return NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "%s: %s\n", path, strerror(errno));
+        return NULL;
+    }
+    uint8_t *p = malloc(expected);
+    if (!p) {
+        load_allocation_failed = 1;
+        fclose(f);
+        return NULL;
+    }
+    size_t n = fread(p, 1, expected, f);
+    int extra = fgetc(f), bad = ferror(f);
+    fclose(f);
+    if (n != expected || extra != EOF || bad) {
+        fprintf(stderr, "%s: expected %zu bytes\n", path, expected);
+        free(p);
+        return NULL;
+    }
+    return p;
+}
+static int check_bad(const ts_check *c) {
+    return c->tei || c->scrambled || c->continuity || c->invalid || c->crc_errors || !c->pat ||
+           !c->pmt;
+}
+static void report(const stream *s) {
+    const ts_decoder *d = &s->decoder;
+    const ts_check *c = &s->check;
+    fprintf(stderr,
+            "{\"packets\":%llu,\"usb_bytes\":%llu,\"markers\":%llu,\"iv_updates\":%llu,\"resync_"
+            "bytes\":%llu,\"waiting_for_iv\":%llu,\"trailing_bytes\":%zu,\"tei\":%llu,"
+            "\"scrambled\":%llu,\"continuity_errors\":%llu,\"invalid_packets\":%llu,\"psi_crc_"
+            "errors\":%llu,\"pat\":%llu,\"pmt\":%llu,\"key_tables\":%llu,"
+            "\"previous_key_uses\":%llu,\"stream_error\":%d,\"capture_elapsed_ms\":%llu}\n",
+            (unsigned long long)c->packets, (unsigned long long)s->usb_bytes,
+            (unsigned long long)d->markers, (unsigned long long)d->iv_updates,
+            (unsigned long long)d->resync, (unsigned long long)d->waiting, d->used,
+            (unsigned long long)c->tei, (unsigned long long)c->scrambled,
+            (unsigned long long)c->continuity, (unsigned long long)c->invalid,
+            (unsigned long long)c->crc_errors, (unsigned long long)c->pat,
+            (unsigned long long)c->pmt, (unsigned long long)d->key_tables,
+            (unsigned long long)d->previous_key_uses, s->error,
+            (unsigned long long)s->capture_elapsed_ms);
+}
+static int offline(const char *path, const char *context, stream *s) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        perror(path);
+        return 70;
+    }
+    uint8_t block[32768];
+    size_t n;
+    if (context) {
+        uint8_t *ctx = load_file(".", context, 32);
+        if (!ctx) {
+            fclose(f);
+            return 70;
+        }
+        ts_decoder_init(&s->decoder, ctx, write_ts, s, &s->check);
+        secure_clear(ctx, 32);
+        free(ctx);
+        while ((n = fread(block, 1, sizeof(block), f)) > 0) {
+            s->usb_bytes += n;
+            if (ts_decoder_feed(&s->decoder, block, n)) {
+                s->error = 1;
+                break;
+            }
+        }
+    } else {
+        uint8_t p[188];
+        while ((n = fread(p, 1, 188, f)) == 188)
+            ts_check_packet(&s->check, p);
+        s->decoder.used = n;
+    }
+    if (ferror(f)) {
+        s->error = 1; s->failure_exit = 70;
+    }
+    fclose(f);
+    report(s);
+    if (s->failure_exit) return s->failure_exit;
+    return s->error || check_bad(&s->check) || s->decoder.resync || s->decoder.waiting ||
+                   (!context && s->decoder.used)
+               ? 8
+               : 0;
+}
+int main(int argc, char **argv) {
+    pixy_system system = PIXY_TERRESTRIAL;
+    unsigned channel = 0, seconds = 0;
+    usb_selector selector;
+    usb_selector_parse("0", &selector);
+    const char *channel_text = NULL, *firmware = NULL;
+    uint32_t frequency = 0;
+    int slot = -1, control = 0, verbose = 0, system_given = 0;
+    int model = USB_MODEL_DT181;
+    uint8_t pid_mask[8192] = {0}; int filter_pids = 0;
+    int fd = -1, tsid = -1, lna = -1, detach = 0, list = 0, rc = 2;
+    const char *assets = "assets", *output = "-", *inspect = NULL, *raw = NULL, *context = NULL;
+    const char *diag_dir = NULL, *replay = NULL;
+    unsigned replay_chunk = 0;
+    static const struct option opts[] = {{"channel", 1, 0, 'c'},
+                                         {"model", 1, 0, 272},
+                                         {"freq", 1, 0, 'f'},
+                                         {"firmware", 1, 0, 'F'},
+                                         {"pid", 1, 0, 'p'},
+                                         {"verbose", 0, 0, 'v'},
+                                         {"control", 0, 0, 268},
+                                         {"fail-on-drop", 0, 0, 269},
+                                         {"list-json", 0, 0, 270},
+                                         {"slot", 1, 0, 271},
+                                         {"system", 1, 0, 's'},
+                                         {"time", 1, 0, 't'},
+                                         {"output", 1, 0, 'o'},
+                                         {"assets", 1, 0, 'a'},
+                                         {"device", 1, 0, 'd'},
+                                         {"tsid", 1, 0, 256},
+                                         {"fd", 1, 0, 257},
+                                         {"lna", 1, 0, 258},
+                                         {"detach-kernel-driver", 0, 0, 259},
+                                         {"list", 0, 0, 260},
+                                         {"inspect", 1, 0, 261},
+                                         {"decode", 1, 0, 262},
+                                         {"context", 1, 0, 263},
+                                         {"version", 0, 0, 264},
+                                         {"diagnostic", 1, 0, 265},
+                                         {"replay-diagnostic", 1, 0, 266},
+                                         {"replay-chunk-bytes", 1, 0, 267},
+                                         {"help", 0, 0, 'h'},
+                                         {0, 0, 0, 0}};
+    int c;
+    unsigned long v;
+    while ((c = getopt_long(argc, argv, "c:s:t:o:a:d:f:F:p:vlh", opts, NULL)) != -1) {
+        switch (c) {
+        case 272:
+            if (!strcmp(optarg,"dt181")) model=USB_MODEL_DT181;
+            else if (!strcmp(optarg,"dt295")) model=USB_MODEL_DT295;
+            else goto bad;
+            break;
+        case 'c':
+            channel_text = optarg;
+            break;
+        case 'f':
+            if (number(optarg, UINT32_MAX, &v) || !v) goto bad;
+            frequency = (uint32_t)v;
+            break;
+        case 'F': firmware = optarg; break;
+        case 'p':
+            if (number(optarg, 8192, &v)) goto bad;
+            if (v == 8192) { memset(pid_mask, 1, sizeof(pid_mask)); }
+            else pid_mask[v] = 1;
+            filter_pids = 1;
+            break;
+        case 'v': verbose = 1; break;
+        case 268: control = 1; break;
+        case 269: break; /* Queue overflow already fails closed. */
+        case 270:
+            if (list) goto bad;
+            list = 2; break;
+        case 271:
+            if (number(optarg, 7, &v)) goto bad;
+            slot = (int)v; break;
+        case 's':
+            system_given = 1;
+            if (!strcmp(optarg, "terrestrial") || !strcmp(optarg, "isdb-t"))
+                system = PIXY_TERRESTRIAL;
+            else if (!strcmp(optarg, "bs"))
+                system = PIXY_BS;
+            else if (!strcmp(optarg, "cs"))
+                system = PIXY_CS;
+            else
+                goto bad;
+            break;
+        case 't':
+            if (!strcmp(optarg, "-")) { seconds = 0; break; }
+            if (number(optarg, 86400 * 365u, &v) || !v)
+                goto bad;
+            seconds = (unsigned)v;
+            break;
+        case 'o':
+            output = optarg;
+            break;
+        case 'a':
+            assets = optarg;
+            break;
+        case 'd':
+            if (usb_selector_parse(optarg, &selector)) goto bad;
+            break;
+        case 256:
+            if (number(optarg, 65535, &v))
+                goto bad;
+            tsid = (int)v;
+            break;
+        case 257:
+            if (number(optarg, INT_MAX, &v))
+                goto bad;
+            fd = (int)v;
+            break;
+        case 258:
+            if (!strcmp(optarg, "on"))
+                lna = 1;
+            else if (!strcmp(optarg, "off"))
+                lna = 0;
+            else
+                goto bad;
+            break;
+        case 259:
+            detach = 1;
+            break;
+        case 'l':
+        case 260:
+            if (list == 2) goto bad;
+            list = 1;
+            break;
+        case 261:
+            inspect = optarg;
+            break;
+        case 262:
+            raw = optarg;
+            break;
+        case 263:
+            context = optarg;
+            break;
+        case 264:
+            puts("pix-ts " VERSION);
+            return 0;
+        case 265:
+            diag_dir = optarg;
+            break;
+        case 266:
+            replay = optarg;
+            break;
+        case 267:
+            if (number(optarg, 32768, &v) || !v)
+                goto bad;
+            replay_chunk = (unsigned)v;
+            break;
+        case 'h':
+            usage(stdout);
+            return 0;
+        default:
+            goto bad;
+        }
+    }
+    if (optind < argc) {
+        if (optind + 1 != argc || fd >= 0 || number(argv[optind], INT_MAX, &v))
+            goto bad;
+        fd = (int)v;
+    }
+#ifdef _WIN32
+    if (fd >= 0) {
+        fprintf(stderr, "--fd is only available on Linux/Android\n");
+        goto bad;
+    }
+#endif
+    if (fd >= 0 && (list || selector.kind != USB_SELECT_INDEX || selector.index))
+        goto bad;
+    if (replay_chunk && !replay)
+        goto bad;
+    if (list) {
+        if (channel_text || frequency || control || detach || inspect || raw || context || diag_dir || replay)
+            goto bad;
+        return usb_list_model(list == 2, model);
+    }
+    if ((inspect && raw) || (raw && !context) || (context && !raw) ||
+        ((inspect || raw) && (channel_text || frequency || control || fd >= 0)))
+        goto bad;
+    if ((diag_dir && (inspect || raw || replay)) ||
+        (replay && (inspect || raw || context || channel_text || frequency || control || fd >= 0)))
+        goto bad;
+    uint32_t hz = frequency;
+    if (channel_text && frequency) goto bad;
+    if (control && (seconds || diag_dir || inspect || raw || replay)) goto bad;
+    if (channel_text) {
+        pix_channel selected;
+        if (channel_text[0] >= '0' && channel_text[0] <= '9') {
+            if (number(channel_text, 62, &v) || !v) goto bad;
+            selected = (pix_channel){system, (unsigned)v, -1};
+        } else if (pix_channel_parse(channel_text, system, &selected)) goto bad;
+        if (system_given && selected.system != system) goto bad;
+        system = selected.system; channel = selected.channel;
+        if (selected.slot >= 0) {
+            if (slot >= 0) goto bad;
+            if (tsid < 0) slot = selected.slot;
+        }
+        if (pixy_frequency(system, channel, &hz)) goto bad;
+    }
+    if (system == PIXY_TERRESTRIAL && (tsid >= 0 || slot >= 0)) goto bad;
+    if (slot >= 0 && tsid >= 0) goto bad;
+    if (model == USB_MODEL_DT295) {
+        if (inspect || raw || replay || control || frequency || system != PIXY_TERRESTRIAL ||
+            tsid >= 0 || slot >= 0 || firmware || lna >= 0 || !channel) {
+            fprintf(stderr,"DT295 supports terrestrial channel capture only; unsupported options rejected before USB access\n");
+            goto bad;
+        }
+    }
+    pix_control input = {0};
+    if (!inspect && !raw && !replay && !hz && !control) goto bad;
+#ifdef _WIN32
+    signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
+#else
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
+#endif
+    while (control && !hz && !interrupted) {
+        pix_command cmd; int result = pix_control_poll(&input, system, &cmd);
+        if (result < 0) { rc = 2; return rc; }
+        if (result == 2 || (result == 1 && cmd.quit)) { rc = 0; return rc; }
+        if (result == 1) {
+            if (cmd.frequency) hz = cmd.hz;
+            else { system = cmd.channel.system; channel = cmd.channel.channel; slot = cmd.channel.slot; pixy_frequency(system, channel, &hz); }
+        } else sleep_ms(20);
+    }
+    if (interrupted) return 0;
+    if (model == USB_MODEL_DT295) {
+        if (!strcmp(output,"-") && os_output_is_terminal(STDOUT_FILENO)) {
+            fprintf(stderr,"Refusing binary TS output to a terminal; use -o FILE or a pipe\n");return 2;
+        }
+        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted};
+        return dt295_capture_run(&cfg);
+    }
+    stream *s = calloc(1, sizeof(*s));
+    if (!s)
+        return 70;
+    s->output = STDOUT_FILENO;
+    ts_check_init(&s->check);
+    memcpy(s->pid_mask, pid_mask, sizeof(pid_mask)); s->filter_pids = filter_pids;
+    int flags = -1;
+    if (!inspect) {
+        if (strcmp(output, "-")) {
+            s->output = open(output, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
+            if (s->output < 0) {
+                perror(output);
+                free(s);
+                return 70;
+            }
+        } else if (os_output_is_terminal(STDOUT_FILENO)) {
+            fprintf(stderr, "Refusing binary TS output to a terminal; use -o FILE or a pipe\n");
+            free(s);
+            return 2;
+        }
+        flags = os_output_prepare(s->output);
+        if (flags < 0) {
+            perror("output flags");
+            rc = 70;
+            goto finish;
+        }
+    }
+    if (replay) {
+        if (os_mutex_init(&s->mutex, NULL)) {
+            rc = 70;
+            goto finish;
+        }
+        rc = diag_replay_chunks(replay, &s->decoder, &s->check, write_ts, s, replay_chunk) ? 8 : 0;
+        report(s);
+        os_mutex_destroy(&s->mutex);
+        if (s->failure_exit) rc = s->failure_exit;
+        else if (check_bad(&s->check) || s->decoder.resync || s->decoder.waiting) rc = 8;
+        goto finish;
+    }
+    if (inspect || raw) {
+        if (os_mutex_init(&s->mutex, NULL)) {
+            rc = 70;
+            goto finish;
+        }
+        rc = offline(inspect ? inspect : raw, context, s);
+        os_mutex_destroy(&s->mutex);
+        goto finish;
+    }
+    if (diag_dir) {
+        s->diag = diag_open(diag_dir);
+        if (!s->diag) {
+            perror("diagnostic directory");
+            rc = 70;
+            goto finish;
+        }
+        s->check.issue = diag_issue;
+        s->check.issue_user = s->diag;
+    }
+    load_allocation_failed = 0;
+    uint8_t *fw = load_file(firmware ? "." : assets, firmware ? firmware : "fpga.bin", 699673),
+            *bootstrap = load_file(assets, "bootstrap.bin", 16),
+            *validation = load_file(assets, "validation.bin", 64);
+    if (!fw || !bootstrap || !validation) {
+        free(fw);
+        free(bootstrap);
+        free(validation);
+        rc = load_allocation_failed ? 70 : 10;
+        goto finish;
+    }
+    dt181_session session = {0};
+    pixy *device = &session.device;
+    int opened = 0, queue = 0, started_thread = 0;
+    os_thread thread;
+    rc = dt181_session_open(&session, &selector, fd, detach);
+    if (rc)
+        goto cleanup;
+    opened = session.opened;
+    dt181_session_diagnostics(&session, diag_dir != NULL);
+    if (dt181_session_initialize(&session, fw, bootstrap, validation)) {
+        rc = dt181_session_device_exit(&session); goto cleanup;
+    }
+    if (interrupted) {
+        rc = 0;
+        goto cleanup;
+    }
+    if (dt181_session_tune_slot(&session, system, hz,
+                                lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot))
+        { rc = dt181_session_device_exit(&session); goto cleanup; }
+    uint8_t status[64];
+    size_t statusn = 64;
+    if (dt181_session_status(&session, status, &statusn)) { rc = dt181_session_device_exit(&session); goto cleanup; }
+    if (statusn > 3 && !status[3]) { fprintf(stderr, "B-CAS card not inserted\n"); rc = 9; goto cleanup; }
+    fprintf(stderr, "locked system=%s channel=%u frequency=%u tsid=%d bcas_inserted=%d\n",
+            system == PIXY_TERRESTRIAL ? "terrestrial"
+            : system == PIXY_BS        ? "bs"
+                                       : "cs",
+            channel, hz, tsid, statusn > 3 ? !!status[3] : -1);
+    if (os_mutex_init(&s->mutex, NULL)) {
+        rc = 70;
+        goto cleanup;
+    }
+    if (os_cond_init(&s->cond, NULL)) {
+        os_mutex_destroy(&s->mutex);
+        rc = 70;
+        goto cleanup;
+    }
+    queue = 1;
+capture_restart:
+    ;
+    uint8_t stream_context[32];
+    if (dt181_session_prepare(&session, enqueue, s, stream_context)) { rc = dt181_session_device_exit(&session); goto cleanup; }
+    dt181_capture_bridge_init_decoder(s, stream_context, write_ts, s, &s->check);
+    secure_clear(stream_context, 32);
+    if (os_thread_create(&thread, NULL, worker, s)) {
+        rc = 70;
+        goto cleanup;
+    }
+    started_thread = 1;
+    uint64_t start = now_ms(), next = start + 1000;
+    pix_command retune = {0}; int changing = 0;
+    rc = 0;
+    while (!interrupted && (!seconds || now_ms() - start < (uint64_t)seconds * 1000)) {
+        if (control) {
+            int result = pix_control_poll(&input, system, &retune);
+            if (result < 0) { fprintf(stderr, "Invalid control command\n"); rc = 2; break; }
+            if (result == 2 || (result == 1 && retune.quit)) break;
+            if (result == 1) { changing = 1; break; }
+        }
+        if (dt181_session_poll(&session, 50)) {
+            rc = dt181_session_failure_exit(&session);
+            os_mutex_lock(&s->mutex);
+            if (rc == 8 && s->failure_exit) rc = s->failure_exit;
+            os_mutex_unlock(&s->mutex);
+            break;
+        }
+        os_mutex_lock(&s->mutex);
+        int err = s->error;
+        int stream_exit = s->failure_exit ? s->failure_exit : 8;
+#ifdef _WIN32
+        if (s->write_started && now_ms() - s->write_started > 3000) {
+            s->error = 1;
+            if (!s->failure_exit) s->failure_exit = 8;
+            stream_exit = s->failure_exit;
+            err = 1;
+        }
+#endif
+        os_mutex_unlock(&s->mutex);
+        if (err) {
+            rc = stream_exit;
+            break;
+        }
+        if (now_ms() >= next) {
+            if (dt181_session_certify(&session)) {
+                rc = dt181_session_device_exit(&session);
+                break;
+            }
+            next = now_ms() + 1000;
+        }
+    }
+    s->capture_elapsed_ms += now_ms() - start;
+    if (changing) {
+        if (dt181_session_stop_hardware(&session) || dt181_session_stop_usb(&session)) { rc = dt181_session_device_exit(&session); goto cleanup; }
+        os_mutex_lock(&s->mutex); s->done = 1; os_cond_signal(&s->cond); os_mutex_unlock(&s->mutex);
+        os_thread_join(thread, 0); started_thread = 0;
+        if (s->error || s->check.tei || s->check.scrambled || s->check.continuity || s->check.invalid || s->check.crc_errors || s->decoder.resync || s->decoder.waiting) { rc = s->failure_exit ? s->failure_exit : 8; goto cleanup; }
+        s->done = 0; s->head = 0; s->count = 0;
+        ts_check_init(&s->check);
+        if (retune.frequency) { hz = retune.hz; channel = 0; slot = -1; }
+        else { system = retune.channel.system; channel = retune.channel.channel; slot = retune.channel.slot; pixy_frequency(system, channel, &hz); }
+        tsid = -1;
+        if (verbose) fprintf(stderr, "control tune frequency=%u\n", hz);
+        if (dt181_session_tune_slot(&session, system, hz,
+                                    lna < 0 ? system != PIXY_TERRESTRIAL : lna, &tsid, slot)) { rc = dt181_session_device_exit(&session); goto cleanup; }
+        goto capture_restart;
+    }
+cleanup:
+    if (opened) {
+        if (rc)
+            fprintf(stderr, "%s\n", device->error[0] ? device->error : "Capture did not complete");
+        if (device->streaming && dt181_session_stop_hardware(&session) && !rc)
+            rc = dt181_session_device_exit(&session);
+        if (dt181_session_stop_usb(&session) && !rc)
+            rc = dt181_session_failure_exit(&session);
+        if (started_thread) {
+            os_mutex_lock(&s->mutex);
+            s->done = 1;
+            os_cond_signal(&s->cond);
+            os_mutex_unlock(&s->mutex);
+            os_thread_join(thread, rc || interrupted);
+            report(s);
+            if (rc == 8 && s->failure_exit) rc = s->failure_exit;
+            if (!rc &&
+                (s->error || check_bad(&s->check) || s->decoder.resync || s->decoder.waiting))
+                rc = s->failure_exit ? s->failure_exit : 8;
+        }
+        if (dt181_session_shutdown(&session) && !rc)
+            rc = dt181_session_device_exit(&session);
+        dt181_session_close(&session);
+        secure_clear(device, sizeof(*device));
+    }
+    if (queue) {
+        os_cond_destroy(&s->cond);
+        os_mutex_destroy(&s->mutex);
+    }
+    free(fw);
+    secure_clear(bootstrap, 16);
+    free(bootstrap);
+    secure_clear(validation, 64);
+    free(validation);
+finish:
+    if (diag_close(s->diag)) {
+        fprintf(stderr, "Diagnostic capture I/O failed\n");
+        if (!rc) rc = 70;
+    }
+    if (flags >= 0 && s->output == STDOUT_FILENO)
+        os_output_restore(s->output, flags);
+    if (s->output != STDOUT_FILENO && close(s->output) && !rc)
+        rc = 70;
+    secure_clear(s, sizeof(*s));
+    free(s);
+    return rc;
+bad:
+    usage(stderr);
+    return 2;
+}

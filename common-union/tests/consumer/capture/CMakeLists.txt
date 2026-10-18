@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(dtv_userland_capture_consumer LANGUAGES CXX)
+find_package(dtv_userland_core CONFIG REQUIRED COMPONENTS capture)
+add_executable(capture_consumer main.cpp)
+target_compile_features(capture_consumer PRIVATE cxx_std_17)
+target_link_libraries(capture_consumer PRIVATE dtv::capture)

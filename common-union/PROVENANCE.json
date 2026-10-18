@@ -1,0 +1,333 @@
+{
+  "source": {
+    "repository": "Khronos31/px4-userland",
+    "revision": "90f08a594487e2603bd5c09f778a0b3b64ac9a4d",
+    "tree": "025fe2b1f68a341ef83d12eed61d30c20b8b21e8"
+  },
+  "license_scope": {
+    "applies_to": "The root MIT license applies within this candidate to the seven foundation destinations, the two receiver destinations and the receiver-Hz additions listed below, the card ownership destinations, and one mechanically transferred SHA-256 class listed below, the independently implemented wire, identity, STATUS JSON, tuning, control-connection, and control-client subsets, the leased receiver snapshot observation listed below, and this candidate's new build, packaging, test, and documentation files.",
+    "does_not_apply_to": [
+      "The full Khronos31/px4-userland product or unlisted source files",
+      "Any future GPL adapter or other separately licensed component",
+      "Third-party components or material retaining another license"
+    ],
+    "authority": [
+      "agent-workspace branch design/independent-code-policy.md",
+      "User continuation policy, 2026-10-18 02:44 JST",
+      "First-increment implementation start, 2026-10-18 03:06 JST"
+    ],
+    "ownership_statement": "This records the approved license scope; it does not assert or infer copyright ownership or authorship. No source hash or rights holder beyond the values explicitly recorded here is implied."
+  },
+  "foundation": {
+    "method": "Adapted from the pinned PX4 implementation under the recorded independent-code policy. The original source files carry GPL-2.0-only identifiers; destination files in this candidate carry MIT identifiers within the approved scope below.",
+    "source_files": [
+      {
+        "path": "userland/include/px4/error.h",
+        "sha256": "aba979d8421e9dab4513715bb4aa89e3c30ecfaee477054b99b974ad95ec0013",
+        "destination_path": "include/dtv/userland/error.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Error values and Result<T>/Result<void> declarations and behavior.",
+        "excluded_scope": "No error/result API behavior was excluded. Include path, namespace, header guard, and SPDX line were adapted."
+      },
+      {
+        "path": "userland/include/px4/logging.h",
+        "sha256": "e80b422205205976044328560c7d188dd7c64107fee0bfcde5c3aacf751979d9",
+        "destination_path": "include/dtv/userland/logging.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "LogLevel, LogRecord, LogSink, and Logger declarations.",
+        "excluded_scope": "No logging API behavior was excluded. Include path, namespace, header guard, and SPDX line were adapted; no product-specific logger backend was added."
+      },
+      {
+        "path": "userland/include/px4/transport.h",
+        "sha256": "0a594c7cb64057c66f614e9320df3383c02ad83e1acd69bbe143d01140b5426f",
+        "destination_path": "include/dtv/userland/transport.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The neutral ByteView, MutableByteView, Timeout, StreamConfig, StreamEventKind, StreamEvent, BulkReadObservation, and Transport declarations from original lines 19-77.",
+        "excluded_scope": "The six device constants at original lines 12-17 (transfer limits and command/TS endpoint values) were excluded."
+      },
+      {
+        "path": "userland/include/px4/mock_transport.h",
+        "sha256": "59adf3ffe5a0dd16df2b6fd3d36c48c92db4c9aee6d45881f21814701985df2a",
+        "destination_path": "include/dtv/userland/mock_transport.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Mock operation/outcome types, expectation API, and transport override declarations.",
+        "excluded_scope": "The default constructor and implicit product limits/endpoint selection were replaced by explicit MockTransportPolicy input. No real device transport or product-specific endpoint constants were included."
+      },
+      {
+        "path": "userland/src/error.cpp",
+        "sha256": "0eecdb29a8f8cd7c023f7529638791354f69a732b56418e0ec6b7a02090604dc",
+        "destination_path": "src/error.cpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The error_string mapping for the Error values.",
+        "excluded_scope": "No error mapping behavior was excluded. Include path and namespace were adapted; unrelated product code was not included."
+      },
+      {
+        "path": "userland/src/logging.cpp",
+        "sha256": "8c1ee995fac110304bf2290a91e6c4f405bf17b970ec31dcd4cfc2a800767265",
+        "destination_path": "src/logging.cpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Logger threshold and sink behavior, plus log-level string mapping.",
+        "excluded_scope": "No logging behavior was excluded. Include path and namespace were adapted; no product-specific logger backend was included."
+      },
+      {
+        "path": "userland/src/mock_transport.cpp",
+        "sha256": "9abadf6337034bc4143f952a8ae583075e9434e01dc0978eb559df78b8e97906",
+        "destination_path": "src/mock_transport.cpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Mock expectation FIFO, validation, result, partial-transfer, stream, and observation behavior.",
+        "excluded_scope": "Product transfer limits and TS endpoint selection were replaced by the explicit MockTransportPolicy fields. No real USB/device behavior or product-specific transport code was included."
+      }
+    ]
+  },
+  "receiver": {
+    "method": "Adapted from the pinned PX4 TunerService under the recorded independent-code policy, after the backend type seam required by its candidate classification. Only the expressions listed under moved_scope are in the destinations; the original files remain GPL-2.0-only in the product, which keeps them as a facade over this engine.",
+    "authority": [
+      "agent-workspace branch design/independent-code-policy.md",
+      "agent-workspace branch research/followup-extraction-candidates.json (classification needs_backend_type_seam for both source files)",
+      "R1 internal receiver lifecycle specification, shared/implementation/receiver-lifecycle-spec.md"
+    ],
+    "source_files": [
+      {
+        "path": "userland/include/px4/tuner_service.h",
+        "sha256": "8b4032dbe278435880c284d6e784a57d5e6d76732fa956dc18428d173580fb86",
+        "destination_path": "include/dtv/userland/detail/receiver_engine.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Operation set of the backend seam at original lines 41-115 without default bodies; the nonce, lease/attachment ID, and time seams (118-144); the acquire result, attachment, stream counter, and final snapshot field sets (146-178); the disconnected terminal value (187); the stream-control operations attach, detach, stats, and final_snapshot (209-231); the TunerService public operations and private lease/state bookkeeping (256-363).",
+        "excluded_scope": "The receiver_count and receiver_supports defaults with the fixed PX-Q3U4 layout (23-33), the default bodies of the power, disconnect, shutdown, and capture seams, the satellite-before-tune and terrestrial-settle defaults (37-40, 54-57), the remaining terminal values and read result (180-195), release_final, read, and terminal (232-253), and the ipc wire types. Receiver IDs became u16 identities separate from storage slots; frontend tune is one operation with an explicit kHz parameter; the settle decision became a backend-supplied duration."
+      },
+      {
+        "path": "userland/src/tuner_service.cpp",
+        "sha256": "2d30631f888dfa8c266e693ac7a4a543985e29da677b239476e10a35805b83b6",
+        "destination_path": "src/receiver_engine.cpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The lifecycle algorithm at original lines 18-58 and 80-983: construction and shutdown on destruction, client and initial-system checks, lease lookup, lease and attachment ID allocation, acquire, release, lock polling, the tune sequence with power rollback and the post-lock settle arithmetic, stream start, attach with compensation, stop with final snapshot, stats, detach, both revoke forms, status, client cleanup, and shutdown.",
+        "excluded_scope": "The px4_drv-referenced 340 ms terrestrial settle constant and its citation (11-14), which the product supplies through the backend seam; the PX4 wire request validation table valid_tune (59-78), whose per-request decision the product passes in the tune request; the fixed tune response payload construction (503-504)."
+      }
+    ]
+  },
+  "receiver_hz": {
+    "method": "Independent neutral implementation of the adopted exact-Hz request, immutable profile-preparation, existing strict-lane execution, and final publication contract. No product frontend, tuner, or PLL arithmetic was copied into the common engine; source-derived arithmetic and references remain in the separately licensed GPL product drivers.",
+    "authority": [
+      "agent-workspace branch design/independent-code-policy.md and user's 2026-10-18 continuation policy",
+      "shared/implementation/receiver-hz-code-task.md, requirements 1-7",
+      "shared/implementation/receiver-hz-profile-table.md and profile review/clarifications",
+      "shared/implementation/receiver-hz-execution-seams.md and review",
+      "implementation/reports/receiver-hz-code.md, accepted incoming Opus inventory and continuation record"
+    ],
+    "source_baseline": "core-hz revision 4af047b1665190b6560652415bd435ccba545258; the R3 source additions were authored in the recorded accepted continuation and this revision does not claim it contains R3.",
+    "implementation_authors": [
+      {
+        "author": "Claude Opus 5.5",
+        "scope": "The common R3 engine/header/CMake and new receiver-Hz test additions recorded in the accepted incoming-opus inventory and the receiver-hz-code report."
+      }
+    ],
+    "files": [
+      {
+        "path": "CMakeLists.txt",
+        "scope": "Adds the receiver-Hz test target when the existing receiver component and test options are enabled."
+      },
+      {
+        "path": "include/dtv/userland/detail/receiver_engine.h",
+        "scope": "Adds exact-u64-Hz strict requests and results, immutable prepared-profile state, bounded programming output, and the strict-Hz backend seam while retaining the existing kHz API."
+      },
+      {
+        "path": "src/receiver_engine.cpp",
+        "scope": "Consumes the immutable profile outcome prepared by the product facade at the existing admission validation position, carries the exact request through the existing admission/tune flow, derives only the compatibility kHz projection, and publishes the result through the existing final ticket/owner/revision check."
+      },
+      {
+        "path": "tests/receiver_hz_tests.cpp",
+        "scope": "New focused tests for exact-Hz admission, profile preparation, request/result propagation, validation precedence, and guarded publication."
+      }
+    ],
+    "license_scope": "These listed neutral engine, build-target, and new test additions are independently implemented under the adopted policy and carry MIT in this candidate. The GPL product PLL arithmetic, frontend transforms, and source-derived references are excluded."
+  },
+  "identity": {
+    "method": "The selector, instance, USB descriptor and auto-identity codecs are a new independent implementation of the adopted byte representation. The only mechanical transfer is the neutral SHA-256 class, extracted under the standing independent-code policy; no selector/discovery/hardware source was copied.",
+    "authority": [
+      "agent-workspace branch design/identity-encoding-draft.md and examples/identity-vectors.json",
+      "agent-workspace branch design/adoption-status.md, design/device-selection-proposal.md and design/runtime-command-draft.md",
+      "I1 internal identity codec specification, shared/implementation/identity-codec-spec.md",
+      "SHA origin classification, shared/research/identity-sha256-origin.md"
+    ],
+    "source_files": [
+      {
+        "path": "userland/src/firmware.cpp",
+        "sha256": "2e1ad344b71d92d91c4f5acac5601fbbc48d4e16976f39cda0b8269d6058d0a4",
+        "destination_path": "include/dtv/userland/detail/sha256.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Only the `class Sha256 final { ... };` body at original lines 28-171. The identical class body also appears in ASICEN fixed 76299585 userland/src/sha256.h lines 18-161; both calculate to class-body sha256 4117bc2b38ac968a5b1519a3e30fc5224aa94f15ddfb02a8b38d34590a35279b (no trailing newline), re-checked equal to the copied destination class body.",
+        "excluded_scope": "The file header comments, include guard, namespace, firmware policy, file reads, IT930x operations, firmware constants and product types. Class dependencies are only array/cstddef/cstdint."
+      }
+    ],
+    "new_files": "include/dtv/userland/identity.h, src/identity.cpp, include/dtv/userland/detail/text.h, tests/identity_tests.cpp and tests/consumer/identity/ are independently written under the standing policy and carry MIT."
+  },
+  "wire": {
+    "method": "New independent implementation of the documented common UDTV wire; no PX4 wire source was copied or modified.",
+    "scope": "UDTV 1.0 envelope and bounded frame/header handling; typed HELLO request, HELLO response, error response, ACQUIRE request/response, LIST/STATUS snapshots (producer, context, topology, enclosure, USB functions, receiver/reader descriptors and status, measurements and counters), TUNE request/result, START/ATTACH/STOP/RELEASE, TS_DATA, STATE_EVENT/STREAM_END and the CARD_*/transaction records, all with bounded storage, control-payload cap preflight and cross-record validators. It is not a complete protocol: dispatcher/connection state, timers, sockets, JSON/CLI translation and product endpoint migration are out of scope.",
+    "error_values_added": "RESOURCE_LIMIT = 17 was added additively for the control-payload cap. All pre-existing Error values and the one-byte size are unchanged.",
+    "provenance": "Independently written from design/common-wire-draft.md, wire-record-layout.md, common-api-contract.md, json-record-contract.md and cli-contract-draft.md under the conditional adoption in design/adoption-status.md and the scope in design/independent-code-policy.md. No product payload, card/hardware sequence or vendor asset was copied."
+  },
+  "control_connection": {
+    "method": "Independent portable connection state and dispatch-input implementation over the accepted typed wire/record codecs. No PX4 control-server, socket, worker, device, or GPL product implementation was copied.",
+    "authority": [
+      "implementation/reports/runtime-server-next-code-task.md",
+      "shared/design/common-wire-draft.md",
+      "shared/design/wire-record-layout.md",
+      "shared/design/common-api-contract.md",
+      "shared/design/adoption-status.md",
+      "shared/design/independent-code-policy.md"
+    ],
+    "scope": "The dtv::control target provides one-connection HELLO/version/feature negotiation, request-ID and single-outstanding-request state, epoch checks, typed request decoding, typed unsupported/error replies, PID_FILTER selection enforcement before service dispatch, and bounded STATUS snapshot helpers. The product event loop, socket writes, scheduling, ownership, target receiver capability checks, timers, JSON/CLI translation and device work remain outside this common component.",
+    "source_files": [
+      {
+        "path": "include/dtv/userland/control_connection.h",
+        "sha256": "8252d62b6a861b47ec3b052cbcc6a8d0c34ab91d1f8d53a724acaa920e256b37",
+        "spdx": "MIT"
+      },
+      {
+        "path": "src/control_connection.cpp",
+        "sha256": "b66976ed84e7134cc4d8c858ae862491610d8f923674d1743dfc458b6867082d",
+        "spdx": "MIT"
+      },
+      {
+        "path": "tests/control_connection_tests.cpp",
+        "sha256": "859a16597c8d7dae83d10d430c31f6a9c87f3ca3680c5e630744fc21a2af236e",
+        "spdx": "MIT"
+      },
+      {
+        "path": "cmake/dtv_userland_coreConfig.cmake.in",
+        "sha256": "d511c2e8c4f156dcf7156ceb671b6cbeeb520467e0591f1288ac2bbbf4c5498b",
+        "spdx": "MIT"
+      }
+    ],
+    "receiver_snapshot_observation": {
+      "scope": "Adds one leased boolean per engine slot to ReceiverEngineStatus, copied from leases_[slot].active under the existing registry mutex. It exports no lease ID, owner, or token; release cleanup remains represented by the existing operation state.",
+      "source_files": [
+        {
+          "path": "include/dtv/userland/detail/receiver_engine.h",
+          "sha256": "e7d87bbe2234293fae4df11170249edc31b3e1d6d0591142fe4c63e8f42184f5",
+          "spdx": "MIT"
+        },
+        {
+          "path": "src/receiver_engine.cpp",
+          "sha256": "dac6daad549a6fe63aa24ce0fa8ff8888bc5e1d2e37858c30fb3eca907d76f6c",
+          "spdx": "MIT"
+        }
+      ]
+    },
+    "contributors": "Existing pre-correction component work was authored by Opus. Incremental implementation work in the handoff execution was authored by GPT-6-Luna according to the parent subagent history/CLI invocation; the worker self-label is not used for attribution."
+  },
+  "control_client": {
+    "method": "Independent portable UDTV client orchestration over the accepted wire codec, typed records, and JSON exporter. Product transport remains behind the ClientTransport byte interface.",
+    "authority": [
+      "implementation/reports/next-client-migration-facts.md",
+      "implementation/reports/client-runtime-publisher-gap-facts.md",
+      "shared/design/common-wire-draft.md",
+      "shared/design/wire-record-layout.md",
+      "shared/design/common-api-contract.md",
+      "shared/design/adoption-status.md",
+      "shared/design/independent-code-policy.md"
+    ],
+    "scope": "One bounded HELLO, LIST, and STATUS sequence on one byte transport, with response ID/opcode checks, epoch binding, typed error mapping, one outstanding request, timeout and failure close, and immutable list/status snapshot output. No socket, product endpoint, CLI, or device implementation is in this MIT component.",
+    "source_files": [
+      {
+        "path": "include/dtv/userland/control_client.h",
+        "sha256": "9b94793c6ad3ca68819e1c11612a722c134d380a56124d2797fd95b42c680b6c",
+        "spdx": "MIT"
+      },
+      {
+        "path": "src/control_client.cpp",
+        "sha256": "a3f3c87d42deedda0841b2a3d89a710bc14bcb0f70158ea9c633256e943235ac",
+        "spdx": "MIT"
+      }
+    ],
+    "contributors": "GPT-6-Luna, identified from the parent subagent history/CLI invocation."
+  },
+  "json": {
+    "method": "New independent portable serializer; it consumes the existing typed STATUS records and full canonical-context validator.",
+    "scope": "STATUS JSON size and encode APIs, compact UTF-8 object serialization with a final newline, checked caller-capacity handling, canonical collection ordering, and JSON error-symbol projection. The dtv::json target links dtv::wire and introduces no JSON package, parser, product endpoint, C ABI, hardware dependency, or arbitrary byte cap.",
+    "error_symbols": "A shared u32 error-symbol lookup maps JSON codes 1..20 and 255. Legacy error_string continues to recognize only its previous whitelist; codes 16 and 18..20 remain UNKNOWN there. Unknown JSON codes retain their full u32 value in numeric_code, and present code 0 is rejected by existing record validation.",
+    "provenance": "Independently written from shared/design/json-record-contract.md, shared/implementation/status-json-spec.md, shared/design/wire-record-layout.md, shared/design/adoption-status.md, and shared/examples/json-records.json. The serializer does not modify the source record and validates StatusResponse against StatusContext before sizing and writing."
+  },
+  "card_ownership": {
+    "method": "Adapted from the isolated PX4 card ownership implementation under the recorded independent-code policy. AtrSnapshot is an opaque template value; product CardAtr, NativeCardProtocolSession, IPC enums, and the APDU compatibility limit remain in the GPL facade.",
+    "authority": [
+      "agent-workspace branch design/independent-code-policy.md",
+      "C1 internal card ownership specification and independent pre-code boundary review record, shared/implementation/card-ownership-spec.md",
+      "Independent implementation review, implementation/reports/card-ownership-review.md"
+    ],
+    "source_files": [
+      {
+        "path": "userland/include/px4/card_service.h",
+        "sha256": "0e7cbe6d23a98867d54796b8abd07003b129602e1429418452c86212864d938a",
+        "destination_path": "include/dtv/userland/detail/card_ownership_engine.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The protocol session operation set at original lines 14-25, backend operations and result/presence value fields at 47-71, and ownership operations/state declarations at 73-157, adapted to neutral card-share/disposition enums, byte spans, and CardOwnershipSession/Backend seams.",
+        "excluded_scope": "NativeCardProtocolSession and CardSession binding at original lines 27-43; Q3U4/device-specific backend policy in the comment at 45-46; PX4 ipc types; product CardAtr definition and hardware session implementation."
+      },
+      {
+        "path": "userland/src/card_service.cpp",
+        "sha256": "45eb44af207efad7d6cfd77b8cf8358df0d1767fe49e5f95e5d11d5651f8a8f2",
+        "destination_path": "include/dtv/userland/detail/card_ownership_engine.tpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The ownership, sharing, presence/generation, session, transaction, disconnect, cleanup, and error-order algorithm at original lines 10-551. The source's ipc::kMaxCardPayload check at 461-464 is parameterized by the facade constructor at the same validation position.",
+        "excluded_scope": "The Q3U4Runtime/SPEC product-specific comment at original lines 31-33, PX4 IPC enum and header dependencies, and all CardAtr/Native protocol/hardware interpretation. Snapshot values remain opaque and are only defaulted, copied, or returned."
+      }
+    ]
+  },
+  "tuning": {
+    "method": "New independent bounded resolver implementation from the adopted CLI contract and the T1 implementation specification; no product parser or product source was copied.",
+    "authority": [
+      "shared/design/cli-contract-draft.md section 2",
+      "shared/design/adoption-status.md, selection meaning and frequency contract",
+      "shared/implementation/tune-plan-spec.md and tune-plan-spec-review.md"
+    ],
+    "scope": "Pure C++17 channel/typed-Hz/system/selection resolution using the existing wire System and Selection enums. No CLI option parser, repeated-option policy, wire request construction, backend capability checks, hardware quantization, product endpoint, or C ABI.",
+    "new_files": "include/dtv/userland/tuning.h, src/tuning.cpp, tests/tuning_tests.cpp, tests/consumer/tuning/, tests/consumer/missing_receiver/ and docs/tuning.md are independently written and carry MIT."
+  },
+  "packet_session": {
+    "method": "Narrow-range extraction of the verified generic PX4 packet-session storage/read/drain/final expressions into the internal capture component, under the recorded independent-code policy. Only the expressions listed under moved_scope are in the destinations; the product keeps its GPL bridge, demux, hardware, startup, continuity, and producer stop/join policy in userland/src/q3u4_stream.cpp, which now composes the common state.",
+    "authority": [
+      "agent-workspace branch design/independent-code-policy.md",
+      "D2a executable extraction specification, shared/implementation/packet-session-spec.md",
+      "Expression provenance closure, shared/implementation/capture-common-origin-review.md (independent-implementation candidate for the selected ranges)",
+      "D2 preparation, shared/implementation/capture-common-preparation.md",
+      "Decision critique and incorporated reader-incarnation exception, shared/implementation/packet-session-decision-critique.md"
+    ],
+    "source_files": [
+      {
+        "path": "userland/src/q3u4_stream.cpp",
+        "sha256": "8952d3c43f896ca24ea851cc90316f2b4ea0966b32f363926b6cdc4cbc67b67f",
+        "destination_path": "src/packet_stream_session.cpp",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "The independently reviewed generic expressions at fixed lines 100-108 (whole compound attachment equality, hash 43ccce9e13da668d6ebe07df015f0ebd1f4aa27ddb5dd9d799af1d945d2428af); 121-134 (generic queue/read/final state fields, 13b44fcebd616978cca61b0f44da52bb73907463cba85bf1b91842bf2d6ec8ed); 466-488 (BUSY check, checked allocation, session reset and current identity, c3c14d5be6f248c8b8515ef06cc64249abd76837cd2b8db19328c57bd3228f57); 526-543 (detach snapshot/invalidation/drain/wake, 52c3844ec5875af22051131e311c8e88f161e3269eb40b809265725c02859c49); 558-563 (post-cleanup exact-identity final amendment, 482c4a201dfe330d51944028644c18f5c9cb000b805eae9cb51b480fbd8d75cf); 580-581 (read output pointer/alignment validation glue, b212ec4952b12056ffaefb7e7ff66d29f82808475297986b9ead7532be0d0713); 585-630 (read lock/identity/wait/EOF/two-span wrap/result, 7385055d1309823f64d1bd257969bc64d209e0521fc02e83ff3dd4ab8c9fd76a); 638-641 (active counter query, fdc8de41bc37d6921f1ce7442b1e28749aac40128cd32a40bb9e1696f4b7b998); 650-654 (exact-identity retained final query, 7085beca16b89ad8bce4b892e6961df064c85338325ffed0da7c268f6f898e30); 662-669 (exact-identity final release/queue retirement, 63d38471d3886eda713981b35a280dd414c991be015892eb5e0d0d58f18448aa); 694-697 (active terminal query, abd46daac07ec2b521987c51b2de3d98cb3047a70c0a46ffc06a97735e7d31af); 807-818 (packet accounting before overflow rejection, append and wake, ebf72e2aa9bb59a279b4c7bde51bdba82fe374f0168316693e49500deca4bc25); 925-932 (terminal mutation/wake, fb03d629ad76b49174e7b50db3832ed81a20da5f4a52745520ebb8ed3d21c2fa); 939-943 (active terminal assignment/wake, 4e248c84ad78f97677f4f6674255be091f7855565fa59019b96680592e575252); 966-980 (shutdown final snapshot and queue retirement, f4e8ffdd7a88b5919942cf1da78cb36a4a901fd64949956be28b5a6578d82c9c); and 1001-1004 (retained final terminal amendment, 35ec3e9af27371ac85bfc70209f6527c4b24664d89ca888ab464d0b2f82a9bfe).",
+        "excluded_scope": "Product facade declarations, receiver/system/bridge validation and lifecycle locks (444-464, 489-511), bridge locking (514-524), attached-count/last-owner producer stop (545-573), tagged receiver routing, startup stabilization, continuity/TEI observation and TEI predicates (770-806, 828-918), transport cancel/stop, USB error mapping and enclosure shutdown, MLT layout, PSB suppression and the public factory/inheritance header. Hardware, demux, and producer-stop ownership stay GPL."
+      },
+      {
+        "path": "userland/include/px4/q3u4_stream.h",
+        "sha256": "6b138782e51868a00d7ee09b8461866d2d2478b1a8ab9e46b5e4d50fc08054d4",
+        "destination_path": "include/dtv/userland/detail/packet_stream_session.h",
+        "source_spdx": "GPL-2.0-only",
+        "destination_spdx": "MIT",
+        "moved_scope": "Only the neutral packet-session state/operation shape behind the product facade (queue, capacity/head/count, active/draining identities, retained-final fields, terminal/counters, one mutex/condition variable and the read/drain/final operations). The public product class, its TunerService aliases/inheritance and factories stay GPL.",
+        "excluded_scope": "TunerAttachment/TunerStreamControl inheritance, kMaxReadBytes ceiling, receiver topology, test-access macro and all hardware/layout declarations. Receiver validity and the legacy read ceiling remain product inputs."
+      }
+    ],
+    "neutral_types": "Attachment, StreamCounters, StreamFinalSnapshot, ReceiverId, ReceiverToken, and ReceiverSystem are the unchanged neutral declarations split from include/dtv/userland/detail/receiver_engine.h into include/dtv/userland/detail/stream_session_types.h so a capture-only build does not depend on the disabled receiver header. StreamTerminal and StreamReadResult preserve the legacy PX4 numbering/field set. Declaration names, layout, defaults, and enum values are preserved and old receiver source compatibility is retained.",
+    "incarnation_exception": "The sole approved behavior exception is a session-local nonwrapping u64 incarnation. It is incremented under the same session mutex at admitted logical attachment publication (including a publication whose later bridge startup fails) and never on validation/BUSY/allocation rejection. A read captures it when it first validates the attachment, includes the mismatch in its wait predicate, and checks it immediately after wait/reacquisition before any packet, counter, draining, or final access, returning NOT_FOUND without touching the replacement session. A same-incarnation empty detach keeps the old already-validated reader EOF. Incarnation exhaustion rejects the next logical attach with RESOURCE_LIMIT after the external validation/BUSY checks and before allocating or mutating state; there is no wrap, global shutdown, or physical reset. This is not the old source expression and has no existing oracle.",
+    "new_files": "include/dtv/userland/detail/stream_session_types.h, include/dtv/userland/detail/packet_stream_session.h, src/packet_stream_session.cpp, tests/packet_stream_session_tests.cpp, tests/consumer/capture/, tests/consumer/capture_receiver/, tests/consumer/missing_capture/ and the capture CMake/install wiring are new and carry MIT. The product adapter changes and the instrumented fixed-old test copy remain GPL-2.0-only in px4-userland."
+  }
+}

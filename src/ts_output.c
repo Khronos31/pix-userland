@@ -1,3 +1,6 @@
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
 #define _POSIX_C_SOURCE 200809L
 #include "ts_output.h"
 
@@ -48,14 +51,19 @@ int ts_output_destroy(ts_output *o) {
 }
 #else
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -67,6 +75,7 @@ int ts_output_destroy(ts_output *o) {
 
 #define TS_CHILD_END UINT64_MAX
 #define TS_OUTPUT_IPC_WINDOW_BYTES (1024U * 1024U)
+#define TS_CHILD_FD_CLEANUP_FAILED 87
 struct ts_frame {
     uint64_t id;
     uint64_t length;
@@ -169,6 +178,279 @@ static int read_full(int fd, void *data, size_t length) {
     }
     return 0;
 }
+#ifdef __linux__
+struct ts_linux_dirent64 {
+    uint64_t ino;
+    int64_t offset;
+    unsigned short record_length;
+    unsigned char type;
+    char name[];
+};
+static int ts_close_unrelated_fds(int channel, int output_fd);
+static int ts_parse_proc_fd_entries(const char *buffer, size_t length, const int *keep,
+                                    unsigned count, int enum_fd);
+
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+enum {
+    TS_TEST_FD_CLEANUP_NORMAL,
+    TS_TEST_FD_CLEANUP_FALLBACK,
+    TS_TEST_FD_CLEANUP_FAIL,
+    TS_TEST_FD_CLEANUP_PARTIAL,
+    TS_TEST_FD_CLEANUP_FAST_ONLY,
+    TS_TEST_FD_CLEANUP_BAD_DIRENT
+};
+static int test_fd_cleanup_mode;
+static unsigned test_close_range_calls;
+
+void ts_output_test_set_fd_cleanup_mode(int mode) {
+    test_fd_cleanup_mode = mode;
+    test_close_range_calls = 0;
+}
+
+int ts_output_test_close_unrelated_fds(int channel, int output_fd) {
+    return ts_close_unrelated_fds(channel, output_fd);
+}
+
+int ts_output_test_parse_dirents(const char *buffer, size_t length) {
+    const int keep[] = {0, 1, 2};
+    return ts_parse_proc_fd_entries(buffer, length, keep, 3, -1);
+}
+#endif
+
+static int ts_fd_is_kept(unsigned int fd, const int *keep, unsigned count, int enum_fd) {
+    if (fd == (unsigned int)enum_fd)
+        return 1;
+    for (unsigned i = 0; i < count; ++i)
+        if (fd == (unsigned int)keep[i])
+            return 1;
+    return 0;
+}
+
+static int ts_name_is_dot(const char *name, size_t length) {
+    return length == 1 && name[0] == '.';
+}
+
+static int ts_name_is_dotdot(const char *name, size_t length) {
+    return length == 2 && name[0] == '.' && name[1] == '.';
+}
+
+static int ts_close_fd_once(int fd) {
+    int rc = close(fd);
+    if (!rc || errno == EINTR)
+        return 0;
+    return -1;
+}
+
+static int ts_parse_proc_fd_entries(const char *buffer, size_t length, const int *keep,
+                                   unsigned count, int enum_fd) {
+    size_t header_length = offsetof(struct ts_linux_dirent64, name);
+    const char *entry = buffer;
+    size_t remaining = length;
+    while (remaining) {
+        size_t record_length_offset = offsetof(struct ts_linux_dirent64, record_length);
+        if (remaining < record_length_offset + sizeof(unsigned short)) {
+            errno = EIO;
+            return -1;
+        }
+        unsigned short raw_record_length;
+        memcpy(&raw_record_length, entry + record_length_offset, sizeof(raw_record_length));
+        size_t record_length = raw_record_length;
+        if (remaining < header_length + 1 || record_length < header_length + 1 ||
+            record_length > remaining) {
+            errno = EIO;
+            return -1;
+        }
+        const char *name = entry + header_length;
+        size_t name_capacity = record_length - header_length;
+        size_t name_length = 0;
+        while (name_length < name_capacity && name[name_length])
+            ++name_length;
+        if (name_length == name_capacity) {
+            errno = EIO;
+            return -1;
+        }
+        if (!ts_name_is_dot(name, name_length) && !ts_name_is_dotdot(name, name_length)) {
+            if (!name_length) {
+                errno = EIO;
+                return -1;
+            }
+            unsigned int fd = 0;
+            for (size_t i = 0; i < name_length; ++i) {
+                char digit = name[i];
+                if (digit < '0' || digit > '9' ||
+                    fd > (UINT_MAX - (unsigned int)(digit - '0')) / 10U) {
+                    errno = EIO;
+                    return -1;
+                }
+                fd = fd * 10U + (unsigned int)(digit - '0');
+            }
+            if (fd > INT_MAX) {
+                errno = EIO;
+                return -1;
+            }
+            if (!ts_fd_is_kept(fd, keep, count, enum_fd) && ts_close_fd_once((int)fd))
+                return -1;
+        }
+        entry += record_length;
+        remaining -= record_length;
+    }
+    return 0;
+}
+
+static int ts_close_range(unsigned int first, unsigned int last) {
+    if (first > last)
+        return 0;
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+    if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_FAIL) {
+        errno = EPERM;
+        return -1;
+    }
+    if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_PARTIAL && test_close_range_calls++) {
+        errno = EPERM;
+        return -1;
+    }
+#endif
+#if defined(SYS_close_range)
+    return (int)syscall(SYS_close_range, first, last, 0U);
+#elif defined(__NR_close_range)
+    return (int)syscall(__NR_close_range, first, last, 0U);
+#else
+    (void)first;
+    (void)last;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+static int ts_close_fds_by_proc(const int *keep, unsigned count) {
+#if defined(SYS_openat) && defined(SYS_getdents64)
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+    if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_FAIL) {
+        errno = EACCES;
+        return -1;
+    }
+#endif
+    int dir_fd;
+    do {
+        dir_fd = (int)syscall(SYS_openat, AT_FDCWD, "/proc/self/fd",
+                              O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+    } while (dir_fd < 0 && errno == EINTR);
+    if (dir_fd < 0)
+        return -1;
+
+    char buffer[4096];
+    int failed = 0;
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+    if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_BAD_DIRENT) {
+        char malformed[64] = {0};
+        size_t header_length = offsetof(struct ts_linux_dirent64, name);
+        size_t prefix_length = header_length + 2;
+        unsigned short record_length = (unsigned short)prefix_length;
+        memcpy(malformed + offsetof(struct ts_linux_dirent64, record_length),
+               &record_length, sizeof(record_length));
+        malformed[header_length] = '0';
+        malformed[header_length + 1] = '\0';
+        int rc = ts_parse_proc_fd_entries(malformed, prefix_length + 1, keep, count, dir_fd);
+        int saved_errno = errno;
+        (void)ts_close_fd_once(dir_fd);
+        errno = saved_errno;
+        return rc;
+    }
+#endif
+    for (;;) {
+        long length;
+        do {
+            length = syscall(SYS_getdents64, dir_fd, buffer, sizeof(buffer));
+        } while (length < 0 && errno == EINTR);
+        if (length < 0) {
+            failed = 1;
+            break;
+        }
+        if (!length)
+            break;
+        if ((size_t)length > sizeof(buffer)) {
+            failed = 1;
+            break;
+        }
+        if (ts_parse_proc_fd_entries(buffer, (size_t)length, keep, count, dir_fd)) {
+            failed = 1;
+            break;
+        }
+    }
+    if (ts_close_fd_once(dir_fd))
+        failed = 1;
+    if (failed) {
+        if (!errno)
+            errno = EIO;
+        return -1;
+    }
+    return 0;
+#else
+    (void)keep;
+    (void)count;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+static int ts_close_unrelated_fds(int channel, int output_fd) {
+    int keep[5] = {0, 1, 2, channel, output_fd};
+    unsigned count = 0;
+    for (unsigned i = 0; i < sizeof(keep) / sizeof(keep[0]); ++i) {
+        if (keep[i] < 0)
+            continue;
+        int value = keep[i];
+        unsigned insert = count;
+        while (insert && keep[insert - 1] > value) {
+            keep[insert] = keep[insert - 1];
+            --insert;
+        }
+        keep[insert] = value;
+        ++count;
+    }
+    unsigned unique = 0;
+    for (unsigned i = 0; i < count; ++i)
+        if (!unique || keep[i] != keep[unique - 1])
+            keep[unique++] = keep[i];
+    count = unique;
+
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+    if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_FALLBACK ||
+        test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_BAD_DIRENT)
+        return ts_close_fds_by_proc(keep, count);
+#endif
+
+    unsigned int first = 3;
+    int finished = 0;
+    for (unsigned i = 0; i < count; ++i) {
+        if (keep[i] < 3)
+            continue;
+        unsigned int fd = (unsigned int)keep[i];
+        if (fd > first && ts_close_range(first, fd - 1U)) {
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+            if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_FAST_ONLY)
+                return -1;
+#endif
+            return ts_close_fds_by_proc(keep, count);
+        }
+        if (fd == UINT_MAX) {
+            finished = 1;
+            break;
+        }
+        if (fd >= first)
+            first = fd + 1U;
+    }
+    if (!finished && ts_close_range(first, UINT_MAX)) {
+#ifdef TS_OUTPUT_TESTING_FD_CLEANUP
+        if (test_fd_cleanup_mode == TS_TEST_FD_CLEANUP_FAST_ONLY)
+            return -1;
+#endif
+        return ts_close_fds_by_proc(keep, count);
+    }
+    return 0;
+}
+#endif
+
 static void child_loop(int channel, int output_fd, int is_pipe, int max_fd, size_t test_chunk,
                        uint64_t test_fail_after, int test_close_error, int test_crash_after_receive,
                        int test_stall_close_ack, int test_stall_after_receive,
@@ -176,9 +458,15 @@ static void child_loop(int channel, int output_fd, int is_pipe, int max_fd, size
     (void)signal(SIGPIPE, SIG_IGN);
     (void)signal(SIGTERM, SIG_DFL);
     (void)signal(SIGINT, SIG_IGN);
+#ifdef __linux__
+    (void)max_fd;
+    if (ts_close_unrelated_fds(channel, output_fd))
+        _exit(TS_CHILD_FD_CLEANUP_FAILED);
+#else
     for (int fd = 3; fd < max_fd; ++fd)
         if (fd != channel && fd != output_fd)
             (void)close(fd);
+#endif
     uint64_t total_written = 0;
     struct ts_ack pending_acks[64];
     unsigned pending_ack_count = 0;

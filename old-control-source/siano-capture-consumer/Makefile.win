@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# nmake /f Makefile.win  (from VS DevShell)
+# LIBUSB_DIR = extracted libusb (include\libusb-1.0 and MS64 dll import lib)
+
+LIBUSB_DIR = libusb
+CC = cl
+CFLAGS = /nologo /O2 /W3 /std:c11 /utf-8 /Brepro /D_CRT_SECURE_NO_WARNINGS /I$(LIBUSB_DIR)\include\libusb-1.0
+LIBS = $(LIBUSB_DIR)\libusb-1.0.lib
+
+all: siano-ts.exe
+
+test: test-protocol.exe test-clock.exe test-stream-state.exe test-control-parse.exe test-control-input.exe test-usb-location.exe test-detach-decision.exe test-device-selector.exe test-exit-codes.exe test-queue-policy.exe test-write-policy.exe test-output-integration.exe
+	.\test-protocol.exe
+	.\test-clock.exe
+	.\test-stream-state.exe
+	.\test-control-parse.exe
+	.\test-control-input.exe
+	.\test-usb-location.exe
+	.\test-detach-decision.exe
+	.\test-device-selector.exe
+	.\test-exit-codes.exe
+	.\test-queue-policy.exe
+	.\test-write-policy.exe
+	.\test-output-integration.exe
+
+siano-ts.exe: siano-ts.obj siano-device.obj protocol.obj stream-state.obj control-parse.obj control-input.obj device-selector.obj exit-codes.obj queue-policy.obj output-writer.obj
+	$(CC) $(CFLAGS) /Fe:siano-ts.exe siano-ts.obj siano-device.obj protocol.obj stream-state.obj control-parse.obj control-input.obj device-selector.obj exit-codes.obj queue-policy.obj output-writer.obj /link /Brepro $(LIBS)
+
+siano-ts.obj: siano-ts.c siano-device.h protocol.h stream-state.h control-parse.h control-input.h device-selector.h detach-decision.h exit-codes.h siano-os.h siano-clock.h usb-location.h queue-policy.h write-policy.h output-writer.h
+	$(CC) $(CFLAGS) /c siano-ts.c
+
+siano-device.obj: siano-device.c siano-device.h protocol.h stream-state.h device-selector.h detach-decision.h exit-codes.h siano-os.h siano-clock.h usb-location.h queue-policy.h output-writer.h
+	$(CC) $(CFLAGS) /c siano-device.c
+
+protocol.obj: protocol.c protocol.h
+	$(CC) $(CFLAGS) /c protocol.c
+
+stream-state.obj: stream-state.c stream-state.h siano-os.h queue-policy.h
+	$(CC) $(CFLAGS) /c stream-state.c
+
+control-parse.obj: control-parse.c control-parse.h
+	$(CC) $(CFLAGS) /c control-parse.c
+
+control-input.obj: control-input.c control-input.h
+	$(CC) $(CFLAGS) /c control-input.c
+
+device-selector.obj: device-selector.c device-selector.h
+	$(CC) $(CFLAGS) /c device-selector.c
+
+exit-codes.obj: exit-codes.c exit-codes.h siano-os.h
+	$(CC) $(CFLAGS) /c exit-codes.c
+
+queue-policy.obj: queue-policy.c queue-policy.h
+	$(CC) $(CFLAGS) /c queue-policy.c
+
+output-writer.obj: output-writer.c output-writer.h write-policy.h siano-os.h
+	$(CC) $(CFLAGS) /c output-writer.c
+
+test-protocol.exe: tests\test_protocol.c protocol.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_protocol.c protocol.obj
+
+test-clock.exe: tests\test_clock.c
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_clock.c
+
+test-stream-state.exe: tests\test_stream_state.c stream-state.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_stream_state.c stream-state.obj $(LIBS)
+
+test-control-parse.exe: tests\test_control_parse.c control-parse.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_control_parse.c control-parse.obj
+
+test-control-input.exe: tests\test_control_input.c control-input.obj control-input.h
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_control_input.c control-input.obj
+
+test-usb-location.exe: tests\test_usb_location.c
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_usb_location.c
+
+test-detach-decision.exe: tests\test_detach_decision.c
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_detach_decision.c $(LIBS)
+
+test-device-selector.exe: tests\test_device_selector.c device-selector.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_device_selector.c device-selector.obj
+
+test-exit-codes.exe: tests\test_exit_codes.c exit-codes.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_exit_codes.c exit-codes.obj $(LIBS)
+
+test-queue-policy.exe: tests\test_queue_policy.c queue-policy.obj siano-os.h
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_queue_policy.c queue-policy.obj
+
+test-write-policy.exe: tests\test_write_policy.c write-policy.h
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_write_policy.c
+
+test-output-integration.exe: tests\test_output_integration_win.c siano-ts.c siano-device.obj output-writer.obj protocol.obj stream-state.obj control-parse.obj control-input.obj device-selector.obj exit-codes.obj queue-policy.obj
+	$(CC) $(CFLAGS) /Fe:$@ tests\test_output_integration_win.c siano-device.obj output-writer.obj protocol.obj stream-state.obj control-parse.obj control-input.obj device-selector.obj exit-codes.obj queue-policy.obj /link $(LIBS)
+
+clean:
+	del /q siano-ts.exe test-*.exe siano-ts.obj siano-device.obj protocol.obj stream-state.obj control-parse.obj control-input.obj device-selector.obj exit-codes.obj queue-policy.obj output-writer.obj 2>nul
