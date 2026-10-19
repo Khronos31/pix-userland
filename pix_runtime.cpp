@@ -258,16 +258,80 @@ struct Family::Impl final {
     bool initialized = false;
 };
 
-dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& input) noexcept
+namespace {
+
+bool same_serial(const dtv::userland::identity::SerialText& left,
+                 const dtv::userland::identity::SerialText& right) noexcept
 {
-    if (input.rfind("serial:", 0U) == 0U)
-        return dtv::userland::Result<LocatedDevice>::failure(Error::NOT_FOUND);
-    if (input.rfind("usb:", 0U) != 0U)
+    return left.length == right.length &&
+           std::memcmp(left.bytes.data(), right.bytes.data(), left.length) == 0;
+}
+
+bool read_serial_text(libusb_device* device,
+                      const libusb_device_descriptor& descriptor,
+                      dtv::userland::identity::SerialText& output) noexcept
+{
+    if (descriptor.iSerialNumber == 0U) return false;
+    libusb_device_handle* handle = nullptr;
+    if (libusb_open(device, &handle) != LIBUSB_SUCCESS || handle == nullptr)
+        return false;
+    unsigned char characters[256]{};
+    const int length = libusb_get_string_descriptor_ascii(
+        handle, descriptor.iSerialNumber, characters,
+        static_cast<int>(sizeof(characters)));
+    libusb_close(handle);
+    if (length <= 0 || static_cast<std::size_t>(length) > output.bytes.size())
+        return false;
+    output.length = static_cast<std::uint16_t>(length);
+    std::memcpy(output.bytes.data(), characters, static_cast<std::size_t>(length));
+    return true;
+}
+
+bool fill_location(libusb_device* device, unsigned bus, Model model,
+                   LocatedDevice& output) noexcept
+{
+    std::uint8_t ports[USB_SELECTOR_MAX_PORTS]{};
+    const int port_count = libusb_get_port_numbers(device, ports, sizeof(ports));
+    if (port_count <= 0) return false;
+    char path[64]{};
+    if (usb_selector_format_path(path, sizeof(path), bus, ports,
+                                 static_cast<unsigned>(port_count)) != 0)
+        return false;
+    output.model = model;
+    output.bus = static_cast<std::uint8_t>(bus);
+    output.address = libusb_get_device_address(device);
+    output.port_count = static_cast<std::uint8_t>(port_count);
+    std::copy(ports, ports + port_count, output.ports.begin());
+    output.path.assign(path);
+    output.selector.kind = USB_SELECT_PATH;
+    output.selector.bus = output.bus;
+    output.selector.address = output.address;
+    output.selector.port_count = static_cast<unsigned>(output.port_count);
+    std::copy(ports, ports + port_count, output.selector.ports);
+    return true;
+}
+
+}  // namespace
+
+dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
+{
+    const bool serial_selector = input.rfind("serial:", 0U) == 0U;
+    if (!serial_selector && input.rfind("usb:", 0U) != 0U)
         return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
+
     LocatedDevice selected{};
-    if (usb_selector_parse(input.c_str() + 4, &selected.selector) != 0 ||
-        selected.selector.kind != USB_SELECT_PATH)
+    dtv::userland::identity::SerialText wanted{};
+    if (serial_selector) {
+        const auto parsed = dtv::userland::identity::parse_device_selector(input);
+        if (!parsed ||
+            parsed.value().kind != dtv::userland::identity::SelectorKind::serial)
+            return dtv::userland::Result<LocatedDevice>::failure(
+                Error::INVALID_ARGUMENT);
+        wanted = parsed.value().serial;
+    } else if (usb_selector_parse(input.c_str() + 4, &selected.selector) != 0 ||
+               selected.selector.kind != USB_SELECT_PATH) {
         return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
+    }
 
     libusb_context* context = nullptr;
     if (libusb_init(&context) != LIBUSB_SUCCESS)
@@ -279,41 +343,66 @@ dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& input) noex
         return dtv::userland::Result<LocatedDevice>::failure(Error::USB_IO);
     }
     bool found = false;
+    bool ambiguous = false;
     Error failure = Error::NOT_FOUND;
     for (ssize_t index = 0; index < count; ++index) {
         libusb_device_descriptor descriptor{};
         if (libusb_get_device_descriptor(devices[index], &descriptor) != LIBUSB_SUCCESS)
             continue;
+        if (descriptor.idVendor != 0x06b8U) continue;
+        Model model;
+        if (descriptor.idProduct == 0x102bU) model = Model::dt181;
+        else if (descriptor.idProduct == 0x103bU) model = Model::dt295;
+        else continue;
+
         const unsigned bus = libusb_get_bus_number(devices[index]);
+        if (serial_selector) {
+            dtv::userland::identity::SerialText observed{};
+            if (!read_serial_text(devices[index], descriptor, observed) ||
+                !same_serial(observed, wanted)) continue;
+            if (found) {
+                ambiguous = true;
+                break;
+            }
+            if (!fill_location(devices[index], bus, model, selected)) {
+                failure = Error::INTERNAL;
+                break;
+            }
+            found = true;
+            continue;
+        }
+
+        LocatedDevice candidate{};
         std::uint8_t ports[USB_SELECTOR_MAX_PORTS]{};
         const int port_count = libusb_get_port_numbers(devices[index], ports,
                                                        sizeof(ports));
         if (port_count <= 0 || !usb_selector_matches(&selected.selector, 0U, bus,
                 libusb_get_device_address(devices[index]), ports,
                 static_cast<unsigned>(port_count))) continue;
-        if (descriptor.idVendor != 0x06b8U || descriptor.idProduct != 0x102bU) {
-            failure = descriptor.idVendor == 0x06b8U && descriptor.idProduct == 0x103bU
-                ? Error::UNSUPPORTED : Error::NOT_FOUND;
-            break;
-        }
-        selected.bus = static_cast<std::uint8_t>(bus);
-        selected.address = libusb_get_device_address(devices[index]);
-        selected.port_count = static_cast<std::uint8_t>(port_count);
-        std::copy(ports, ports + port_count, selected.ports.begin());
-        char path[64]{};
-        if (usb_selector_format_path(path, sizeof(path), bus, ports,
-                                     static_cast<unsigned>(port_count)) != 0) {
+        if (!fill_location(devices[index], bus, model, candidate)) {
             failure = Error::INTERNAL;
             break;
         }
-        selected.path.assign(path);
+        selected = std::move(candidate);
         found = true;
         break;
     }
     libusb_free_device_list(devices, 1);
     libusb_exit(context);
+    if (ambiguous)
+        return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
     if (!found) return dtv::userland::Result<LocatedDevice>::failure(failure);
     return dtv::userland::Result<LocatedDevice>::success(std::move(selected));
+}
+
+dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& input) noexcept
+{
+    const auto located = locate(input);
+    if (!located)
+        return dtv::userland::Result<LocatedDevice>::failure(located.error());
+    if (located.value().model != Model::dt181)
+        return dtv::userland::Result<LocatedDevice>::failure(Error::UNSUPPORTED);
+    return located;
 }
 
 Assets::~Assets() noexcept

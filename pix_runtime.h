@@ -16,7 +16,10 @@ namespace pix::runtime {
 
 namespace dt181 = ::pix::capture::dt181;
 
+enum class Model : std::uint8_t { dt181 = 0U, dt295 = 1U };
+
 struct LocatedDevice final {
+    Model model = Model::dt181;
     usb_selector selector{};
     std::uint8_t bus = 0U;
     std::uint8_t address = 0U;
@@ -25,6 +28,7 @@ struct LocatedDevice final {
     std::string path;
 };
 
+dtv::userland::Result<LocatedDevice> locate(const std::string& selector) noexcept;
 dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& selector) noexcept;
 
 struct Assets final {
