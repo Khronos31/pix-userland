@@ -272,7 +272,7 @@ target_link_libraries(pix_dt181_runtime PUBLIC
 add_executable(pixd pixd.cpp)
 target_compile_definitions(pixd PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pixd PRIVATE cxx_std_17)
-target_link_libraries(pixd PRIVATE pix_dt181_runtime)
+target_link_libraries(pixd PRIVATE pix_dt181_runtime dtv::json)
 target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
 add_executable(pixctl ${PX4_ROOT}/tools/px4ctl.cpp)
