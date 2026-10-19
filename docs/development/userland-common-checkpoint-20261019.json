@@ -2,7 +2,7 @@
   "kind": "work-in-progress-source-checkpoint-limited-review-ready",
   "branch": "wip/userland-common-20261017",
   "upstream_main": "af57d4c2824635caa46f57aa873e3b4c3ca4320b",
-  "snapshot_source": "/config/.work/userland-common-20261017/implementation/pix-dt181-product-status-pinned",
+  "snapshot_source": "/config/.work/userland-common-20261017/implementation/pix-dt181-queue-capacity",
   "snapshot_file_count": 327,
   "snapshot_file_sha256": {
     "./CMakeLists.txt": "25414adfcdc46974e4ad31e3a7878175f0a1127ac10ff552217f1b8ea14632a5",
@@ -255,7 +255,7 @@
     "./pix-dt181-consumer.h": "b14be7f5d5c470a44ccf5e7d3d243a594d0b9cb0a5c49927f8c8953700efa573",
     "./pix-dt181-receiver-adapter.cpp": "caf17096fbc0bc1779f8341fc2ac5e7b2ee0389049e80f64e919786c764b671b",
     "./pix-dt181-receiver-adapter.h": "fbf06cccf5997fbb34c5548cba6fdce68450b8dd29c45cec21c7f8f85e2fc8a0",
-    "./pix_runtime.cpp": "5a76f862e76dfbb08666037d6cad61d91ececcd72482875585644db11f6fde3c",
+    "./pix_runtime.cpp": "2f07f5988f451ea71d1f55e5ffcdb6ff646227d33b934957f73dceabf31619f7",
     "./pix_runtime.h": "c5622b8ccb914bfb37cbd14c241b1cd4f192167ed7bf7ffca750dbe8b72a16d9",
     "./pixd.cpp": "92ba7bbcf658ace4a1f823d8921a5e1b0cc95fd4c4a7f545a35f221512e599e5",
     "./src/channel.c": "e5cf29936e46d7f1d60efbfe9b3d18ed7425b3c024cb139fe31eba263c075ea1",
@@ -482,14 +482,18 @@
   ],
   "overlay_policy": "固定sourceのみ専用branchへ保全。manifest外のupstream fileと元作業treeを保持。metadata自体はsnapshot外。",
   "acceptance_scope": [
-    "共用ctl製品bindingは独立review限定READY。PIX proof準備gate修正も確認済み。",
-    "P/commonをsource overrideなしfresh取得。実HEAD/treeとP293/common86 source一致、実daemon/TS/ctl/proof build成功、offline public runtime proof成功。",
-    "実機RF・全OS・全CLI・CARD・正式source archive・RCの認定ではない。"
+    "DT181 Family queue容量だけを8MiB相当44620packetへ修正。327source、他326file不変。source独立限定READY。",
+    "親実機T27/6秒2回で取り込み表示と保存packet数が一致、client/daemon0、sync/TEI0。初回末尾CC6件・2回目0。",
+    "初回末尾観測はprivate Issue5へ分離し全品質無欠陥を認定しない。観測専用stderr/sourceを製品へ混ぜていない。",
+    "P4d5a982/common80固定参照保持。buildはその実checkoutの明示override、native Windows/全機種/RC認定ではない。"
   ],
   "acceptance_index": "https://github.com/Khronos31/agent-workspace/blob/design/userland-common-contract-20261017/implementation/accepted-source-index.md",
   "ci_policy": "このソース保全コミットは[skip ci]を含む。リリース・tag・mainへの反映は別の判断とする。",
-  "known_followups": [],
-  "previous_checkpoint_commit": "f15a848f3377a18871070c946e18f14f616990e9",
+  "known_followups": [
+    "https://github.com/Khronos31/pix-userland/issues/4",
+    "https://github.com/Khronos31/pix-userland/issues/5"
+  ],
+  "previous_checkpoint_commit": "9bad581e033bdb2110d2983e72cfb132014cc244",
   "runtime_dependencies": {
     "px4-userland": "a5b72256e612995f0c3766ac31949ca7a7e485a5",
     "dtv-userland-core": "80ccc7b7e9ccad7c9b3656f02a28d12f003c45a0",

@@ -30,6 +30,12 @@ using namespace px4::userland;
 using namespace px4::userland::ipc::posix;
 using dtv::userland::Error;
 
+// common-api-contract.md fixes the per-stream TS queue at an 8 MiB budget.
+// ReceiverAdapter sizes its queue in 188-byte packets, so floor the quotient.
+constexpr std::size_t kTsQueueByteBudget = 8U * 1024U * 1024U;
+constexpr std::size_t kTsQueuePackets =
+    kTsQueueByteBudget / dtv::userland::wire::kTsPacketSize;
+
 template <std::size_t N>
 bool set_string(dtv::userland::wire::WString<N>& out, std::string_view value) noexcept
 {
@@ -358,7 +364,8 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::USB_IO);
     family->impl_->initialized = true;
     family->impl_->adapter.reset(new (std::nothrow) dt181::ReceiverAdapter(
-        family->impl_->session, family->impl_->consumer, family->impl_->clock, 0U, 256U));
+        family->impl_->session, family->impl_->consumer, family->impl_->clock, 0U,
+        kTsQueuePackets));
     if (!family->impl_->adapter)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     family->impl_->tuner.reset(new (std::nothrow) PixTunerBackend(*family->impl_->adapter));
