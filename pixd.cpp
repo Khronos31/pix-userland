@@ -57,48 +57,24 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
 int write_models()
 {
     namespace w = dtv::userland::wire;
-    auto copy = [](auto& dest, const char* value) -> bool {
-        const std::size_t size = std::strlen(value);
-        if (size == 0U || size > dest.bytes.size()) return false;
-        dest.length = static_cast<std::uint16_t>(size);
-        std::memcpy(dest.bytes.data(), value, size);
-        return true;
-    };
-
-    w::ModelCatalogEntry entries[2]{};
-    auto& dt181 = entries[0];
-    if (!copy(dt181.model.id, "PIX-DT181-PU0") ||
-        !copy(dt181.model.name, "PIX-DT181-PU0")) return 70;
-    dt181.usb_ids.count = 1U;
-    dt181.usb_ids.items[0] = {0x06b8U, 0x102bU, w::Mode::runtime};
-    dt181.nominal_receiver_count = {true, 1U};
-    dt181.nominal_usb_function_count = {true, 1U};
-    dt181.available_in_build = true;
-    dt181.receivers.present = true;
-    dt181.receivers.value.count = 1U;
-    dt181.receivers.value.items[0].id = 0U;
-    dt181.receivers.value.items[0].systems.mask = 3U;
-    dt181.max_concurrent_streams = {true, 1U};
-
-    auto& dt295 = entries[1];
-    if (!copy(dt295.model.id, "PIX-DT295") ||
-        !copy(dt295.model.name, "PIX-DT295")) return 70;
-    dt295.usb_ids.count = 1U;
-    dt295.usb_ids.items[0] = {0x06b8U, 0x103bU, w::Mode::runtime};
-    // A separate capture implementation exists, but public pixd currently
-    // serves DT181. Do not invent DT295 physical nominal receiver capacity.
-    dt295.available_in_build = false;
-    dt295.receivers.present = true;
-    dt295.max_concurrent_streams = {true, 0U};
-
-    w::ModelsResponse document{};
-    if (!copy(document.producer.product, "pix-userland") ||
-        !copy(document.producer.version, PIX_RUNTIME_VERSION)) return 70;
-    document.models = {entries, 2U};
-    const auto size = w::models_json_size(document);
+    // The product supports these USB models, independent of which are
+    // currently attached. The daemon's runtime paths are verified separately.
+    w::SupportedModel models[2]{};
+    const char* names[] = {"PIX-DT181-PU0", "PIX-DT295"};
+    const w::SupportedUsbId ids[] = {{0x06b8U, 0x102bU}, {0x06b8U, 0x103bU}};
+    for (std::size_t i = 0; i < 2; ++i) {
+        const std::size_t size = std::strlen(names[i]);
+        if (size == 0U || size > models[i].name.bytes.size()) return 70;
+        models[i].name.length = static_cast<std::uint16_t>(size);
+        std::memcpy(models[i].name.bytes.data(), names[i], size);
+        models[i].usb_ids.count = 1U;
+        models[i].usb_ids.items[0] = ids[i];
+    }
+    const w::SupportedModels list{{models, 2U}};
+    const auto size = w::models_text_size(list);
     if (!size) return 70;
     std::vector<std::uint8_t> bytes(size.value());
-    const auto encoded = w::encode_models_json(document, {bytes.data(), bytes.size()});
+    const auto encoded = w::encode_models_text(list, {bytes.data(), bytes.size()});
     if (!encoded || encoded.value() != bytes.size() ||
         std::fwrite(bytes.data(), 1U, bytes.size(), stdout) != bytes.size() ||
         std::fflush(stdout) != 0) return 70;
