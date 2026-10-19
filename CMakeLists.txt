@@ -246,8 +246,12 @@ target_include_directories(pix_px4_runtime PUBLIC
 target_compile_definitions(pix_px4_runtime PRIVATE
     PX4_USERLAND_RUNTIME_PRODUCT="pix-userland")
 target_compile_features(pix_px4_runtime PUBLIC cxx_std_17)
+# Shared core's CARD request enum is additive. This legacy host-runtime
+# target does not advertise CARD_SERVICE: unknown CARD requests are refused
+# by the negotiated core feature gate, before the legacy dispatch switch.
+# Do not suppress other -Werror diagnostics or alter normal tuner behavior.
 target_compile_options(pix_px4_runtime PRIVATE
-    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    -Wall -Wextra -Wpedantic -Werror -Wno-error=switch -fno-exceptions -fno-rtti)
 target_link_libraries(pix_px4_runtime PUBLIC Threads::Threads
     dtv::core dtv::wire dtv::control dtv::identity dtv::tuning
     dtv::receiver dtv::capture dtv::card)
