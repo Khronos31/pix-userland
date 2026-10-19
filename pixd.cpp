@@ -2,10 +2,14 @@
 #include "pix_runtime.h"
 
 #include "dtv/userland/identity.h"
+#include <dtv/userland/json.h>
 #include "px4/posix_tuner_nonce.h"
 #include "px4d_signals.h"
 
+#include <array>
+#include <cstdint>
 #include <cstdio>
+#include <vector>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -27,7 +31,9 @@ void usage(FILE* output) noexcept
 {
     std::fprintf(output,
         "usage: pixd --device serial:SELECTOR|usb:SELECTOR [--assets DIR] "
-        "[--runtime-dir DIR] [--instance TOKEN] [-h|--help]\n");
+        "[--runtime-dir DIR] [--instance TOKEN] [-h|--help]\n"
+        "       pixd --version\n"
+        "       pixd --models\n");
 }
 
 bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
@@ -48,6 +54,57 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
                       out.device.rfind("usb:", 0U) == 0U);
 }
 
+int write_models()
+{
+    namespace w = dtv::userland::wire;
+    auto copy = [](auto& dest, const char* value) -> bool {
+        const std::size_t size = std::strlen(value);
+        if (size == 0U || size > dest.bytes.size()) return false;
+        dest.length = static_cast<std::uint16_t>(size);
+        std::memcpy(dest.bytes.data(), value, size);
+        return true;
+    };
+
+    w::ModelCatalogEntry entries[2]{};
+    auto& dt181 = entries[0];
+    if (!copy(dt181.model.id, "PIX-DT181-PU0") ||
+        !copy(dt181.model.name, "PIX-DT181-PU0")) return 70;
+    dt181.usb_ids.count = 1U;
+    dt181.usb_ids.items[0] = {0x06b8U, 0x102bU, w::Mode::runtime};
+    dt181.nominal_receiver_count = {true, 1U};
+    dt181.nominal_usb_function_count = {true, 1U};
+    dt181.available_in_build = true;
+    dt181.receivers.present = true;
+    dt181.receivers.value.count = 1U;
+    dt181.receivers.value.items[0].id = 0U;
+    dt181.receivers.value.items[0].systems.mask = 3U;
+    dt181.max_concurrent_streams = {true, 1U};
+
+    auto& dt295 = entries[1];
+    if (!copy(dt295.model.id, "PIX-DT295") ||
+        !copy(dt295.model.name, "PIX-DT295")) return 70;
+    dt295.usb_ids.count = 1U;
+    dt295.usb_ids.items[0] = {0x06b8U, 0x103bU, w::Mode::runtime};
+    // A separate capture implementation exists, but public pixd currently
+    // serves DT181. Do not invent DT295 physical nominal receiver capacity.
+    dt295.available_in_build = false;
+    dt295.receivers.present = true;
+    dt295.max_concurrent_streams = {true, 0U};
+
+    w::ModelsResponse document{};
+    if (!copy(document.producer.product, "pix-userland") ||
+        !copy(document.producer.version, PIX_RUNTIME_VERSION)) return 70;
+    document.models = {entries, 2U};
+    const auto size = w::models_json_size(document);
+    if (!size) return 70;
+    std::vector<std::uint8_t> bytes(size.value());
+    const auto encoded = w::encode_models_json(document, {bytes.data(), bytes.size()});
+    if (!encoded || encoded.value() != bytes.size() ||
+        std::fwrite(bytes.data(), 1U, bytes.size(), stdout) != bytes.size() ||
+        std::fflush(stdout) != 0) return 70;
+    return 0;
+}
+
 int fail(Error error) noexcept
 {
     std::fprintf(stderr, "pixd: %s\n", error_string(error));
@@ -58,6 +115,14 @@ int fail(Error error) noexcept
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && argv != nullptr && argv[1] != nullptr) {
+        const std::string_view option(argv[1]);
+        if (option == "--version") {
+            std::printf("pix-userland %s\n", PIX_RUNTIME_VERSION);
+            return 0;
+        }
+        if (option == "--models") return write_models();
+    }
     Arguments arguments;
     bool help = false;
     if (!parse(argc, argv, arguments, help)) { usage(stderr); return 2; }
