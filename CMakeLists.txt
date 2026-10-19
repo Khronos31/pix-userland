@@ -304,7 +304,7 @@ target_compile_definitions(pixd_fixture PRIVATE _POSIX_C_SOURCE=200809L
     PIX_CAPTURE_BRIDGE_EXTERNAL PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
     PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50 PIX_TEST_CALLBACK_GATE)
 target_compile_features(pixd_fixture PRIVATE cxx_std_17)
-target_link_libraries(pixd_fixture PRIVATE pix_dt181_runtime)
+target_link_libraries(pixd_fixture PRIVATE pix_dt181_runtime dtv::json)
 target_link_options(pixd_fixture PRIVATE
     -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
     -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
