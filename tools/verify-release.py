@@ -110,9 +110,11 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, commit
             if prefix + required not in contents:
                 raise ValueError(f"Missing license notice: {target}/{required}")
         if target != "source":
-            executable = "pix-ts.exe" if target == "windows-x64" else "pix-ts"
-            if prefix + executable not in contents:
-                raise ValueError(f"Missing executable: {target}")
+            suffix = ".exe" if target == "windows-x64" else ""
+            for program in ("pixd", "pixctl", "pix-ts"):
+                executable = program + suffix
+                if prefix + executable not in contents:
+                    raise ValueError(f"Missing executable: {target}/{executable}")
         else:
             libusb = contents.get(prefix + "third_party/libusb-1.0.30.tar.bz2")
             if libusb is None or hashlib.sha256(libusb).hexdigest() != source_libusb_sha256:

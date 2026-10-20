@@ -92,7 +92,11 @@ def package(target, binary_dir=None, core_source_root=None, px4_source_root=None
         files = [(n, ROOT/n) for n in ('README.md','LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md')]
         files += [(n,f) for n,f in source_files() if n.startswith(('packaging/','licenses/','docs/'))]
         b = Path(binary_dir)
-        files += [('pix-ts.exe' if target == 'windows-x64' else 'pix-ts', b/('pix-ts.exe' if target == 'windows-x64' else 'pix-ts'))]
+        suffix = '.exe' if target == 'windows-x64' else ''
+        programs = [f'{name}{suffix}' for name in ('pixd', 'pixctl', 'pix-ts')]
+        missing = [name for name in programs if not (b/name).is_file()]
+        if missing: raise ValueError(f'Missing release program(s): {", ".join(missing)}')
+        files += [(name,b/name) for name in programs]
         files += [('licenses/'+f.name,f) for f in sorted((b/'licenses').glob('*')) if f.is_file()]
         if (b/'build-info.txt').exists(): files += [('build-info.txt',b/'build-info.txt')]
     commit = git_value(ROOT, 'rev-parse', 'HEAD')

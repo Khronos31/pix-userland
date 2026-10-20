@@ -78,32 +78,28 @@ CIに実機は接続していないため、CI成功は各OSでの受信を保�
 ## 再ビルドと再リンク
 
 `release-info.json` にコミット・バージョン・対象・静的libusb・assets同梱の有無を記録します。
-`build-info.txt` はコンパイラなどの情報です。自作ソースはMIT、libusbはLGPL-2.1以降です。
+`build-info.txt` はコンパイラと依存pinなどの情報です。ルートのMIT `LICENSE` はMIT表記されたPIXソースに適用されます。daemon/ctl/TSの各入口とCoreの製品adapterは各sourceのSPDX表記に従い、optional host adapterは対応する `COPYING` と `THIRD_PARTY_NOTICES.md` を参照します。静的libusbはLGPL-2.1以降です。
 その他は `THIRD_PARTY_NOTICES.md` と `licenses/` を参照してください。
 
 sourceアーカイブの `third_party/libusb-1.0.30.tar.bz2` を `tools/build-portable.sh` が優先利用します。
 公式ソースはSHA-256を照合します。通常のソースcheckoutでは、未配置なら公式サイトから取得します。
 コンパイル・単体テストに実機assetsは不要です。
 
-改変したlibusbとの再リンク例（POSIX。改変版に固定チェックサムの検査を適用しない手順）:
+sourceアーカイブにはCoreとPX4の固定sourceが `third_party/` に含まれます。`tools/build-portable.sh` と `tools/build-windows.sh` は両rootを明示してCMakeへ渡します。別のsource checkoutを使う場合も `DTV_USERLAND_CORE_SOURCE_DIR` と `PX4_USERLAND_SOURCE_DIR` を両方指定できますが、CMakeはoverrideのcommitを検証しないため、各lockに一致するrootを指定してください。
+
+改変したlibusbとの再リンク例（POSIX。改変版のarchiveを明示した場合だけ固定チェックサムを迂回します）:
 
 ```sh
 # sourceアーカイブを展開したルートで実行
 mkdir -p build/relink
-cd build/relink
-tar -xjf ../../third_party/libusb-1.0.30.tar.bz2
-cd libusb-1.0.30
-# 必要な変更をソースに加えてから実行
-./configure --disable-udev --disable-shared --enable-static
-make -j4
-cd ../../..
-make clean
-make USB_CFLAGS='-Ibuild/relink/libusb-1.0.30/libusb' \
-  USB_LIBS='build/relink/libusb-1.0.30/libusb/.libs/libusb-1.0.a'
+tar -xjf third_party/libusb-1.0.30.tar.bz2 -C build/relink
+# build/relink/libusb-1.0.30 の必要箇所を変更
+tar -cjf build/relink/libusb-modified.tar.bz2 -C build/relink libusb-1.0.30
+LIBUSB_SOURCE_TARBALL="$PWD/build/relink/libusb-modified.tar.bz2" \
+LIBUSB_ALLOW_MODIFIED=1 tools/build-portable.sh musl
+for program in pixd pixctl pix-ts; do
+  python3 tools/audit-binary.py linux-x86_64 "build/musl/$program"
+done
 ```
 
-macOSではUSB_LIBSへ `-lobjc -framework IOKit -framework CoreFoundation -framework Security` も加えます。
-Linuxの完全静的版はmusl環境で `LDFLAGS=-static` を指定します。
-AndroidはNDKツールチェーンでlibusbとアプリの両方をビルドし、`-llog` をリンクします。
-Windowsも改変libusbのMinGW64静的アーカイブを、MakefileのUSB_LIBSで指定できます。
-`tools/build-windows.sh` のリンク引数が基準です。署名や独自の再リンク制限は設けません。
+このrecipeはlibusbを再ビルドし、daemonを含む3 programを同じarchiveから再リンクします。公式archiveとsource checkoutは既定で公式SHA-256を必須とします。Windowsでは改変MinGW64 static archiveを用意し、`LIBUSB_MINGW_ARCHIVE=/path/to/libusb.7z LIBUSB_ALLOW_MODIFIED=1 tools/build-windows.sh` と指定します。通常のWindows recipeは公式7zのSHA-256を検証します。AndroidはNDK toolchainでlibusbと3 programをビルドし、macOSはIOKit/CoreFoundation/Security frameworkをリンクします。署名や独自の再リンク制限は設けません。

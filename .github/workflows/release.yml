@@ -48,11 +48,11 @@ jobs:
           persist-credentials: false
       - run: |
           docker run --rm -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
-            apk add --no-cache build-base linux-headers curl bzip2 pkgconf
+            apk add --no-cache build-base linux-headers curl bzip2 pkgconf cmake git ca-certificates
             sh tests/test_mdev.sh
             CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
           '
-      - run: python3 tools/audit-binary.py '${{ matrix.target }}' build/musl/pix-ts
+      - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py '${{ matrix.target }}' "build/musl/$program"; done
       - run: python3 tools/package-release.py '${{ matrix.target }}' build/musl
       - run: tools/check-private.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -68,8 +68,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - run: brew install cmake pkgconf
       - run: CFLAGS='-O2 -g -Werror' tools/build-portable.sh native
-      - run: python3 tools/audit-binary.py darwin-arm64 build/native/pix-ts
+      - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py darwin-arm64 "build/native/$program"; done
       - run: python3 tools/package-release.py darwin-arm64 build/native
       - run: tools/check-private.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -93,12 +94,13 @@ jobs:
         id: ndk
         with:
           ndk-version: r27d
+      - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config
       - run: tools/build-portable.sh android
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_ABI: ${{ matrix.abi }}
           CFLAGS: -O2 -g -Werror
-      - run: python3 tools/audit-binary.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}/pix-ts'
+      - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py 'android-${{ matrix.abi }}' "build/android-${{ matrix.abi }}/$program"; done
       - run: python3 tools/package-release.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}'
       - run: tools/check-private.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -118,11 +120,11 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-gcc make curl p7zip python
+          install: mingw-w64-x86_64-gcc make curl p7zip python mingw-w64-x86_64-cmake mingw-w64-x86_64-pkgconf
       - shell: msys2 {0}
         run: tools/build-windows.sh
       - shell: msys2 {0}
-        run: python tools/audit-binary.py windows-x64 build/windows-x64/pix-ts.exe
+        run: for program in pixd pixctl pix-ts; do python tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"; done
       - shell: bash
         run: python tools/package-release.py windows-x64 build/windows-x64
       - shell: bash

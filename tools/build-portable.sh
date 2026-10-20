@@ -1,6 +1,5 @@
 #!/bin/sh
-# Build libusb without libudev, then link pix-ts against its static archive.
-# Run under musl for a fully static Linux binary, or with an Android NDK for Bionic.
+# Build static libusb, preserve the legacy test path, and build the three CMake release programs.
 set -eu
 mode=${1:-native}
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -18,24 +17,37 @@ else
     curl -fL --retry 3 "$usb_url" -o "$build/libusb.tar.bz2"
 fi
 actual=$( (sha256sum "$build/libusb.tar.bz2" 2>/dev/null || shasum -a 256 "$build/libusb.tar.bz2") | awk '{print $1}')
-[ "$actual" = "$usb_sha" ] || { echo 'libusb SHA-256 mismatch' >&2; exit 1; }
+if [ "$actual" != "$usb_sha" ] && { [ -z "${LIBUSB_SOURCE_TARBALL:-}" ] || [ "${LIBUSB_ALLOW_MODIFIED:-0}" != 1 ]; }; then
+    echo 'libusb SHA-256 mismatch; set LIBUSB_ALLOW_MODIFIED=1 only for a reviewed modified source archive' >&2
+    exit 1
+fi
 tar -xjf "$build/libusb.tar.bz2" -C "$build"
 cc=${CC:-cc}
+cxx=${CXX:-c++}
 extra_link=
 configure_host=
 abi=${ANDROID_ABI:-aarch64}
+toolchain_file=
+android_abi=
+api=${ANDROID_API:-24}
 if [ "$mode" = android ]; then
     ndk=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
     [ -d "$ndk" ] || { echo 'Set ANDROID_NDK_HOME' >&2; exit 2; }
     case $(uname -s) in Linux) host=linux-x86_64;; Darwin) host=darwin-x86_64;; *) exit 2;; esac
     toolchain=$ndk/toolchains/llvm/prebuilt/$host
-    api=${ANDROID_API:-24}
-    case "$abi" in aarch64) target=aarch64-linux-android;triplet=$target;; x86_64) target=x86_64-linux-android;triplet=$target;; armv7a) target=armv7a-linux-androideabi;triplet=arm-linux-androideabi;; *) exit 2;; esac
+    case "$abi" in
+        aarch64) target=aarch64-linux-android;triplet=$target;android_abi=arm64-v8a;;
+        x86_64) target=x86_64-linux-android;triplet=$target;android_abi=x86_64;;
+        armv7a) target=armv7a-linux-androideabi;triplet=arm-linux-androideabi;android_abi=armeabi-v7a;;
+        *) echo "Unsupported Android ABI: $abi" >&2; exit 2;;
+    esac
     cc=$toolchain/bin/${target}${api}-clang
-    [ -x "$cc" ] || { echo "Compiler missing: $cc" >&2; exit 2; }
+    cxx=$toolchain/bin/${target}${api}-clang++
+    [ -x "$cc" ] && [ -x "$cxx" ] || { echo "Android compiler missing: $cc or $cxx" >&2; exit 2; }
     export AR="$toolchain/bin/llvm-ar" RANLIB="$toolchain/bin/llvm-ranlib"
     configure_host=--host=$triplet
     extra_link=-llog
+    toolchain_file=$ndk/build/cmake/android.toolchain.cmake
 elif [ "$mode" = musl ]; then
     "$cc" -E -dM -include features.h - < /dev/null > "$build/compiler-macros"
     if grep -Eq '__GLIBC__|__BIONIC__' "$build/compiler-macros"; then
@@ -46,7 +58,6 @@ elif [ "$mode" = musl ]; then
 fi
 (
     cd "$build/libusb-1.0.30"
-    # No pkg-config dependency on the build host's libudev or libusb.
     CC="$cc" ./configure $configure_host --prefix="$build/prefix" --disable-udev --disable-shared --enable-static
     make -j "${JOBS:-4}"
     make install
@@ -54,23 +65,49 @@ fi
 if [ "$mode" = native ] && [ "$(uname -s)" = Darwin ]; then
     extra_link='-lobjc -Wl,-framework,IOKit -Wl,-framework,CoreFoundation -Wl,-framework,Security'
 fi
+
+# Keep the existing legacy Make test path intact; its pix-ts output is not a release binary.
 mkdir "$build/app"
 cp -R "$root/src" "$root/include" "$root/tests" "$root/tools" "$root/Makefile" "$build/app/"
-# Remove copied object/dependency files so no host objects can leak into cross builds.
 (cd "$build/app" && make clean && make -j "${JOBS:-4}" CC="$cc" PKG_CONFIG=false USB_CFLAGS="-I$build/prefix/include/libusb-1.0" USB_LIBS="$build/prefix/lib/libusb-1.0.a $extra_link")
 if [ "$mode" != android ]; then
     (cd "$build/app" && make test CC="$cc" PKG_CONFIG=false USB_CFLAGS="-I$build/prefix/include/libusb-1.0" USB_LIBS="$build/prefix/lib/libusb-1.0.a $extra_link" LDFLAGS="$extra_link")
 fi
+
+version=$(sed -n 's/^#define VERSION "\([0-9][0-9.]*\)"/\1/p' "$root/include/version.h")
+[ -n "$version" ] || { echo 'Unable to read product version from include/version.h' >&2; exit 1; }
+core_root=${DTV_USERLAND_CORE_SOURCE_DIR:-$root/third_party/dtv-userland-core}
+px4_root=${PX4_USERLAND_SOURCE_DIR:-$root/third_party/px4-userland}
+if [ -d "$core_root" ] && [ -d "$px4_root" ]; then
+    source_roots=true
+elif [ -n "${DTV_USERLAND_CORE_SOURCE_DIR:-}" ] || [ -n "${PX4_USERLAND_SOURCE_DIR:-}" ]; then
+    echo 'Both DTV_USERLAND_CORE_SOURCE_DIR and PX4_USERLAND_SOURCE_DIR must exist' >&2
+    exit 2
+else
+    source_roots=false
+fi
+pkgdir=$build/prefix/lib/pkgconfig
+mkdir -p "$pkgdir"
 out=$root/build/$mode
 [ "$mode" != android ] || out=$out-$abi
 mkdir -p "$out"
-cp "$build/app/pix-ts" "$out/"
+set -- cmake -S "$root" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
+[ -z "$toolchain_file" ] || set -- "$@" -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" -DANDROID_ABI="$android_abi" -DANDROID_PLATFORM="android-$api" -DANDROID_STL=c++_static
+if [ "$source_roots" = true ]; then
+    set -- "$@" "-DDTV_USERLAND_CORE_SOURCE_DIR=$core_root" "-DPX4_USERLAND_SOURCE_DIR=$px4_root" -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+fi
+CC=$cc CXX=$cxx PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir "$@"
+PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
+cp "$build/bin/pixd" "$build/bin/pixctl" "$build/bin/pix-ts" "$out/"
 cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
-printf 'libusb 1.0.30\nSHA256 %s\nmode=%s\ncompiler=%s\n' "$usb_sha" "$mode" "$cc" > "$out/build-info.txt"
-"$cc" --version >> "$out/build-info.txt"
-echo "Built $out/pix-ts" >&2
+{
+    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\nmode=%s\ncompiler=%s\ncxx=%s\n' "$version" "$actual" "$mode" "$cc" "$cxx"
+    cat "$root/cmake/dtv-userland-core.revision" "$root/cmake/px4-userland.revision"
+    "$cc" --version | head -n 1
+    "$cxx" --version | head -n 1
+} > "$out/build-info.txt"
 if [ "$mode" = musl ] && command -v apk >/dev/null 2>&1; then
-    apk list --installed musl gcc > "$build/runtime-packages.txt"
+    apk list --installed musl gcc g++ > "$build/runtime-packages.txt"
     cat "$build/runtime-packages.txt" >> "$out/build-info.txt"
     grep '^musl-1\.2\.5-r' "$build/runtime-packages.txt" >/dev/null || { echo 'Update musl notices for the installed version' >&2; exit 1; }
 fi
@@ -78,3 +115,4 @@ if [ "$mode" = android ]; then
     mkdir -p "$out/licenses"
     cp "$toolchain/NOTICE" "$out/licenses/Android-NDK-build-NOTICE.txt"
 fi
+echo "Built $out/pixd, $out/pixctl, and $out/pix-ts" >&2
