@@ -56,6 +56,14 @@ set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
 set(DTV_USERLAND_BUILD_HOST_CTL ON CACHE BOOL "Build shared host control frontend" FORCE)
 set(DTV_USERLAND_HOST_CTL_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
     "Product facade include directories for the shared host control frontend" FORCE)
+set(DTV_USERLAND_BUILD_HOST_RUNTIME ON CACHE BOOL
+    "Build the optional GPL POSIX host runtime adapter" FORCE)
+set(DTV_USERLAND_HOST_RUNTIME_PRODUCT "pix-userland" CACHE STRING
+    "Product runtime namespace component required by the GPL POSIX host runtime adapter" FORCE)
+set(DTV_USERLAND_HOST_RUNTIME_INSTANCE_POLICY "lowercase" CACHE STRING
+    "Instance-name policy for the GPL POSIX host runtime adapter" FORCE)
+set(DTV_USERLAND_HOST_RUNTIME_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
+    "Private product facade include directories required by the GPL POSIX host runtime adapter" FORCE)
 if(NOT EXISTS "${DTV_CORE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "dtv-userland-core source has no CMakeLists.txt: ${DTV_CORE_SOURCE}")
 endif()
@@ -253,10 +261,14 @@ target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+add_library(pix_px4_ipc STATIC ${PX4_ROOT}/src/ipc.cpp)
+target_include_directories(pix_px4_ipc PUBLIC
+    ${PX4_ROOT}/include ${PX4_ROOT}/src)
+target_link_libraries(pix_px4_ipc PUBLIC dtv::wire)
+target_compile_options(pix_px4_ipc PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+
 set(PX4_RUNTIME_SOURCES
-    ${PX4_ROOT}/src/ipc.cpp
-    ${PX4_ROOT}/src/posix_ipc.cpp
-    ${PX4_ROOT}/src/posix_tuner_nonce.cpp
     ${PX4_ROOT}/src/control_server.cpp
     ${PX4_ROOT}/src/control_workers.cpp
     ${PX4_ROOT}/src/tuner_service.cpp
@@ -270,8 +282,6 @@ set(PX4_RUNTIME_SOURCES
 add_library(pix_px4_runtime STATIC ${PX4_RUNTIME_SOURCES})
 target_include_directories(pix_px4_runtime PUBLIC
     ${PX4_ROOT}/include ${PX4_ROOT}/src ${PX4_ROOT}/tools)
-target_compile_definitions(pix_px4_runtime PRIVATE
-    PX4_USERLAND_RUNTIME_PRODUCT="pix-userland")
 target_compile_features(pix_px4_runtime PUBLIC cxx_std_17)
 # Shared core's CARD request enum is additive. This legacy host-runtime
 # target does not advertise CARD_SERVICE: unknown CARD requests are refused
@@ -281,7 +291,7 @@ target_compile_options(pix_px4_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wno-error=switch -fno-exceptions -fno-rtti)
 target_link_libraries(pix_px4_runtime PUBLIC Threads::Threads
     dtv::core dtv::wire dtv::control dtv::identity dtv::tuning
-    dtv::receiver dtv::capture dtv::card)
+    dtv::receiver dtv::capture dtv::card dtv::host_runtime pix_px4_ipc)
 
 add_library(pix_dt181_runtime STATIC pix_runtime.cpp pix-dt295-receiver-adapter.cpp)
 target_include_directories(pix_dt181_runtime PUBLIC
