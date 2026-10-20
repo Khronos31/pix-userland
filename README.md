@@ -3,7 +3,20 @@
 > [!CAUTION]
 > 本プロジェクトは非公開の個人用リポジトリです。リポジトリやリリースを外部へ公開しないでください。
 
-## 概要
+## v1.0.0開発中のdaemon経路（2026-10-20）
+
+隔離WIPでは `pixd` がデバイスを保持し、`pix-ts` が接続して受信します。PIX-DT295は既存の `dt295.assets` を使い、内部B-CASの初期化・有効化、地上波の選局、TS受信、停止を接続しました。Linuxの実機T27で20秒受信と正常停止を確認しています。取得済み95,165パケットは188byte同期異常0、TEI0、scrambling controlは全て0でした。映像音声再生、他channel、長時間、他OSのこのdaemon経路は未確認です。
+
+```sh
+# daemonを起動（資産ディレクトリにはdt295.assetsを配置）
+pixd --device serial:SERIAL --assets /path/to/assets --runtime-dir /tmp/pix-test
+# 別のターミナルから短時間受信
+pix-ts --device serial:SERIAL --runtime-dir /tmp/pix-test -c T27 --time 20 -o capture.ts
+```
+
+初期のPAT/PMT取得とroute構成に数秒かかります。USB選択は `usb:BUS-PORT` も使用できます。`pixctl`の共通化・カード挿入照会は次の増分で、汎用外部CARD/ATR/APDUを提供するものではありません。正式release・配布手順は移行中です。以下の既存リリース/standalone版の記録を、新daemonの全OS検証済みという意味には読み替えないでください。
+
+## 概要（従来のstandalone版）
 
 pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御し、188 バイトの MPEG-TS パケットを出力する C11 実装のユーザー空間 CLI ツール（`pix-ts`）です。
 

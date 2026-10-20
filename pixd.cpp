@@ -294,6 +294,14 @@ int fail(Error error) noexcept
     return error == Error::INVALID_ARGUMENT ? 2 : error == Error::NOT_FOUND ? 3 : 70;
 }
 
+// "pixd ready" reports the model the running enclosure family was built from.
+// DT295 selection is resolved by the locator; whether its daemon backend can
+// start is decided by Family::create, not by this label.
+const char* model_name(pix::runtime::Model model) noexcept
+{
+    return model == pix::runtime::Model::dt295 ? "PIX-DT295" : "PIX-DT181-PU0";
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -312,7 +320,7 @@ int main(int argc, char** argv)
     if (!parse(argc, argv, arguments, help)) { usage(stderr); return 2; }
     if (help) { usage(stdout); return 0; }
 
-    const auto located = pix::runtime::locate_dt181(arguments.device);
+    const auto located = pix::runtime::locate(arguments.device);
     if (!located) return fail(located.error());
     auto family_result = pix::runtime::Family::create(located.value(), arguments.assets.c_str());
     if (!family_result) return fail(family_result.error());
@@ -361,8 +369,8 @@ int main(int argc, char** argv)
     const auto published = context->publish(control);
     if (!published) return fail(published.error());
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
-    std::fprintf(stderr, "pixd ready: model=PIX-DT181-PU0 endpoint=%s\n",
-                 context->endpoint_path());
+    std::fprintf(stderr, "pixd ready: model=%s endpoint=%s\n",
+                 model_name(located.value().model), context->endpoint_path());
     Error loop_error = Error::OK;
     while (!px4::userland::px4d::stop_requested()) {
         const auto polled = context->poll_once(Timeout{100U});

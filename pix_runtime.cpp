@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "pix_runtime.h"
 
+#include "pix-dt295-receiver-adapter.h"
+
 #include "dtv/userland/identity.h"
 #include "dtv/userland/wire.h"
 #include "pixy.h"
@@ -24,6 +26,7 @@
 
 namespace pix::runtime {
 namespace dt181 = ::pix::capture::dt181;
+namespace dt295 = ::pix::capture::dt295;
 namespace {
 
 using namespace px4::userland;
@@ -90,6 +93,16 @@ public:
     Result<bool> detect_card() noexcept override { return Result<bool>::success(false); }
 };
 
+class Dt295CardBackend final : public CardServiceBackend {
+public:
+    Result<void> set_power(bool) noexcept override
+    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<void> initialize_uart() noexcept override
+    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<bool> detect_card() noexcept override
+    { return Result<bool>::failure(Error::UNSUPPORTED); }
+};
+
 class EmptyCardSession final : public CardProtocolSession {
 public:
     Result<void> initialize() noexcept override
@@ -103,9 +116,10 @@ private:
     CardAtr atr_{};
 };
 
-class PixStreamShim final : public px4::userland::TunerStreamControl {
+template <typename Adapter>
+class PixStreamShimT final : public px4::userland::TunerStreamControl {
 public:
-    explicit PixStreamShim(dt181::ReceiverAdapter& adapter) noexcept : adapter_(adapter) {}
+    explicit PixStreamShimT(Adapter& adapter) noexcept : adapter_(adapter) {}
     Result<void> attach(const TunerAttachment& value) noexcept override
     { return adapter_.attach(convert(value)); }
     Result<void> detach(const TunerAttachment& value) noexcept override
@@ -142,9 +156,9 @@ public:
         return Result<TunerStreamReadResult>::success(out);
     }
 private:
-    static dt181::ReceiverAdapter::Attachment convert(const TunerAttachment& value) noexcept
+    static typename Adapter::Attachment convert(const TunerAttachment& value) noexcept
     {
-        dt181::ReceiverAdapter::Attachment out{};
+        typename Adapter::Attachment out{};
         out.owner_client_id = value.owner_client_id;
         out.lease_id = value.lease_id;
         out.attachment_id = value.attachment_id;
@@ -162,8 +176,10 @@ private:
             value.tei_packets, value.continuity_errors, value.queue_drops,
             value.usb_errors, value.empty_intervals};
     }
-    dt181::ReceiverAdapter& adapter_;
+    Adapter& adapter_;
 };
+
+using PixStreamShim = PixStreamShimT<dt181::ReceiverAdapter>;
 
 class PixTunerBackend final : public TunerServiceBackend {
 public:
@@ -243,9 +259,83 @@ private:
     dt181::ReceiverAdapter& adapter_;
 };
 
+using Dt295StreamShim = PixStreamShimT<dt295::ReceiverAdapter>;
+
+class Dt295TunerBackend final : public TunerServiceBackend {
+public:
+    explicit Dt295TunerBackend(dt295::ReceiverAdapter& adapter) noexcept : adapter_(adapter) {}
+    std::uint8_t receiver_count() const noexcept override { return 1U; }
+    bool receiver_supports(std::uint8_t receiver, ipc::System system) const noexcept override
+    { return receiver == 0U && system == ipc::System::ISDB_T; }
+    bool selects_satellite_stream_before_tune() const noexcept override { return false; }
+    Result<void> open_receiver(std::uint8_t receiver) noexcept override
+    { return adapter_.open(receiver); }
+    Result<void> tune_terrestrial(std::uint8_t receiver, std::uint32_t khz,
+                                  std::uint32_t timeout) noexcept override
+    { return adapt(adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::terrestrial,
+                                       static_cast<std::uint64_t>(khz) * 1000U, timeout)); }
+    Result<void> tune_satellite(std::uint8_t, std::uint32_t,
+                                std::uint32_t) noexcept override
+    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<TunerHzProgramming> tune_terrestrial_hz(
+        std::uint8_t receiver, std::uint64_t hz, std::uint32_t timeout) noexcept override
+    { return adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::terrestrial,
+                                 hz, timeout); }
+    Result<TunerHzProgramming> tune_satellite_hz(
+        std::uint8_t, std::uint64_t, std::uint32_t) noexcept override
+    { return Result<TunerHzProgramming>::failure(Error::UNSUPPORTED); }
+    TunerStrictProfile strict_profile(std::uint8_t receiver,
+                                      ipc::System system) const noexcept override
+    {
+        if (!receiver_supports(receiver, system)) return TunerStrictProfile{};
+        TunerStrictProfile profile{};
+        profile.native_hz = true;
+        profile.readiness = dtv::userland::detail::TuneReadiness::commands;
+        profile.min_hz = 473142857U;
+        profile.max_hz = 767142857U;
+        profile.slot_count = 0U;
+        return profile;
+    }
+    Result<bool> is_locked(std::uint8_t, ipc::System) noexcept override
+    { return Result<bool>::failure(Error::UNSUPPORTED); }
+    Result<void> select_satellite_slot(std::uint8_t, std::uint8_t,
+                                       std::uint32_t) noexcept override
+    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<void> select_satellite_tsid(std::uint8_t, std::uint16_t,
+                                       std::uint32_t) noexcept override
+    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<void> close_receiver(std::uint8_t receiver) noexcept override
+    { return adapter_.close(receiver); }
+    Result<void> begin_tune_power(std::uint8_t receiver, ipc::System system,
+                                  std::uint8_t voltage) noexcept override
+    { return adapter_.begin_tune_power(receiver, system == ipc::System::ISDB_T
+        ? dt295::ReceiverAdapter::ReceiverSystem::terrestrial
+        : dt295::ReceiverAdapter::ReceiverSystem::satellite, voltage); }
+    Result<void> commit_tune_power(std::uint8_t receiver) noexcept override
+    { return adapter_.commit_tune_power(receiver); }
+    Result<void> rollback_tune_power(std::uint8_t receiver) noexcept override
+    { return adapter_.rollback_tune_power(receiver); }
+    void mark_receiver_disconnected(std::uint8_t receiver) noexcept override
+    { adapter_.mark_disconnected(receiver); }
+    Result<void> shutdown() noexcept override { return adapter_.shutdown(); }
+    Result<void> start_capture(std::uint8_t receiver, ipc::System system) noexcept override
+    { return adapter_.start_capture(receiver, system == ipc::System::ISDB_T
+        ? dt295::ReceiverAdapter::ReceiverSystem::terrestrial
+        : dt295::ReceiverAdapter::ReceiverSystem::satellite); }
+    Result<void> stop_capture(std::uint8_t receiver, ipc::System system) noexcept override
+    { return adapter_.stop_capture(receiver, system == ipc::System::ISDB_T
+        ? dt295::ReceiverAdapter::ReceiverSystem::terrestrial
+        : dt295::ReceiverAdapter::ReceiverSystem::satellite); }
+private:
+    static Result<void> adapt(Result<TunerHzProgramming> result) noexcept
+    { return result ? Result<void>::success() : Result<void>::failure(result.error()); }
+    dt295::ReceiverAdapter& adapter_;
+};
+
 }  // namespace
 
 struct Family::Impl final {
+    Model model = Model::dt181;
     dt181_session session{};
     std::unique_ptr<Assets> assets;
     PixTime clock;
@@ -253,8 +343,12 @@ struct Family::Impl final {
     std::unique_ptr<dt181::ReceiverAdapter> adapter;
     std::unique_ptr<PixTunerBackend> tuner;
     EmptyCardBackend card;
+    Dt295CardBackend dt295_card;
     EmptyCardSession protocol;
     std::unique_ptr<PixStreamShim> shim;
+    std::unique_ptr<dt295::ReceiverAdapter> dt295_adapter;
+    std::unique_ptr<Dt295TunerBackend> dt295_tuner;
+    std::unique_ptr<Dt295StreamShim> dt295_shim;
     bool initialized = false;
 };
 
@@ -441,6 +535,26 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
     family->impl_.reset(new (std::nothrow) Impl());
     if (!family->impl_)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+    family->impl_->model = device.model;
+    if (device.model == Model::dt295) {
+        std::unique_ptr<dt295::ReceiverAdapter> adapter(
+            new (std::nothrow) dt295::ReceiverAdapter(
+                assets_directory, device.selector, family->impl_->clock, 0U, kTsQueuePackets));
+        if (!adapter)
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+        if (!adapter->ready())
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(adapter->init_error());
+        family->impl_->dt295_adapter = std::move(adapter);
+        family->impl_->dt295_tuner.reset(new (std::nothrow) Dt295TunerBackend(
+            *family->impl_->dt295_adapter));
+        if (!family->impl_->dt295_tuner)
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+        family->impl_->dt295_shim.reset(new (std::nothrow) Dt295StreamShim(
+            *family->impl_->dt295_adapter));
+        if (!family->impl_->dt295_shim)
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+        return dtv::userland::Result<std::unique_ptr<Family>>::success(std::move(family));
+    }
     auto assets = load_assets(assets_directory);
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
@@ -470,6 +584,12 @@ Family::~Family() noexcept
 {
     (void)shutdown();
     if (impl_) {
+        if (impl_->model == Model::dt295) {
+            impl_->dt295_shim.reset();
+            impl_->dt295_tuner.reset();
+            impl_->dt295_adapter.reset();
+            return;
+        }
         impl_->shim.reset();
         impl_->tuner.reset();
         impl_->adapter.reset();
@@ -485,6 +605,9 @@ Family::~Family() noexcept
 Result<void> Family::shutdown() noexcept
 {
     if (!impl_) return Result<void>::success();
+    if (impl_->model == Model::dt295)
+        return impl_->dt295_adapter ? impl_->dt295_adapter->shutdown()
+                                    : Result<void>::success();
     if (impl_->adapter) {
         const auto stopped = impl_->adapter->shutdown();
         if (!stopped) return stopped;
@@ -499,11 +622,26 @@ Result<void> Family::shutdown() noexcept
     return Result<void>::success();
 }
 
-TunerServiceBackend& Family::tuner_backend() noexcept { return *impl_->tuner; }
-CardServiceBackend& Family::card_backend() noexcept { return impl_->card; }
+TunerServiceBackend& Family::tuner_backend() noexcept
+{
+    return impl_->model == Model::dt295
+        ? static_cast<TunerServiceBackend&>(*impl_->dt295_tuner)
+        : static_cast<TunerServiceBackend&>(*impl_->tuner);
+}
+CardServiceBackend& Family::card_backend() noexcept
+{
+    return impl_->model == Model::dt295
+        ? static_cast<CardServiceBackend&>(impl_->dt295_card)
+        : static_cast<CardServiceBackend&>(impl_->card);
+}
 CardProtocolSession& Family::card_protocol() noexcept { return impl_->protocol; }
 TunerServiceTime& Family::time() noexcept { return impl_->clock; }
-TunerStreamControl* Family::stream_control() noexcept { return impl_->shim.get(); }
+TunerStreamControl* Family::stream_control() noexcept
+{
+    return impl_->model == Model::dt295
+        ? static_cast<TunerStreamControl*>(impl_->dt295_shim.get())
+        : static_cast<TunerStreamControl*>(impl_->shim.get());
+}
 
 Result<void> build_list(const LocatedDevice& device, const std::string& instance,
                         const std::string& version,
@@ -513,6 +651,8 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     using namespace dtv::userland::wire;
     context = ControlContext{};
     context.epoch = epoch_bytes;
+    const bool dt295 = device.model == Model::dt295;
+    const char* model_id = dt295 ? "PIX-DT295" : "PIX-DT181-PU0";
     ListResponse& list = context.list;
     list.epoch = context.epoch;
     if (!set_string(list.producer.product, "pix-userland") ||
@@ -524,8 +664,8 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     list.enclosure.present = true;
     list.enclosure.value.id = 0U;
     list.enclosure.value.model.present = true;
-    if (!set_string(list.enclosure.value.model.value.id, "PIX-DT181-PU0") ||
-        !set_string(list.enclosure.value.model.value.name, "PIX-DT181-PU0"))
+    if (!set_string(list.enclosure.value.model.value.id, model_id) ||
+        !set_string(list.enclosure.value.model.value.name, model_id))
         return Result<void>::failure(Error::INTERNAL);
     list.enclosure.value.identity.serial_state = IdentitySerialState::unknown;
     list.enclosure.value.identity.uniqueness = Uniqueness::unknown;
@@ -535,7 +675,7 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     UsbFunction& function = list.functions.items[0];
     function.id = 0U;
     function.vid = 0x06b8U;
-    function.pid = 0x102bU;
+    function.pid = dt295 ? 0x103bU : 0x102bU;
     function.mode = Mode::runtime;
     function.location.bus.present = true;
     function.location.bus.value = device.bus;
@@ -543,8 +683,8 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     function.location.address.value = device.address;
     function.location.usb_path.present = true;
     if (!set_string(function.location.usb_path.value, device.path) ||
-        !set_string(function.model.value.id, "PIX-DT181-PU0") ||
-        !set_string(function.model.value.name, "PIX-DT181-PU0"))
+        !set_string(function.model.value.id, model_id) ||
+        !set_string(function.model.value.name, model_id))
         return Result<void>::failure(Error::INTERNAL);
     function.model.present = true;
     function.serial_state = SerialState::not_queried;
@@ -554,18 +694,20 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     list.receivers.value.count = 1U;
     ReceiverDescriptor& receiver = list.receivers.value.items[0];
     receiver.id = 0U;
-    receiver.systems.mask = 0x03U;
+    receiver.systems.mask = dt295 ? 0x01U : 0x03U;
     receiver.binding.present = true;
     receiver.binding.value = Binding{0U, 0U};
     receiver.capabilities.ts_scope = TsScope::multiplex;
-    receiver.capabilities.controls = kControlBitLna;
-    receiver.capabilities.lna.entries.count = 2U;
-    receiver.capabilities.lna.entries.items[0].system = System::isdb_t;
-    receiver.capabilities.lna.entries.items[0].default_value.present = true;
-    receiver.capabilities.lna.entries.items[0].default_value.value = false;
-    receiver.capabilities.lna.entries.items[1].system = System::isdb_s;
-    receiver.capabilities.lna.entries.items[1].default_value.present = true;
-    receiver.capabilities.lna.entries.items[1].default_value.value = true;
+    receiver.capabilities.controls = dt295 ? 0U : kControlBitLna;
+    if (!dt295) {
+        receiver.capabilities.lna.entries.count = 2U;
+        receiver.capabilities.lna.entries.items[0].system = System::isdb_t;
+        receiver.capabilities.lna.entries.items[0].default_value.present = true;
+        receiver.capabilities.lna.entries.items[0].default_value.value = false;
+        receiver.capabilities.lna.entries.items[1].system = System::isdb_s;
+        receiver.capabilities.lna.entries.items[1].default_value.present = true;
+        receiver.capabilities.lna.entries.items[1].default_value.value = true;
+    }
     list.readers.present = true;
     list.readers.value.count = 0U;
     context.instance.present = !instance.empty();

@@ -143,6 +143,28 @@ target_link_options(dt295_actual_pipeline_proof PRIVATE
     -Wl,--wrap=pthread_join -Wl,--wrap=pthread_cond_clockwait
     -Wl,--wrap=random_bytes)
 
+add_executable(pix_dt295_adapter_lifecycle_proof
+    tests/pix_dt295_adapter_lifecycle_proof.cpp tests/dt295_actual_fixture.c)
+target_include_directories(pix_dt295_adapter_lifecycle_proof PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} include src tests)
+target_compile_definitions(pix_dt295_adapter_lifecycle_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_adapter_lifecycle_proof PRIVATE cxx_std_17)
+set_source_files_properties(tests/pix_dt295_adapter_lifecycle_proof.cpp PROPERTIES
+    COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror;-fno-exceptions;-fno-rtti")
+target_compile_options(pix_dt295_adapter_lifecycle_proof PRIVATE
+    "$<$<COMPILE_LANGUAGE:C>:-UNDEBUG>")
+target_link_libraries(pix_dt295_adapter_lifecycle_proof PRIVATE
+    pix_dt181_runtime Threads::Threads)
+target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=random_bytes)
+
 set(PIX_CAPTURE_OLD_SOURCE old-control-source/pix-capture-consumer)
 add_library(pix_capture_old_actual_backend STATIC
     ${PIX_CAPTURE_OLD_SOURCE}/src/pid_filter.c
@@ -192,7 +214,8 @@ add_library(pix_dt181_c_backend STATIC
     src/pid_filter.c src/control.c src/channel.c src/crypto.c src/platform.c
     src/protocol.c src/transport.c src/usb_selector.c src/usb_listing.c
     src/usb_libusb.c src/usb_log.c src/diagnostic.c
-    src/dt181_capture_bridge.c src/dt181_session.c src/dt181_capture_host.c)
+    src/dt181_capture_bridge.c src/dt181_session.c src/dt181_capture_host.c
+    src/dt295.c src/dt295_crypto.c src/dt295_routes.c src/dt295_stream.c)
 target_compile_definitions(pix_dt181_c_backend PRIVATE
     _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64 PIX_CAPTURE_BRIDGE_EXTERNAL)
 target_include_directories(pix_dt181_c_backend PUBLIC include src)
@@ -256,7 +279,7 @@ target_link_libraries(pix_px4_runtime PUBLIC Threads::Threads
     dtv::core dtv::wire dtv::control dtv::identity dtv::tuning
     dtv::receiver dtv::capture dtv::card)
 
-add_library(pix_dt181_runtime STATIC pix_runtime.cpp)
+add_library(pix_dt181_runtime STATIC pix_runtime.cpp pix-dt295-receiver-adapter.cpp)
 target_include_directories(pix_dt181_runtime PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR} ${PX4_ROOT}/include ${PX4_ROOT}/src
     ${PX4_ROOT}/tools PRIVATE include src)
