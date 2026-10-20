@@ -110,10 +110,10 @@ public:
     Result<std::size_t> transmit(ByteView, MutableByteView) noexcept override
     { return Result<std::size_t>::failure(Error::NO_CARD); }
     bool initialized() const noexcept override { return false; }
-    const CardAtr& atr() const noexcept override { return atr_; }
+    const CardAtrBytes& atr() const noexcept override { return atr_; }
     void invalidate() noexcept override {}
 private:
-    CardAtr atr_{};
+    CardAtrBytes atr_{};
 };
 
 template <typename Adapter>
@@ -760,11 +760,14 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     function.present = true;
     list.receivers.present = true;
     list.receivers.value.count = 1U;
+    context.execution.receiver_count = 1U;
     ReceiverDescriptor& receiver = list.receivers.value.items[0];
     receiver.id = 0U;
     receiver.systems.mask = dt295 ? 0x01U : 0x03U;
     receiver.binding.present = true;
     receiver.binding.value = Binding{0U, 0U};
+    context.receiver_index[0] = 0U;
+    context.execution.receiver_lane[0] = ControlWorkerLane::tuner_dev1;
     receiver.capabilities.ts_scope = TsScope::multiplex;
     receiver.capabilities.controls = dt295 ? 0U : kControlBitLna;
     if (!dt295) {

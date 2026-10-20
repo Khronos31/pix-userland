@@ -25,7 +25,7 @@ if(DTV_USERLAND_CORE_SOURCE_DIR)
     message(WARNING "dtv-userland-core: using explicit local source ${DTV_CORE_SOURCE}; build is not pinned")
 else()
     FetchContent_Declare(dtv_userland_core
-        GIT_REPOSITORY "git@github.com:Khronos31/dtv-userland-core.git"
+        GIT_REPOSITORY "https://github.com/Khronos31/dtv-userland-core.git"
         GIT_TAG "${DTV_CORE_REVISION}")
     FetchContent_GetProperties(dtv_userland_core)
     if(NOT dtv_userland_core_POPULATED)
@@ -38,7 +38,7 @@ if(PX4_USERLAND_SOURCE_DIR)
     message(WARNING "PX4 userland: using explicit local source ${PX4_SOURCE}; build is not pinned")
 else()
     FetchContent_Declare(px4_userland
-        GIT_REPOSITORY "git@github.com:Khronos31/px4-userland.git"
+        GIT_REPOSITORY "https://github.com/Khronos31/px4-userland.git"
         GIT_TAG "${PX4_USERLAND_REVISION}")
     FetchContent_GetProperties(px4_userland)
     if(NOT px4_userland_POPULATED)
@@ -54,6 +54,8 @@ set(DTV_USERLAND_BUILD_CARD ON CACHE BOOL "Build card ownership engine" FORCE)
 set(DTV_USERLAND_BUILD_CAPTURE ON CACHE BOOL "Build packet capture storage" FORCE)
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
 set(DTV_USERLAND_BUILD_HOST_CTL ON CACHE BOOL "Build shared host control frontend" FORCE)
+set(DTV_USERLAND_BUILD_HOST_FACADE ON CACHE BOOL "Build shared host facade" FORCE)
+set(DTV_USERLAND_BUILD_HOST_DAEMON ON CACHE BOOL "Build shared host daemon" FORCE)
 set(DTV_USERLAND_HOST_CTL_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
     "Product facade include directories for the shared host control frontend" FORCE)
 set(DTV_USERLAND_BUILD_HOST_RUNTIME ON CACHE BOOL
@@ -72,6 +74,16 @@ if(NOT EXISTS "${DTV_CORE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "dtv-userland-core source has no CMakeLists.txt: ${DTV_CORE_SOURCE}")
 endif()
 add_subdirectory(${DTV_CORE_SOURCE} core-capture)
+get_target_property(_host_daemon_target_source_dir dtv_userland_host_daemon SOURCE_DIR)
+set(PIX_HOST_DAEMON_INCLUDE_DIR
+    "${_host_daemon_target_source_dir}/adapters/host_daemon/include")
+get_target_property(_host_facade_target_source_dir dtv_userland_host_facade SOURCE_DIR)
+set(PIX_HOST_FACADE_INCLUDE_DIR
+    "${_host_facade_target_source_dir}/adapters/host_facade/include")
+target_include_directories(dtv_userland_host_runtime PRIVATE
+    "${PIX_HOST_DAEMON_INCLUDE_DIR}" "${PIX_HOST_FACADE_INCLUDE_DIR}")
+target_include_directories(dtv_userland_host_ts PRIVATE
+    "${PIX_HOST_DAEMON_INCLUDE_DIR}" "${PIX_HOST_FACADE_INCLUDE_DIR}")
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
@@ -265,42 +277,32 @@ target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-add_library(pix_px4_ipc STATIC ${PX4_ROOT}/src/ipc.cpp)
-target_include_directories(pix_px4_ipc PUBLIC
-    ${PX4_ROOT}/include ${PX4_ROOT}/src)
-target_link_libraries(pix_px4_ipc PUBLIC dtv::wire)
-target_compile_options(pix_px4_ipc PRIVATE
-    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+add_library(pix_px4_ipc INTERFACE)
+target_include_directories(pix_px4_ipc INTERFACE ${PX4_ROOT}/include ${PX4_ROOT}/src)
+target_link_libraries(pix_px4_ipc INTERFACE dtv::host_facade)
 
-set(PX4_RUNTIME_SOURCES
-    ${PX4_ROOT}/src/control_server.cpp
-    ${PX4_ROOT}/src/control_workers.cpp
-    ${PX4_ROOT}/src/tuner_service.cpp
-    ${PX4_ROOT}/src/card_service.cpp
-    ${PX4_ROOT}/src/enclosure_context.cpp
-    ${PX4_ROOT}/src/identity.cpp
-    ${PX4_ROOT}/tools/px4d_signals.cpp)
-add_library(pix_px4_runtime STATIC ${PX4_RUNTIME_SOURCES})
-target_include_directories(pix_px4_runtime PUBLIC
-    ${PX4_ROOT}/include ${PX4_ROOT}/src ${PX4_ROOT}/tools)
-target_compile_features(pix_px4_runtime PUBLIC cxx_std_17)
-# Shared core's CARD request enum is additive. This legacy host-runtime
-# target does not advertise CARD_SERVICE: unknown CARD requests are refused
-# by the negotiated core feature gate, before the legacy dispatch switch.
-# Do not suppress other -Werror diagnostics or alter normal tuner behavior.
-target_compile_options(pix_px4_runtime PRIVATE
-    -Wall -Wextra -Wpedantic -Werror -Wno-error=switch -fno-exceptions -fno-rtti)
-target_link_libraries(pix_px4_runtime PUBLIC Threads::Threads
+add_library(pix_px4_runtime INTERFACE)
+target_include_directories(pix_px4_runtime INTERFACE
+    ${PX4_ROOT}/include ${PX4_ROOT}/src ${PX4_ROOT}/tools
+    ${PIX_HOST_DAEMON_INCLUDE_DIR} ${PIX_HOST_FACADE_INCLUDE_DIR})
+target_compile_features(pix_px4_runtime INTERFACE cxx_std_17)
+target_link_libraries(pix_px4_runtime INTERFACE Threads::Threads
     dtv::core dtv::wire dtv::control dtv::identity dtv::tuning
-    dtv::receiver dtv::capture dtv::card dtv::host_runtime dtv::host_ts pix_px4_ipc)
+    dtv::receiver dtv::capture dtv::card dtv::host_runtime dtv::host_ts
+    dtv::host_facade dtv::host_daemon pix_px4_ipc)
 
 add_library(pix_dt181_runtime STATIC pix_runtime.cpp pix-dt295-receiver-adapter.cpp)
 target_include_directories(pix_dt181_runtime PUBLIC
+    ${PIX_HOST_DAEMON_INCLUDE_DIR} ${PIX_HOST_FACADE_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR} ${PX4_ROOT}/include ${PX4_ROOT}/src
     ${PX4_ROOT}/tools PRIVATE include src)
 target_compile_definitions(pix_dt181_runtime PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix_dt181_runtime PUBLIC cxx_std_17)
+# Shared core's CARD request enum is additive. This legacy host-runtime
+# target does not advertise CARD_SERVICE: unknown CARD requests are refused
+# by the negotiated core feature gate, before the legacy dispatch switch.
+# Do not suppress other -Werror diagnostics or alter normal tuner behavior.
 target_compile_options(pix_dt181_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pix_dt181_runtime PUBLIC
