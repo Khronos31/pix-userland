@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import struct
+import subprocess
 import tarfile
 import unittest
 
@@ -60,15 +61,106 @@ def read_archive(path):
 
 def make_release(tmp_path, monkeypatch):
     root = tmp_path / "release"
-    dist = root / "dist"
-    dist.mkdir(parents=True)
+    finalize.pack.ROOT = ROOT
+    verify.pack.ROOT = ROOT
+    source_files = finalize.pack.source_files()
+    for name, path in source_files:
+        destination = root / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(path.read_bytes())
+    fixture_sources = {
+        "CMakeLists.txt": b"# synthetic release fixture\n",
+        "LICENSE": b"MIT License\n",
+        "COPYING.libusb": b"libusb license fixture\n",
+        "THIRD_PARTY_NOTICES.md": (
+            f"Core {finalize.pack.CORE_LOCK}; PX4 {finalize.pack.PX4_LOCK}; MIT; GPL-2.0-only\n"
+        ).encode(),
+        "PROVENANCE.md": (
+            f"Core {finalize.pack.CORE_LOCK}; PX4 {finalize.pack.PX4_LOCK}; MIT; GPL-2.0-only\n"
+        ).encode(),
+        "cmake/dtv-userland-core.revision": (finalize.pack.CORE_LOCK + "\n").encode(),
+        "cmake/px4-userland.revision": (finalize.pack.PX4_LOCK + "\n").encode(),
+        "pixd.cpp": b"// synthetic release fixture\n",
+        "userland/tools/pix_ts.cpp": b"// synthetic release fixture\n",
+        "docs/releases.md": b"Synthetic release fixture\n",
+        "packaging/pix-usb-permissions": b"# synthetic release fixture\n",
+        "licenses/musl-COPYRIGHT.txt": b"musl license fixture\n",
+    }
+    for name, data in fixture_sources.items():
+        destination = root / name
+        if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "PIX fixture"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "pix-fixture@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A", "-f"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "synthetic release fixture"], check=True)
     targets = tuple(finalize.pack.TARGETS)
     finalize.pack.ROOT = root
     verify.pack.ROOT = root
     finalize.pack.TARGETS = targets
     verify.pack.TARGETS = targets
-    commit = "a" * 40
+    commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    tree = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True).strip()
+    dist = root / "dist"
+    dist.mkdir()
+    libusb_source = b"synthetic libusb source"
+    source_members = {name: path.read_bytes() for name, path in finalize.pack.source_files()}
+    source_members.update({
+        "third_party/dtv-userland-core/LICENSE": b"MIT License\n",
+        "third_party/dtv-userland-core/PROVENANCE.json": b"{}\n",
+        "third_party/dtv-userland-core/adapters/host_runtime/COPYING": b"GPL-2.0-only\n",
+        "third_party/dtv-userland-core/adapters/host_daemon/COPYING": b"GPL-2.0-only\n",
+        "third_party/dtv-userland-core/adapters/host_facade/COPYING": b"GPL-2.0-only\n",
+        "third_party/dtv-userland-core/adapters/host_ts/COPYING": b"GPL-2.0-only\n",
+        "third_party/dtv-userland-core/adapters/windows_winscard/COPYING": b"GPL-2.0-only\n",
+        "third_party/px4-userland/LICENSE": b"GPL-2.0-only\n",
+        "third_party/px4-userland/PROVENANCE.md": b"PX4 fixture\n",
+        "third_party/px4-userland/THIRD_PARTY_NOTICES.md": b"PX4 fixture notices\n",
+        "third_party/libusb-1.0.30.tar.bz2": libusb_source,
+    })
+    core_tree = "31ba29eab93f8166e53ff5b37458c9d554899152"
+    px4_tree = "3f69476186f07be34e79e7a40cf1fb3f8b0c55e8"
+    source_id = {
+        "repository_commit": commit, "repository_tree": tree,
+        "dtv_userland_core_commit": finalize.pack.CORE_LOCK,
+        "dtv_userland_core_tree": core_tree,
+        "px4_userland_commit": finalize.pack.PX4_LOCK,
+        "px4_userland_tree": px4_tree,
+    }
+    source_members["release-info.json"] = json.dumps({
+        "project": "pix-userland", "version": finalize.pack.VERSION,
+        "target": "source", "commit": commit, "libusb": "1.0.30",
+        "private": True, "libusb_linkage": "static", "device_assets": False,
+        **source_id, "libusb_sha256": hashlib.sha256(libusb_source).hexdigest(),
+    }).encode() + b"\n"
+    source_files_manifest = {
+        name: {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+        for name, data in source_members.items()
+    }
+    licenses = {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in source_members.items()
+        if name in {"LICENSE", "COPYING.libusb", "third_party/dtv-userland-core/LICENSE",
+                    "third_party/px4-userland/LICENSE"} or name.endswith("/COPYING")
+    }
+    source_members["source-manifest.json"] = json.dumps({
+        "schema": 1, "kind": "corresponding-source", "project": "pix-userland",
+        "version": finalize.pack.VERSION, "private": True, **source_id,
+        "libusb_version": "1.0.30",
+        "libusb_archive_sha256": hashlib.sha256(libusb_source).hexdigest(),
+        "licenses": licenses, "files": source_files_manifest,
+    }, sort_keys=True, indent=2).encode() + b"\n"
+    source_members["SHA256SUMS"] = "".join(
+        f"{hashlib.sha256(data).hexdigest()}  {name}\n"
+        for name, data in sorted(source_members.items())
+    ).encode("ascii")
     for target in (*targets, "source"):
+        if target == "source":
+            write_archive(dist / f"pix-userland-{finalize.pack.VERSION}-source.tar.gz",
+                          target, source_members)
+            continue
         members = {
             "release-info.json": json.dumps({
                 "project": "pix-userland", "version": finalize.pack.VERSION,
@@ -78,10 +170,9 @@ def make_release(tmp_path, monkeypatch):
             "LICENSE": b"license", "COPYING.libusb": b"copying",
             "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
         }
-        if target == "source":
-            members["third_party/libusb-1.0.30.tar.bz2"] = b"synthetic libusb source"
-        else:
-            members["pix-ts.exe" if target == "windows-x64" else "pix-ts"] = b"binary"
+        suffix = ".exe" if target == "windows-x64" else ""
+        for program in ("pixd", "pixctl", "pix-ts"):
+            members[program + suffix] = b"binary"
         write_archive(dist / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz", target, members)
     return root, commit
 

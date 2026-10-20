@@ -2,7 +2,7 @@
 
 The source package identifies the PIX product snapshot by Git commit and tree
 in `source-manifest.json`. Its dependency locks are
-`cmake/dtv-userland-core.revision` (`9591ed861291f6d718ac9943328df20b2d3f1463`)
+`cmake/dtv-userland-core.revision` (`35249f85347093ca3b431cbe4a730b2366de7ada`)
 and `cmake/px4-userland.revision`
 (`90b08dfe79b0b40e393f015975c761863830866a`). The archive carries Git
 archives of those exact dependency commits, not their current working heads.

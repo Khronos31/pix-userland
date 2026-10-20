@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ('linux-x86_64', 'linux-aarch64', 'darwin-arm64', 'android-aarch64', 'android-armv7a', 'android-x86_64', 'windows-x64')
 VERSION = re.search(r'#define VERSION "([0-9]+\.[0-9]+\.[0-9]+)"', (ROOT/'include/version.h').read_text()).group(1)
-CORE_LOCK = '9591ed861291f6d718ac9943328df20b2d3f1463'
+CORE_LOCK = '35249f85347093ca3b431cbe4a730b2366de7ada'
 PX4_LOCK = '90b08dfe79b0b40e393f015975c761863830866a'
 LIBUSB_SHA256 = 'fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf'
 CORE_URL = 'https://github.com/Khronos31/dtv-userland-core.git'
