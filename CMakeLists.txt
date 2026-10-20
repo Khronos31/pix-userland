@@ -25,7 +25,7 @@ if(DTV_USERLAND_CORE_SOURCE_DIR)
     message(WARNING "dtv-userland-core: using explicit local source ${DTV_CORE_SOURCE}; build is not pinned")
 else()
     FetchContent_Declare(dtv_userland_core
-        GIT_REPOSITORY "git@github.com:Khronos31/dtv-userland-core.git"
+        GIT_REPOSITORY "https://github.com/Khronos31/dtv-userland-core.git"
         GIT_TAG "${DTV_CORE_REVISION}")
     FetchContent_GetProperties(dtv_userland_core)
     if(NOT dtv_userland_core_POPULATED)
@@ -38,7 +38,7 @@ if(PX4_USERLAND_SOURCE_DIR)
     message(WARNING "PX4 userland: using explicit local source ${PX4_SOURCE}; build is not pinned")
 else()
     FetchContent_Declare(px4_userland
-        GIT_REPOSITORY "git@github.com:Khronos31/px4-userland.git"
+        GIT_REPOSITORY "https://github.com/Khronos31/px4-userland.git"
         GIT_TAG "${PX4_USERLAND_REVISION}")
     FetchContent_GetProperties(px4_userland)
     if(NOT px4_userland_POPULATED)
