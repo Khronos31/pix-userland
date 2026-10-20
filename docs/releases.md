@@ -45,13 +45,14 @@
 | darwin-arm64 | libusb静的、macOS標準ライブラリ・フレームワークに依存 |
 | android-aarch64 / android-armv7a / android-x86_64 | NDK r27d / API 24、libusb静的、Bionic等に依存 |
 | windows-x64 | MinGW-w64、libusb静的、WinUSBとOS標準DLLに依存 |
-| source | 自作Cソース、ビルド/梱包スクリプト、ライセンス、libusb 1.0.30対応ソース |
+| source | daemon/ctl/TSの対応source、build inputs、固定Core/PX4 source、provenance/license、manifest、libusb 1.0.30対応source |
 | SHA256SUMS | 8アーカイブのSHA-256 |
 
 各バイナリには `assets/fpga.bin`、`assets/bootstrap.bin`、`assets/validation.bin` が入ります。
 元のアプリ、録画、セッションデータは含めません。ソースアーカイブには実機assetsと暗号化入力を含めません。
 GitHubが自動生成するSource codeアーカイブには、リポジトリ内の暗号化入力は入りますが、復元キーは含まれません。
 対応libusbソースも必要な場合は、手動同梱の `pix-userland-VERSION-source.tar.gz` を使ってください。
+このprivate source archiveには、`PROVENANCE.md` に記録した固定Core/PX4 commitのsourceと各license noticeを含みます。`source-manifest.json` と `SHA256SUMS` がproduct/dependencyのsource identityとfile hashを記録します。実機assetsや暗号化入力は含めません。
 
 ## CIの実行
 
