@@ -64,6 +64,10 @@ set(DTV_USERLAND_HOST_RUNTIME_INSTANCE_POLICY "lowercase" CACHE STRING
     "Instance-name policy for the GPL POSIX host runtime adapter" FORCE)
 set(DTV_USERLAND_HOST_RUNTIME_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
     "Private product facade include directories required by the GPL POSIX host runtime adapter" FORCE)
+set(DTV_USERLAND_BUILD_HOST_TS ON CACHE BOOL
+    "Build the optional GPL host TS consumer" FORCE)
+set(DTV_USERLAND_HOST_TS_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
+    "Private product facade include directories required by the GPL host TS consumer" FORCE)
 if(NOT EXISTS "${DTV_CORE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "dtv-userland-core source has no CMakeLists.txt: ${DTV_CORE_SOURCE}")
 endif()
@@ -274,10 +278,7 @@ set(PX4_RUNTIME_SOURCES
     ${PX4_ROOT}/src/tuner_service.cpp
     ${PX4_ROOT}/src/card_service.cpp
     ${PX4_ROOT}/src/enclosure_context.cpp
-    ${PX4_ROOT}/src/control_client.cpp
     ${PX4_ROOT}/src/identity.cpp
-    ${PX4_ROOT}/tools/px4_ts_core.cpp
-    ${PX4_ROOT}/tools/px4_ts_posix.cpp
     ${PX4_ROOT}/tools/px4d_signals.cpp)
 add_library(pix_px4_runtime STATIC ${PX4_RUNTIME_SOURCES})
 target_include_directories(pix_px4_runtime PUBLIC
@@ -291,7 +292,7 @@ target_compile_options(pix_px4_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wno-error=switch -fno-exceptions -fno-rtti)
 target_link_libraries(pix_px4_runtime PUBLIC Threads::Threads
     dtv::core dtv::wire dtv::control dtv::identity dtv::tuning
-    dtv::receiver dtv::capture dtv::card dtv::host_runtime pix_px4_ipc)
+    dtv::receiver dtv::capture dtv::card dtv::host_runtime dtv::host_ts pix_px4_ipc)
 
 add_library(pix_dt181_runtime STATIC pix_runtime.cpp pix-dt295-receiver-adapter.cpp)
 target_include_directories(pix_dt181_runtime PUBLIC
@@ -320,12 +321,11 @@ target_compile_features(pixctl PRIVATE cxx_std_17)
 target_link_libraries(pixctl PRIVATE dtv::host_ctl pix_px4_runtime dtv::json dtv::identity)
 target_compile_options(pixctl PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
-add_executable(pix-ts userland/tools/pix_ts.cpp
-    ${PX4_ROOT}/tools/px4_ts_core.cpp ${PX4_ROOT}/tools/px4_ts_posix.cpp)
+add_executable(pix-ts userland/tools/pix_ts.cpp)
 target_include_directories(pix-ts PRIVATE ${PX4_ROOT}/include ${PX4_ROOT}/tools)
 target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix-ts PRIVATE cxx_std_17)
-target_link_libraries(pix-ts PRIVATE pix_px4_runtime dtv::tuning)
+target_link_libraries(pix-ts PRIVATE pix_px4_runtime dtv::host_ts)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
 add_executable(pix_runtime_list_proof tests/pix_runtime_list_proof.cpp)

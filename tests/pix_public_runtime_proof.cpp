@@ -262,7 +262,7 @@ int main()
     const std::string idle_instance = json_string(idle_status, "instance");
 
     const pid_t client = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--freq", "473142857", "--time", "3",
+        {"--device", "usb:1-2", "--freq", "473142857", "--system", "isdb-t", "--time", "3",
          "--output", output_path, "--runtime-dir", root}, root + "/pix-ts.log");
     std::string streaming_ready_status;
     unsigned readiness_attempts = 0U;
@@ -300,7 +300,7 @@ int main()
         return 5;
     }
     const pid_t off_grid = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--freq", "473142000", "--time", "1",
+        {"--device", "usb:1-2", "--freq", "473142000", "--system", "isdb-t", "--time", "1",
          "--output", off_grid_path, "--runtime-dir", root}, root + "/pix-ts-off-grid.log");
     int off_grid_status = 0;
     if (off_grid <= 0 || ::waitpid(off_grid, &off_grid_status, 0) != off_grid ||
