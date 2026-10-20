@@ -9,12 +9,17 @@
 
 ```sh
 # daemonを起動（資産ディレクトリにはdt295.assetsを配置）
-pixd --device serial:SERIAL --assets /path/to/assets --runtime-dir /tmp/pix-test
+pixd --device serial:SERIAL --instance dt295-test --assets /path/to/assets --runtime-dir /tmp/pix-test
+# 状態・内部カード観測（DT295の物理挿入状態はunknown）
+pixctl --device serial:SERIAL --runtime-dir /tmp/pix-test status
+pixctl --device serial:SERIAL --runtime-dir /tmp/pix-test card-status
 # 別のターミナルから短時間受信
-pix-ts --device serial:SERIAL --runtime-dir /tmp/pix-test -c T27 --time 20 -o capture.ts
+pix-ts --instance dt295-test --runtime-dir /tmp/pix-test -f 557142857 --time 20 -o capture.ts
 ```
 
-初期のPAT/PMT取得とroute構成に数秒かかります。USB選択は `usb:BUS-PORT` も使用できます。`pixctl`の共通化・カード挿入照会は次の増分で、汎用外部CARD/ATR/APDUを提供するものではありません。正式release・配布手順は移行中です。以下の既存リリース/standalone版の記録を、新daemonの全OS検証済みという意味には読み替えないでください。
+初期のPAT/PMT取得とroute構成に数秒かかります。daemonと`pixctl`のUSB選択は `usb:BUS-PORT` も使用できます。現在の`pix-ts --device serial:...`は受入済み旧版・今回版の双方でexit 3となるため、受信例では明示instanceを使っています。
+
+`pixctl`はCoreの共有frontendを使い、`list/status/card-status`を提供します。DT181の内部statusから挿入状態を読み、取得失敗はunknown、DT295の物理挿入状態もunknownとして返します。汎用外部CARDのATR/reset/APDUとLNB操作は非対応でexit 3です。LinuxではDT181/DT295の状態取得と、DT295受信中の並行取得を確認しています。正式release・配布手順は移行中です。以下の既存リリース/standalone版の記録を、新daemonの全OS検証済みという意味には読み替えないでください。
 
 ## 概要（従来のstandalone版）
 

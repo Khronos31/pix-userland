@@ -5,6 +5,7 @@
 #include "pix-dt181-consumer.h"
 #include "pix-dt181-receiver-adapter.h"
 #include "px4/enclosure_context.h"
+#include "dtv/userland/identity.h"
 
 #include <array>
 #include <cstddef>
@@ -26,6 +27,10 @@ struct LocatedDevice final {
     std::array<std::uint8_t, USB_SELECTOR_MAX_PORTS> ports{};
     std::uint8_t port_count = 0U;
     std::string path;
+    bool serial_present = false;
+    bool serial_absent = false;
+    bool serial_unique = false;
+    dtv::userland::identity::SerialText serial{};
 };
 
 dtv::userland::Result<LocatedDevice> locate(const std::string& selector) noexcept;

@@ -183,8 +183,21 @@ using PixStreamShim = PixStreamShimT<dt181::ReceiverAdapter>;
 
 class PixTunerBackend final : public TunerServiceBackend {
 public:
-    explicit PixTunerBackend(dt181::ReceiverAdapter& adapter) noexcept : adapter_(adapter) {}
+    PixTunerBackend(dt181::ReceiverAdapter& adapter, dt181_session& session) noexcept
+        : adapter_(adapter), session_(session) {}
     std::uint8_t receiver_count() const noexcept override { return 1U; }
+    bool supports_internal_card_observation() const noexcept override { return true; }
+    dtv::userland::wire::Optional<bool> sample_internal_card_inserted() noexcept override
+    {
+        std::uint8_t status[64]{};
+        std::size_t length = sizeof(status);
+        if (dt181_session_status(&session_, status, &length) != 0 || length < 4U)
+            return {};
+        dtv::userland::wire::Optional<bool> observed{};
+        observed.present = true;
+        observed.value = status[3] != 0U;
+        return observed;
+    }
     bool receiver_supports(std::uint8_t receiver, ipc::System system) const noexcept override
     { return receiver == 0U && (system == ipc::System::ISDB_T || system == ipc::System::ISDB_S); }
     bool selects_satellite_stream_before_tune() const noexcept override { return true; }
@@ -257,6 +270,7 @@ private:
     static Result<void> adapt(Result<TunerHzProgramming> result) noexcept
     { return result ? Result<void>::success() : Result<void>::failure(result.error()); }
     dt181::ReceiverAdapter& adapter_;
+    dt181_session& session_;
 };
 
 using Dt295StreamShim = PixStreamShimT<dt295::ReceiverAdapter>;
@@ -438,6 +452,7 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
     }
     bool found = false;
     bool ambiguous = false;
+    ssize_t selected_index = -1;
     Error failure = Error::NOT_FOUND;
     for (ssize_t index = 0; index < count; ++index) {
         libusb_device_descriptor descriptor{};
@@ -462,9 +477,14 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
                 failure = Error::INTERNAL;
                 break;
             }
+            selected.serial = observed;
+            selected.serial_present = true;
+            selected.serial_unique = true;
             found = true;
             continue;
         }
+
+        if (found) continue;
 
         LocatedDevice candidate{};
         std::uint8_t ports[USB_SELECTOR_MAX_PORTS]{};
@@ -477,9 +497,33 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
             failure = Error::INTERNAL;
             break;
         }
+        dtv::userland::identity::SerialText observed{};
+        if (read_serial_text(devices[index], descriptor, observed)) {
+            candidate.serial = observed;
+            candidate.serial_present = true;
+            candidate.serial_unique = true;
+        } else if (descriptor.iSerialNumber == 0U) {
+            candidate.serial_absent = true;
+        }
         selected = std::move(candidate);
+        selected_index = index;
         found = true;
-        break;
+        continue;
+    }
+    if (!serial_selector && found && selected.serial_present) {
+        for (ssize_t index = 0; index < count; ++index) {
+            if (index == selected_index) continue;
+            libusb_device_descriptor descriptor{};
+            if (libusb_get_device_descriptor(devices[index], &descriptor) !=
+                LIBUSB_SUCCESS || descriptor.idVendor != 0x06b8U)
+                continue;
+            dtv::userland::identity::SerialText observed{};
+            if (read_serial_text(devices[index], descriptor, observed) &&
+                same_serial(observed, selected.serial)) {
+                selected.serial_unique = false;
+                break;
+            }
+        }
     }
     libusb_free_device_list(devices, 1);
     libusb_exit(context);
@@ -571,7 +615,8 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         kTsQueuePackets));
     if (!family->impl_->adapter)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
-    family->impl_->tuner.reset(new (std::nothrow) PixTunerBackend(*family->impl_->adapter));
+    family->impl_->tuner.reset(new (std::nothrow) PixTunerBackend(
+        *family->impl_->adapter, family->impl_->session));
     if (!family->impl_->tuner)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     family->impl_->shim.reset(new (std::nothrow) PixStreamShim(*family->impl_->adapter));
@@ -667,8 +712,21 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
     if (!set_string(list.enclosure.value.model.value.id, model_id) ||
         !set_string(list.enclosure.value.model.value.name, model_id))
         return Result<void>::failure(Error::INTERNAL);
-    list.enclosure.value.identity.serial_state = IdentitySerialState::unknown;
-    list.enclosure.value.identity.uniqueness = Uniqueness::unknown;
+    if (device.serial_present) {
+        list.enclosure.value.identity.serial_state = IdentitySerialState::present;
+        list.enclosure.value.identity.serial.present = true;
+        if (!set_string(list.enclosure.value.identity.serial.value,
+                        std::string_view(device.serial.bytes.data(), device.serial.length)))
+            return Result<void>::failure(Error::INTERNAL);
+        list.enclosure.value.identity.uniqueness = device.serial_unique
+            ? Uniqueness::unique_in_scan : Uniqueness::duplicate;
+    } else if (device.serial_absent) {
+        list.enclosure.value.identity.serial_state = IdentitySerialState::absent;
+        list.enclosure.value.identity.uniqueness = Uniqueness::not_applicable;
+    } else {
+        list.enclosure.value.identity.serial_state = IdentitySerialState::unknown;
+        list.enclosure.value.identity.uniqueness = Uniqueness::unknown;
+    }
     list.enclosure.value.limits.max_concurrent_streams.present = true;
     list.enclosure.value.limits.max_concurrent_streams.value = 1U;
     list.functions.count = 1U;
@@ -687,7 +745,17 @@ Result<void> build_list(const LocatedDevice& device, const std::string& instance
         !set_string(function.model.value.name, model_id))
         return Result<void>::failure(Error::INTERNAL);
     function.model.present = true;
-    function.serial_state = SerialState::not_queried;
+    if (device.serial_present) {
+        function.serial_state = SerialState::present;
+        function.serial.present = true;
+        if (!set_string(function.serial.value,
+                        std::string_view(device.serial.bytes.data(), device.serial.length)))
+            return Result<void>::failure(Error::INTERNAL);
+    } else if (device.serial_absent) {
+        function.serial_state = SerialState::absent;
+    } else {
+        function.serial_state = SerialState::not_queried;
+    }
     function.identification_reason = IdentificationReason::none;
     function.present = true;
     list.receivers.present = true;

@@ -53,6 +53,9 @@ set(PIX_RUNTIME_VERSION "${PIX_RUNTIME_VERSION}" CACHE STRING "PIX runtime versi
 set(DTV_USERLAND_BUILD_CARD ON CACHE BOOL "Build card ownership engine" FORCE)
 set(DTV_USERLAND_BUILD_CAPTURE ON CACHE BOOL "Build packet capture storage" FORCE)
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
+set(DTV_USERLAND_BUILD_HOST_CTL ON CACHE BOOL "Build shared host control frontend" FORCE)
+set(DTV_USERLAND_HOST_CTL_FACADE_INCLUDE_DIRS "${PX4_ROOT}/include" CACHE STRING
+    "Product facade include directories for the shared host control frontend" FORCE)
 if(NOT EXISTS "${DTV_CORE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "dtv-userland-core source has no CMakeLists.txt: ${DTV_CORE_SOURCE}")
 endif()
@@ -260,6 +263,7 @@ set(PX4_RUNTIME_SOURCES
     ${PX4_ROOT}/src/card_service.cpp
     ${PX4_ROOT}/src/enclosure_context.cpp
     ${PX4_ROOT}/src/control_client.cpp
+    ${PX4_ROOT}/src/identity.cpp
     ${PX4_ROOT}/tools/px4_ts_core.cpp
     ${PX4_ROOT}/tools/px4_ts_posix.cpp
     ${PX4_ROOT}/tools/px4d_signals.cpp)
@@ -298,12 +302,12 @@ target_compile_features(pixd PRIVATE cxx_std_17)
 target_link_libraries(pixd PRIVATE pix_dt181_runtime dtv::json PkgConfig::LIBUSB)
 target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
-add_executable(pixctl ${PX4_ROOT}/tools/px4ctl.cpp)
+add_executable(pixctl tools/pixctl.cpp)
+target_include_directories(pixctl PRIVATE ${PX4_ROOT}/tools)
 target_compile_definitions(pixctl PRIVATE
-    PX4CTL_TOOL_NAME="pixctl" PX4CTL_PRODUCT_SLUG="pix-userland"
-    PX4CTL_PRODUCT_ENUM=pix PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
+    PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pixctl PRIVATE cxx_std_17)
-target_link_libraries(pixctl PRIVATE pix_px4_runtime dtv::json dtv::identity)
+target_link_libraries(pixctl PRIVATE dtv::host_ctl pix_px4_runtime dtv::json dtv::identity)
 target_compile_options(pixctl PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
 add_executable(pix-ts userland/tools/pix_ts.cpp
