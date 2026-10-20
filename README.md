@@ -17,7 +17,7 @@ pixctl --device serial:SERIAL --runtime-dir /tmp/pix-test card-status
 pix-ts --instance dt295-test --runtime-dir /tmp/pix-test -f 557142857 --time 20 -o capture.ts
 ```
 
-初期のPAT/PMT取得とroute構成に数秒かかります。daemonと`pixctl`のUSB選択は `usb:BUS-PORT` も使用できます。現在の`pix-ts --device serial:...`は受入済み旧版・今回版の双方でexit 3となるため、受信例では明示instanceを使っています。
+初期のPAT/PMT取得とroute構成に数秒かかります。daemonと`pixctl`のUSB選択は `usb:BUS-PORT` も使用できます。serial profile修正後、DT295の実serial selectorを使ってLinux実機で地上波T27を5秒受信し、通常停止した限定確認があります。これは他OS・再生・長時間受信の確認ではありません。受信例では明示instanceも示していますが、serial selectorが現行CLIで失敗するという修正前の記録を現制約として扱いません。
 
 `pixctl`はCoreの共有frontendを使い、`list/status/card-status`を提供します。DT181の内部statusから挿入状態を読み、取得失敗はunknown、DT295の物理挿入状態もunknownとして返します。汎用外部CARDのATR/reset/APDUとLNB操作は非対応でexit 3です。LinuxではDT181/DT295の状態取得と、DT295受信中の並行取得を確認しています。正式release・配布手順は移行中です。以下の既存リリース/standalone版の記録を、新daemonの全OS検証済みという意味には読み替えないでください。
 
@@ -27,7 +27,7 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 
 単一チューナーを制御して TS パケットを出力します。DT181は選択した伝送ストリーム全体、開発中のDT295は番組表から計画した有限の広告PIDとSIが対象です。
 
-なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。
+この従来standalone C11バイナリには、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能はありません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。現在の `pixd` / `pixctl` / `pix-ts` daemon経路は上記の開発中経路として別に説明しており、standalone版の記録をその経路の全OS認定には読み替えません。
 
 ## 対応機器・動作環境
 
