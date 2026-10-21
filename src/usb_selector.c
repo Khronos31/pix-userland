@@ -18,10 +18,41 @@ static int decimal(const char **cursor, unsigned max, unsigned *out) {
     *out = value;
     return 0;
 }
+static int path_tail(const char **cursor, usb_selector *result) {
+    unsigned value;
+    result->kind = USB_SELECT_PATH;
+    do {
+        (*cursor)++;
+        if (result->port_count == USB_SELECTOR_MAX_PORTS ||
+            decimal(cursor, UINT8_MAX, &value) || !value)
+            return -1;
+        result->ports[result->port_count++] = (uint8_t)value;
+    } while (**cursor == '.');
+    return **cursor ? -1 : 0;
+}
 int usb_selector_parse(const char *text, usb_selector *out) {
     usb_selector result = {0};
     unsigned first, value;
-    if (!text || !out || decimal(&text, UINT_MAX, &first))
+    if (!text || !out)
+        return -1;
+    if (!strncmp(text, "serial:", 7)) {
+        if (!text[7])
+            return -1;
+        result.kind = USB_SELECT_SERIAL;
+        result.serial = text + 7;
+        *out = result;
+        return 0;
+    }
+    if (!strncmp(text, "usb:", 4)) {
+        text += 4;
+        if (decimal(&text, UINT8_MAX, &first) || *text != '-' ||
+            path_tail(&text, &result))
+            return -1;
+        result.bus = (uint8_t)first;
+        *out = result;
+        return 0;
+    }
+    if (decimal(&text, UINT_MAX, &first))
         return -1;
     if (!*text) {
         result.kind = USB_SELECT_INDEX;
@@ -37,15 +68,7 @@ int usb_selector_parse(const char *text, usb_selector *out) {
             result.kind = USB_SELECT_ADDRESS;
             result.address = (uint8_t)value;
         } else if (*text == '-') {
-            result.kind = USB_SELECT_PATH;
-            do {
-                text++;
-                if (result.port_count == USB_SELECTOR_MAX_PORTS ||
-                    decimal(&text, UINT8_MAX, &value) || !value)
-                    return -1;
-                result.ports[result.port_count++] = (uint8_t)value;
-            } while (*text == '.');
-            if (*text)
+            if (path_tail(&text, &result))
                 return -1;
         } else
             return -1;
@@ -55,7 +78,7 @@ int usb_selector_parse(const char *text, usb_selector *out) {
 }
 int usb_selector_matches(const usb_selector *selector, unsigned index, unsigned bus,
                          unsigned address, const uint8_t *ports, unsigned port_count) {
-    if (!selector)
+    if (!selector || selector->kind == USB_SELECT_SERIAL)
         return 0;
     if (selector->kind == USB_SELECT_INDEX)
         return index == selector->index;
@@ -66,6 +89,11 @@ int usb_selector_matches(const usb_selector *selector, unsigned index, unsigned 
     return selector->kind == USB_SELECT_PATH && ports && port_count &&
            port_count <= USB_SELECTOR_MAX_PORTS && port_count == selector->port_count &&
            !memcmp(ports, selector->ports, port_count);
+}
+int usb_selector_matches_serial(const usb_selector *selector, usb_serial_state state,
+                                const char *serial) {
+    return selector && selector->kind == USB_SELECT_SERIAL && state == USB_SERIAL_READABLE &&
+           serial && selector->serial && !strcmp(selector->serial, serial);
 }
 int usb_selector_format_path(char *out, size_t size, unsigned bus, const uint8_t *ports,
                              unsigned port_count) {

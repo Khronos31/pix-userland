@@ -192,9 +192,14 @@ TSID配列のスロット番号（0〜7）で、空スロットはエラーに�
 
 `-f/--freq HZ`（衛星では中間周波数）、`-p/--pid PID`（繰り返し可、8192は全PID）、
 `-v/--verbose`、`--list-json`、`--control`、`--fail-on-drop` を追加しました。
-`--device` はインデックス、`BUS:ADDRESS`、`BUS-PORT[.PORT...]` を受け付けます。
+`--device` はインデックス、`BUS:ADDRESS`、`BUS-PORT[.PORT...]`、`serial:TEXT`、
+`usb:BUS-PORT[.PORT...]` を受け付けます。`serial:` は接続中の機器のserialと完全一致
+（大文字小文字を保持）で照合し、一致なし・重複時は先頭へfallbackせず失敗します。
 `--list-json` は `enclosures` / `ungrouped_usb_devices` 形式で、1台につき
-`system: "ISDB-T/S"` の受信機1基を列挙します。
+`systems: ["ISDB-T","ISDB-S"]` の受信機1基を列挙します（DT181・DT295ともT/S両対応。
+現在の受信経路の検証・対応OS範囲は別で、DT295のC経路はmacOS地上波のみ確認済みです）。
+`serial` はdescriptorの文字列またはnull、`serial_unique` は現在の列挙内での
+一意性（true/false、判定不能はnull）です。
 
 mirakc設定例（展開先とUSB位置は実際の環境に置換）:
 
@@ -241,7 +246,7 @@ pix-ts --system terrestrial|bs|cs --channel N [options]
 | `-o, --output` | `PATH` | 出力先ファイルパスを指定します。既存ファイルは上書きします。省略時または `-` の場合は標準出力に出力します。 |
 | `--model` | `dt181 / dt295` | 機種を指定します（既定値: `dt181`）。実験的 DT295 は macOS・地上波・ターゲット0のみです。 |
 | `-a, --assets` | `DIR` | 機器データのあるディレクトリを指定します（既定値: `./assets`）。DT181 は3ファイル、実験的 DT295 は `dt295.assets` を読み込みます。 |
-| `-d, --device` | `SPEC` | インデックス（既定値: `0`）、`BUS:ADDRESS`、`BUS-PORT[.PORT...]` を指定します。 |
+| `-d, --device` | `SPEC` | インデックス（既定値: `0`）、`BUS:ADDRESS`、`BUS-PORT[.PORT...]`、`serial:TEXT`、`usb:BUS-PORT[.PORT...]` を指定します。 |
 | `--fd` | `FD` | Android / Termux から渡された借用 USB ファイルディスクリプタを指定します（引数末尾の整数でも指定可能）。Windows では未対応です。`--list` や 0 以外の `--device` とは併用できません。 |
 | `--lna` | `on / off` | 内部受信増幅器（LNA）を設定します（既定値: 地上波は `off`、BS/CS は `on`）。LNB 電源ではありません。 |
 | `--detach-kernel-driver` | なし | カーネルドライバが対象インターフェースにアタッチされている場合、明示的にデタッチします。 |
