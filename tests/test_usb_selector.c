@@ -29,14 +29,35 @@ int main(void) {
     assert(usb_selector_matches(&s, 99, 3, 1, ports, 3));
     assert(usb_selector_format_path(path, 4, 3, ports, 3));
     assert(usb_selector_format_path(path, sizeof(path), 3, ports, 0));
+
+    /* usb: keeps the existing physical path meaning and nothing else. */
+    assert(!usb_selector_parse("usb:003-02.4.1", &s));
+    assert(s.kind == USB_SELECT_PATH && usb_selector_matches(&s, 99, 3, 1, ports, 3));
+    assert(usb_selector_parse("usb:3", &s));
+    assert(usb_selector_parse("usb:3:2", &s));
+
+    /* serial: is an exact, case-preserving string match on readable serials. */
+    assert(!usb_selector_parse("serial:AbC-123", &s));
+    assert(s.kind == USB_SELECT_SERIAL && !strcmp(s.serial, "AbC-123"));
+    assert(usb_selector_matches_serial(&s, USB_SERIAL_READABLE, "AbC-123"));
+    assert(!usb_selector_matches_serial(&s, USB_SERIAL_READABLE, "abc-123"));
+    assert(!usb_selector_matches_serial(&s, USB_SERIAL_ABSENT, "AbC-123"));
+    assert(!usb_selector_matches_serial(&s, USB_SERIAL_UNREADABLE, "AbC-123"));
+    assert(!usb_selector_matches_serial(&s, USB_SERIAL_READABLE, ""));
+    assert(!usb_selector_matches(&s, 0, 3, 7, ports, 3));
+    assert(!usb_selector_parse("serial:a:b", &s));
+    assert(!strcmp(s.serial, "a:b"));
+
     const char *bad[] = {"", "-1", "+1", " 1", "1 ", "0x1", "1:2:3", "1:", ":2",
                          "256:1", "1:256", "1-", "1-0", "1-256", "1-2.", "1-.2",
-                         "1-2..3", "1-2:3", "1-2.3.4.5.6.7.8.9", "9999999999999999999999"};
+                         "1-2..3", "1-2:3", "1-2.3.4.5.6.7.8.9", "9999999999999999999999",
+                         "serial:", "usb:", "usb:1", "usb:1:2", "usb:-1", "usb:1-",
+                         "usb:1-0", "usb:256-1"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(*bad); i++)
         assert(usb_selector_parse(bad[i], &s));
     assert(usb_selector_parse(NULL, &s));
     assert(usb_selector_parse("0", NULL));
     assert(!usb_selector_parse("255-255.255.255.255.255.255.255", &s));
-    puts("USB selectors: index, address, topology and invalid-input tests passed");
+    puts("USB selectors: index, address, topology, serial and invalid-input tests passed");
     return 0;
 }

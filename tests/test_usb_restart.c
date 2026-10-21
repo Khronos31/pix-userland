@@ -25,6 +25,7 @@ static uint8_t LIBUSB_CALL test_bus(libusb_device *);
 static uint8_t LIBUSB_CALL test_address(libusb_device *);
 static int LIBUSB_CALL test_ports(libusb_device *, uint8_t *, int);
 static int LIBUSB_CALL test_open(libusb_device *, libusb_device_handle **);
+static int LIBUSB_CALL test_string_ascii(libusb_device_handle *, uint8_t, unsigned char *, int);
 static int LIBUSB_CALL test_wrap(libusb_context *, intptr_t, libusb_device_handle **);
 static libusb_device *LIBUSB_CALL test_device(libusb_device_handle *);
 static int LIBUSB_CALL test_active(libusb_device_handle *, int);
@@ -54,6 +55,7 @@ static void *test_calloc(size_t, size_t);
 #define libusb_get_configuration test_get_config
 #define libusb_claim_interface test_claim
 #define libusb_close test_close
+#define libusb_get_string_descriptor_ascii test_string_ascii
 #define libusb_bulk_transfer test_bulk
 #define calloc test_calloc
 #define libusb_alloc_transfer test_alloc
@@ -85,6 +87,7 @@ static void *test_calloc(size_t, size_t);
 #undef libusb_get_configuration
 #undef libusb_claim_interface
 #undef libusb_close
+#undef libusb_get_string_descriptor_ascii
 #undef libusb_bulk_transfer
 #undef calloc
 
@@ -100,10 +103,12 @@ static int descriptor_product = 0x102b;
 static int init_result, list_result = 1, descriptor_result, wrong_model, open_result;
 static int active_result, claim_result, malloc_failure, bulk_result, short_write;
 static int fake_context, fake_handle;
-typedef struct { uint16_t product; uint8_t bus, address, port; } fake_usb_device;
-static fake_usb_device fake_devices[2] = {{0x102b, 1, 7, 2}, {0x103b, 1, 8, 3}};
+typedef struct { uint16_t product; uint8_t bus, address, port; const char *serial; } fake_usb_device;
+static fake_usb_device fake_devices[2] = {{0x102b, 1, 7, 2, NULL}, {0x103b, 1, 8, 3, NULL}};
 static unsigned fake_device_count = 1;
 static libusb_device *last_opened_device;
+static const char *opened_serial;
+static int string_result;
 static intptr_t wrapped_fd;
 static int LIBUSB_CALL test_init(libusb_context **ctx) {
     *ctx = init_result ? NULL : (libusb_context *)&fake_context;
@@ -128,6 +133,7 @@ static int LIBUSB_CALL test_descriptor(libusb_device *d, struct libusb_device_de
     memset(desc, 0, sizeof(*desc));
     desc->idVendor = wrong_model ? 1 : 0x06b8;
     desc->idProduct = fake_device_count == 1 ? descriptor_product : device->product;
+    desc->iSerialNumber = device->serial ? 1 : 0;
     return descriptor_result;
 }
 static uint8_t LIBUSB_CALL test_bus(libusb_device *d) { return ((fake_usb_device *)d)->bus; }
@@ -137,7 +143,21 @@ static int LIBUSB_CALL test_ports(libusb_device *d, uint8_t *p, int n) {
 }
 static int LIBUSB_CALL test_open(libusb_device *d, libusb_device_handle **h) {
     last_opened_device = d;
+    opened_serial = ((fake_usb_device *)d)->serial;
     *h = open_result ? NULL : (libusb_device_handle *)&fake_handle; return open_result;
+}
+static int LIBUSB_CALL test_string_ascii(libusb_device_handle *h, uint8_t index,
+                                         unsigned char *data, int length) {
+    (void)h;
+    if (index != 1 || !opened_serial)
+        return LIBUSB_ERROR_NOT_FOUND;
+    if (string_result)
+        return string_result;
+    size_t n = strlen(opened_serial);
+    if (n >= (size_t)length)
+        n = (size_t)length - 1;
+    memcpy(data, opened_serial, n);
+    return (int)n;
 }
 static int LIBUSB_CALL test_wrap(libusb_context *ctx, intptr_t fd, libusb_device_handle **h) {
     (void)ctx; wrapped_fd = fd; return test_open((libusb_device *)&fake_devices[0], h);
@@ -393,8 +413,8 @@ static void dt295_model_selection(void) {
     /* A mixed enumeration must preserve the old DT181-local index and path
      * behavior even when a DT295 occurs first in libusb's device list. */
     fake_device_count = 2;
-    fake_devices[0] = (fake_usb_device){0x103b, 1, 9, 4};
-    fake_devices[1] = (fake_usb_device){0x102b, 1, 7, 2};
+    fake_devices[0] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
+    fake_devices[1] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
     list_result = 2;
     assert(!usb_selector_parse("0", &selector));
     assert(!usb_open(&b, &selector, -1, 0));
@@ -411,6 +431,29 @@ static void dt295_model_selection(void) {
     usb_close(b);
     assert(!usb_selector_parse("1", &selector));
     assert(usb_open(&b, &selector, -1, 0) == 3 && !b);
+
+    /* serial: selects exactly the readable descriptor serial and never falls
+     * back to the first matching model; a duplicate stays ambiguous. */
+    fake_devices[0] = (fake_usb_device){0x103b, 1, 9, 4, "serial-A"};
+    fake_devices[1] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
+    assert(!usb_selector_parse("serial:serial-A", &selector));
+    assert(!usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295));
+    assert(last_opened_device == (libusb_device *)&fake_devices[0]);
+    usb_close(b);
+    assert(!usb_selector_parse("serial:Serial-A", &selector));
+    assert(usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295) == 3 && !b);
+    assert(!usb_selector_parse("serial:serial-A", &selector));
+    assert(usb_open(&b, &selector, -1, 0) == 3 && !b);
+    assert(!usb_selector_parse("usb:1-4", &selector));
+    assert(!usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295));
+    assert(last_opened_device == (libusb_device *)&fake_devices[0]);
+    usb_close(b);
+    fake_devices[1] = (fake_usb_device){0x103b, 1, 8, 5, "serial-A"};
+    assert(!usb_selector_parse("serial:serial-A", &selector));
+    assert(usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295) == 3 && !b);
+
+    fake_devices[0] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
+    fake_devices[1] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
 
     char text[4096];
     FILE *capture = tmpfile(); assert(capture);
@@ -437,8 +480,8 @@ static void dt295_model_selection(void) {
     assert(!strstr(text, "PIX-DT181-PU0"));
 
     /* The borrowed-fd path remains model checked, with the fd passed through. */
-    fake_devices[0] = (fake_usb_device){0x102b, 1, 7, 2};
-    fake_devices[1] = (fake_usb_device){0x103b, 1, 9, 4};
+    fake_devices[0] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
+    fake_devices[1] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
     assert(!usb_open(&b, NULL, 42, 0));
     assert(wrapped_fd == 42 && usb_model(b) == USB_MODEL_DT181);
     usb_close(b);
