@@ -196,7 +196,8 @@ TSID配列のスロット番号（0〜7）で、空スロットはエラーに�
 `usb:BUS-PORT[.PORT...]` を受け付けます。`serial:` は接続中の機器のserialと完全一致
 （大文字小文字を保持）で照合し、一致なし・重複時は先頭へfallbackせず失敗します。
 `--list-json` は `enclosures` / `ungrouped_usb_devices` 形式で、1台につき
-`systems: ["ISDB-T","ISDB-S"]`（DT295は `["ISDB-T"]`）の受信機1基を列挙します。
+`systems: ["ISDB-T","ISDB-S"]` の受信機1基を列挙します（DT181・DT295ともT/S両対応。
+現在の受信経路の検証・対応OS範囲は別で、DT295のC経路はmacOS地上波のみ確認済みです）。
 `serial` はdescriptorの文字列またはnull、`serial_unique` は現在の列挙内での
 一意性（true/false、判定不能はnull）です。
 

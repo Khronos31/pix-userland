@@ -67,17 +67,15 @@ int usb_listing_write(FILE *out, const usb_device_info *devices, size_t count, i
                 fprintf(out, "\"%s\"", port);
             else
                 fputs("null", out);
-            fprintf(out, "}],\"candidates\":[],\"receivers\":[{\"receiver\":0,\"device\":1,\"local\":0,"
-                  "\"systems\":%s,\"lnb_15v_supported\":false}]}",
-                    product == 0x103b ? "[\"ISDB-T\"]"
-                                      : "[\"ISDB-T\",\"ISDB-S\"]");
+            fputs("}],\"candidates\":[],\"receivers\":[{\"receiver\":0,\"device\":1,"
+                  "\"local\":0,\"systems\":[\"ISDB-T\",\"ISDB-S\"],"
+                  "\"lnb_15v_supported\":false}]}", out);
         } else {
             fprintf(out,
                     "model=%s usb=06b8:%04x bus=%u address=%u port=%s "
                     "status=ready receivers=1 index=%u\n"
-                    "receiver=0 device=1 local=0 system=%s lnb_15v_supported=false\n",
-                    model, product, d->bus, d->address, have_port ? port : "unknown", d->index,
-                    product == 0x103b ? "ISDB-T" : "ISDB-T/S");
+                    "receiver=0 device=1 local=0 system=ISDB-T/S lnb_15v_supported=false\n",
+                    model, product, d->bus, d->address, have_port ? port : "unknown", d->index);
         }
     }
     if (json)
