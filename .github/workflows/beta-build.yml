@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
       - run: |
           docker run --rm -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
-            apk add --no-cache build-base linux-headers curl bzip2 pkgconf
+            apk add --no-cache build-base linux-headers curl bzip2 pkgconf python3
             sh tests/test_mdev.sh
             CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
           '
