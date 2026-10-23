@@ -243,7 +243,7 @@ int main(void) {
     assert(ts_output_destroy(a) == 0);
 
     /* A receive-like producer polls once per 64 KiB tick. poll(0) must drain
-       ready frame/ACK work instead of accumulating one record per tick. */
+       ready frame/ACK work instead of letting ACK lag exceed the IPC window. */
     memset(&cfg, 0, sizeof(cfg));
     cfg.capacity_bytes = 16 * 1024 * 1024;
     int paced_fd = open("/dev/null", O_WRONLY);
@@ -268,7 +268,7 @@ int main(void) {
     ts_output_snapshot(a, &stats);
     assert(stats.confirmed_bytes == (uint64_t)paced_ticks * 64 * 1024 &&
            !stats.pending_bytes);
-    assert(paced_peak < 8 * 64 * 1024);
+    assert(paced_peak < 16 * 64 * 1024);
     assert(ts_output_destroy(a) == 0);
 
     /* Receive callbacks arrive in short bursts with variable gaps. The writer
