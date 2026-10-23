@@ -101,7 +101,9 @@ if [ -n "$baseline" ]; then test_control_quit "$baseline"; fi
 test_control_signal() {
     "$python" - "$1" <<'PY'
 import os, signal, subprocess, sys, time
-if os.name == 'nt' or sys.platform.startswith(('msys', 'cygwin', 'win')):
+print('signal environment: os.name=%r sys.platform=%r MSYSTEM=%r' %
+      (os.name, sys.platform, os.environ.get('MSYSTEM')))
+if os.name == 'nt' or os.environ.get('MSYSTEM'):
     print('Skipping idle-control POSIX signal smoke test on Windows')
     raise SystemExit(0)
 p = subprocess.Popen([sys.argv[1], '--control'], stdin=subprocess.PIPE,

@@ -6,4 +6,4 @@ candidate archiveにはLinux x86_64/aarch64、macOS arm64、Android aarch64/armv
 
 これはbeta build専用artifactで、GitHub Releaseやtagを作成しません。
 
-Linux Alpine buildではCLI互換test用にPython 3を入れます。Windows/MSYS2/CygwinのPythonではPOSIX signal smoke testを実行しません。
+Linux Alpine buildではCLI互換test用にPython 3を入れます。CLI testは`os.name`、`sys.platform`、`MSYSTEM`を記録し、Windows/MSYS2ではPOSIX signal smoke testだけを実行しません。
