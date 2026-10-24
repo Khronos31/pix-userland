@@ -67,7 +67,7 @@ def main():
                     wait_ready(process, log)
                     status = run([package / "pixctl.exe", "--runtime-dir", runtime,
                                   "--instance", "proof", "status"])
-                    assert json.loads(status.stdout)["product"] == "pix-userland"
+                    assert json.loads(status.stdout)["producer"]["product"] == "pix-userland"
                     if attempt == 0:
                         destination = root / "受信 日本語.ts"
                         run([package / "pix-ts.exe", "--instance", "proof",
@@ -76,6 +76,9 @@ def main():
                         assert destination.read_bytes() == expected, "TS binary output differs"
                     process.stdin.close()
                     assert process.wait(timeout=10) == 0, log.read_text(errors="replace")
+                except BaseException:
+                    print(log.read_text(encoding="utf-8", errors="replace"), flush=True)
+                    raise
                 finally:
                     if process.poll() is None:
                         process.kill()
