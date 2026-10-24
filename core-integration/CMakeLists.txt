@@ -6,9 +6,13 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
 
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/dtv-userland-core.revision" PIX_CORE_PIN LIMIT_COUNT 1)
 set(PIX_CORE_SOURCE_DIR "" CACHE PATH "Local dtv-userland-core source override")
-set(PIX_CORE_REVISION "8c9e7f68aacbfde32790c800aec69a08a1270328" CACHE STRING
-    "dtv-userland-core revision")
+set(PIX_CORE_REVISION "${PIX_CORE_PIN}" CACHE STRING "dtv-userland-core revision")
+set(PIX_CORE_BUNDLED_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/dtv-userland-core")
+if(NOT PIX_CORE_SOURCE_DIR AND EXISTS "${PIX_CORE_BUNDLED_DIR}/CMakeLists.txt")
+    set(PIX_CORE_SOURCE_DIR "${PIX_CORE_BUNDLED_DIR}")
+endif()
 
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
 set(DTV_USERLAND_BUILD_CARD ON CACHE BOOL "Build card ownership engine" FORCE)
@@ -79,7 +83,7 @@ target_include_directories(pix_dt181_receiver_adapter_proof PRIVATE
 target_compile_definitions(pix_dt181_receiver_adapter_proof PRIVATE
     _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL)
 target_compile_options(pix_dt181_receiver_adapter_proof PRIVATE
-    -UNDEBUG -fno-exceptions -fno-rtti)
+    -UNDEBUG "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_dt181_receiver_adapter_proof PRIVATE
     pix_dt181_composition Threads::Threads)
 target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
@@ -124,7 +128,8 @@ target_compile_definitions(pix_dt295_adapter_lifecycle_proof PRIVATE
     _POSIX_C_SOURCE=200809L)
 target_compile_features(pix_dt295_adapter_lifecycle_proof PRIVATE cxx_std_17)
 target_compile_options(pix_dt295_adapter_lifecycle_proof PRIVATE
-    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_dt295_adapter_lifecycle_proof PRIVATE
     pix_dt295_composition Threads::Threads)
 target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE

@@ -1,6 +1,6 @@
 /assets
 /build/
-/pix-ts
+/pix-ts-legacy
 *.o
 *.d
 /tests/test-crypto

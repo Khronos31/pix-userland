@@ -16,6 +16,8 @@ finalize = importlib.util.module_from_spec(_final_spec)
 _final_spec.loader.exec_module(finalize)
 
 SOURCE_LIBUSB_SHA256 = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+CORE_PIN = pack.CORE_LOCK
+SOURCE_ONLY_KEYS = {"repository_commit", "repository_tree", "dtv_userland_core_tree", "libusb_sha256"}
 DT181_ASSET_SIZES = {"fpga.bin": 699673, "bootstrap.bin": 16, "validation.bin": 64}
 
 
@@ -39,8 +41,47 @@ def _expected_metadata(target, commit, with_assets, with_dt295_assets):
         "project": "pix-userland", "version": pack.VERSION, "target": target,
         "commit": commit, "libusb": "1.0.30", "private": True,
         "libusb_linkage": "static", "device_assets": bool(with_assets and target != "source"),
+        "dtv_userland_core_commit": CORE_PIN,
     }
     return expected
+
+
+def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
+    """Check the corresponding-source manifest against the archive and the fixed Core pin."""
+    try:
+        manifest = json.loads(contents[prefix + "source-manifest.json"])
+        sums = contents[prefix + "SHA256SUMS"].decode("ascii")
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Missing or invalid source manifest or SHA256SUMS") from exc
+    pin = contents.get(prefix + "core-integration/dtv-userland-core.revision", b"").decode("ascii").strip()
+    if pin != CORE_PIN:
+        raise ValueError("Source archive Core pin differs from the verifier pin")
+    for key in ("repository_commit", "repository_tree", "dtv_userland_core_commit",
+                "dtv_userland_core_tree", "libusb_sha256"):
+        if manifest.get(key) != metadata.get(key) or not manifest.get(key):
+            raise ValueError(f"Source manifest identity mismatch: {key}")
+    if manifest["dtv_userland_core_commit"] != CORE_PIN or manifest["libusb_sha256"] != libusb_sha256:
+        raise ValueError("Source manifest dependency identity mismatch")
+    listed = manifest.get("files", {})
+    actual = {name[len(prefix):]: data for name, data in contents.items()
+              if name[len(prefix):] not in {"source-manifest.json", "SHA256SUMS"}}
+    if set(listed) != set(actual):
+        raise ValueError("Source manifest file list differs from the archive")
+    for name, data in actual.items():
+        if listed[name] != {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}:
+            raise ValueError(f"Source manifest hash mismatch: {name}")
+    expected_sums = {line.split("  ", 1)[1]: line.split("  ", 1)[0] for line in sums.splitlines()}
+    if set(expected_sums) != set(actual) | {"source-manifest.json"} or any(
+            expected_sums[name] != hashlib.sha256(contents[prefix + name]).hexdigest() for name in expected_sums):
+        raise ValueError("Source SHA256SUMS differs from the archive")
+    for required in ("third_party/dtv-userland-core/LICENSE", "third_party/dtv-userland-core/PROVENANCE.json",
+                     "third_party/dtv-userland-core/CMakeLists.txt", "core-integration/CMakeLists.txt",
+                     "core-integration/pixd.cpp", "core-integration/tools/pixctl.cpp",
+                     "core-integration/tools/pix_ts.cpp"):
+        if required not in listed:
+            raise ValueError(f"Source closure lacks {required}")
+    if not any(name.startswith("third_party/dtv-userland-core/adapters/") and name.endswith("/COPYING") for name in listed):
+        raise ValueError("Source closure lacks the Core adapter COPYING")
 
 
 def verify_release(root=None, with_assets=False, with_dt295_assets=False, commit=None,
@@ -77,7 +118,12 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, commit
             expected_metadata["dt295_assets"] = bool(with_dt295_assets and target == "darwin-arm64")
         elif target != "source" and metadata.get("dt295_assets", False) is not False:
             raise ValueError(f"Unexpected DT295 asset metadata: {target}")
-        if metadata != expected_metadata:
+        compared = metadata
+        if target == "source":
+            if metadata.get("repository_commit") != commit:
+                raise ValueError("Source repository commit mismatch")
+            compared = {k: v for k, v in metadata.items() if k not in SOURCE_ONLY_KEYS}
+        if compared != expected_metadata:
             raise ValueError(f"Release metadata mismatch: {target}")
         assets_prefix = prefix + "assets/"
         asset_names = {member_name for member_name in contents if member_name.startswith(assets_prefix)}
@@ -99,10 +145,21 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, commit
             if prefix + required not in contents:
                 raise ValueError(f"Missing license notice: {target}/{required}")
         if target != "source":
-            executable = "pix-ts.exe" if target == "windows-x64" else "pix-ts"
-            if prefix + executable not in contents:
-                raise ValueError(f"Missing executable: {target}")
+            suffix = ".exe" if target == "windows-x64" else ""
+            for program in pack.PROGRAMS:
+                if prefix + program + suffix not in contents:
+                    raise ValueError(f"Missing executable: {target}/{program}{suffix}")
+            if prefix + "pix-ts-legacy" + suffix in contents:
+                raise ValueError(f"Legacy standalone CLI must not be packaged: {target}")
+            build_info = contents.get(prefix + "build-info.txt", b"").decode("utf-8", "replace")
+            if f"dtv-userland-core {CORE_PIN}" not in build_info:
+                raise ValueError(f"build-info.txt lacks the Core pin: {target}")
+            if prefix + "licenses/dtv-userland-core-LICENSE" not in contents or not any(
+                    name.startswith(prefix + "licenses/dtv-userland-core-") and name.endswith("-COPYING")
+                    for name in contents):
+                raise ValueError(f"Missing Core license notices: {target}")
         else:
+            _verify_source_closure(contents, prefix, metadata, source_libusb_sha256)
             libusb = contents.get(prefix + "third_party/libusb-1.0.30.tar.bz2")
             if libusb is None or hashlib.sha256(libusb).hexdigest() != source_libusb_sha256:
                 raise ValueError("libusb source checksum mismatch")
@@ -120,7 +177,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     validate_flags(args.with_assets, args.with_dt295_assets)
     verify_release(with_assets=args.with_assets, with_dt295_assets=args.with_dt295_assets)
-    print("Verified seven binary packages and matching source; SHA256SUMS created")
+    print("Verified seven binary packages (pixd, pixctl, pix-ts) and matching source closure; SHA256SUMS created")
 
 
 if __name__ == "__main__":

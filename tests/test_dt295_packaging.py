@@ -58,6 +58,64 @@ def read_archive(path):
                 for member in archive.getmembers()}
 
 
+SYNTHETIC_LIBUSB = b"synthetic libusb source"
+
+
+def source_members(commit):
+    """Synthetic corresponding-source closure whose manifest matches its archive."""
+    files = {
+        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "core-integration/CMakeLists.txt": b"project()",
+        "core-integration/dtv-userland-core.revision": verify.CORE_PIN.encode() + b"\n",
+        "core-integration/pixd.cpp": b"pixd", "core-integration/tools/pixctl.cpp": b"pixctl",
+        "core-integration/tools/pix_ts.cpp": b"pix-ts",
+        "third_party/dtv-userland-core/LICENSE": b"mit",
+        "third_party/dtv-userland-core/PROVENANCE.json": b"{}",
+        "third_party/dtv-userland-core/CMakeLists.txt": b"project()",
+        "third_party/dtv-userland-core/adapters/host_ts/COPYING": b"gpl",
+        "third_party/libusb-1.0.30.tar.bz2": SYNTHETIC_LIBUSB,
+    }
+    identity = {
+        "repository_commit": commit, "repository_tree": "b" * 40,
+        "dtv_userland_core_commit": verify.CORE_PIN, "dtv_userland_core_tree": "c" * 40,
+        "libusb_sha256": hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest(),
+    }
+    metadata = {
+        "project": "pix-userland", "version": finalize.pack.VERSION, "target": "source",
+        "commit": commit, "libusb": "1.0.30", "private": True, "libusb_linkage": "static",
+        "device_assets": False, **identity,
+    }
+    files["release-info.json"] = json.dumps(metadata).encode() + b"\n"
+    manifest = {"schema": 1, "kind": "corresponding-source", **identity,
+                "files": {name: {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+                          for name, data in files.items()}}
+    files["source-manifest.json"] = json.dumps(manifest, sort_keys=True).encode() + b"\n"
+    names = sorted(files)
+    files["SHA256SUMS"] = "".join(f"{hashlib.sha256(files[name]).hexdigest()}  {name}\n"
+                                  for name in names).encode()
+    return files
+
+
+def binary_members(target, commit):
+    suffix = ".exe" if target == "windows-x64" else ""
+    members = {
+        "release-info.json": json.dumps({
+            "project": "pix-userland", "version": finalize.pack.VERSION,
+            "target": target, "commit": commit, "libusb": "1.0.30",
+            "private": True, "libusb_linkage": "static", "device_assets": False,
+            "dtv_userland_core_commit": verify.CORE_PIN,
+        }).encode() + b"\n",
+        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "build-info.txt": f"dtv-userland-core {verify.CORE_PIN}\n".encode(),
+        "licenses/dtv-userland-core-LICENSE": b"mit",
+        "licenses/dtv-userland-core-host_ts-COPYING": b"gpl",
+    }
+    members.update({program + suffix: b"binary" for program in verify.pack.PROGRAMS})
+    return members
+
+
 def make_release(tmp_path, monkeypatch):
     root = tmp_path / "release"
     dist = root / "dist"
@@ -69,19 +127,7 @@ def make_release(tmp_path, monkeypatch):
     verify.pack.TARGETS = targets
     commit = "a" * 40
     for target in (*targets, "source"):
-        members = {
-            "release-info.json": json.dumps({
-                "project": "pix-userland", "version": finalize.pack.VERSION,
-                "target": target, "commit": commit, "libusb": "1.0.30",
-                "private": True, "libusb_linkage": "static", "device_assets": False,
-            }).encode() + b"\n",
-            "LICENSE": b"license", "COPYING.libusb": b"copying",
-            "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
-        }
-        if target == "source":
-            members["third_party/libusb-1.0.30.tar.bz2"] = b"synthetic libusb source"
-        else:
-            members["pix-ts.exe" if target == "windows-x64" else "pix-ts"] = b"binary"
+        members = source_members(commit) if target == "source" else binary_members(target, commit)
         write_archive(dist / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz", target, members)
     return root, commit
 
@@ -133,7 +179,7 @@ class TestDT295Packaging(unittest.TestCase):
       self.assertEqual(source_path.read_bytes(), source_before)
 
       verify.verify_release(root=root, with_assets=True, with_dt295_assets=True,
-                          commit=commit, source_libusb_sha256=hashlib.sha256(b"synthetic libusb source").hexdigest())
+                          commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
 
 
   def test_legacy_finalization_sets_false_and_verifies_without_dt295(self):
@@ -147,7 +193,7 @@ class TestDT295Packaging(unittest.TestCase):
         self.assertIs(json.loads(contents[prefix + "release-info.json"])["dt295_assets"], False)
         self.assertFalse(any(name.startswith(prefix + "assets/dt295") for name in contents))
       verify.verify_release(root=root, with_assets=True, commit=commit,
-                          source_libusb_sha256=hashlib.sha256(b"synthetic libusb source").hexdigest())
+                          source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
 
 
   def test_invalid_bundle_is_rejected_before_any_archive_changes(self):
@@ -184,7 +230,75 @@ class TestDT295Packaging(unittest.TestCase):
       })
       with self.assertRaisesRegex(ValueError, "SHA-256"):
         verify.verify_release(root=root, with_assets=True, with_dt295_assets=True,
-                              commit=commit, source_libusb_sha256=hashlib.sha256(b"synthetic libusb source").hexdigest())
+                              commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
+
+
+  def _rewrite(self, root, target, edit):
+    path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz"
+    prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
+    members = {name.removeprefix(prefix): data for name, data in read_archive(path).items()}
+    edit(members)
+    write_archive(path, target, members)
+
+  def _verify(self, root, commit):
+    verify.verify_release(root=root, commit=commit,
+                          source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
+
+  def test_three_program_release_and_source_closure_verify(self):
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root, commit = make_release(Path(temp), self)
+      self._verify(root, commit)
+
+  def test_binary_package_requires_all_three_programs_and_rejects_legacy_cli(self):
+    for removed in ("pixd", "pixctl", "pix-ts"):
+      with self.subTest(removed=removed), __import__("tempfile").TemporaryDirectory() as temp:
+        root, commit = make_release(Path(temp), self)
+        self._rewrite(root, "linux-x86_64", lambda members: members.pop(removed))
+        with self.assertRaisesRegex(ValueError, "Missing executable"):
+          self._verify(root, commit)
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root, commit = make_release(Path(temp), self)
+      self._rewrite(root, "linux-x86_64", lambda members: members.update({"pix-ts-legacy": b"old"}))
+      with self.assertRaisesRegex(ValueError, "Legacy standalone CLI"):
+        self._verify(root, commit)
+
+  def test_binary_package_requires_core_pin_and_notices(self):
+    cases = {
+      "build-info": (lambda members: members.update({"build-info.txt": b"no pin\n"}), "Core pin"),
+      "license": (lambda members: members.pop("licenses/dtv-userland-core-LICENSE"), "Core license"),
+      "copying": (lambda members: members.pop("licenses/dtv-userland-core-host_ts-COPYING"), "Core license"),
+    }
+    for name, (edit, message) in cases.items():
+      with self.subTest(case=name), __import__("tempfile").TemporaryDirectory() as temp:
+        root, commit = make_release(Path(temp), self)
+        self._rewrite(root, "windows-x64", edit)
+        with self.assertRaisesRegex(ValueError, message):
+          self._verify(root, commit)
+
+  def test_source_closure_detects_tampering_and_missing_dependency(self):
+    cases = {
+      "changed-core-file": (lambda members: members.update(
+          {"third_party/dtv-userland-core/LICENSE": b"changed"}), "hash mismatch"),
+      "dropped-core": (lambda members: [members.pop(name) for name in list(members)
+                                        if name.startswith("third_party/dtv-userland-core/")],
+                       "file list differs"),
+      "changed-pin": (lambda members: members.update(
+          {"core-integration/dtv-userland-core.revision": b"0" * 40 + b"\n"}), "Core pin"),
+    }
+    for name, (edit, message) in cases.items():
+      with self.subTest(case=name), __import__("tempfile").TemporaryDirectory() as temp:
+        root, commit = make_release(Path(temp), self)
+        self._rewrite(root, "source", edit)
+        with self.assertRaisesRegex(ValueError, message):
+          self._verify(root, commit)
+
+  def test_source_allowlist_covers_core_integration_and_adapter_sources(self):
+    names = {name for name, _ in load_script("package-release.py", "test_package_release_real").source_files()}
+    for required in ("core-integration/CMakeLists.txt", "core-integration/dtv-userland-core.revision",
+                     "core-integration/pixd.cpp", "core-integration/tools/pixctl.cpp",
+                     "core-integration/tools/pix_ts.cpp", "pix-dt181-receiver-adapter.cpp",
+                     "pix-dt295-receiver-adapter.cpp", "tests/pix_dt295_adapter_lifecycle_proof.cpp"):
+      self.assertIn(required, names)
 
 
 if __name__ == "__main__":

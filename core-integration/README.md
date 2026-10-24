@@ -1,11 +1,13 @@
 # PIX Core integration build
 
-This opt-in build target compiles the existing PIX DT181 and DT295 C backends
-with the shared Core receiver and packet-stream interfaces. The normal `make`
-and `make test` CLI builds remain independent.
+This CMake project builds the released `pixd`, `pixctl` and `pix-ts` programs: the
+existing PIX DT181 and DT295 C backends with the shared Core receiver, daemon,
+control and TS client interfaces. The normal `make` and `make test` build only
+the legacy standalone CLI (`pix-ts-legacy`), which is not distributed.
 
-The build fetches the pinned Core source revision by default. A local source
-tree can be supplied for development:
+The Core revision is pinned in `dtv-userland-core.revision`. The build uses the
+source archive's `third_party/dtv-userland-core` when present and otherwise fetches
+the pinned revision. A local source tree can be supplied for development:
 
 ```sh
 cmake -S core-integration -B build/core-integration \

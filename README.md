@@ -11,6 +11,20 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 
 なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。
 
+## 配布コマンド（pixd / pixctl / pix-ts）
+
+配布アーカイブに入る公開コマンドは次の3つです（Windows 向けパッケージは `.exe`）。
+
+| コマンド | 役割 |
+|---|---|
+| `pixd` | USB 機器を所有する常駐 daemon です。`--models` で対応機種、`--list-json` で接続中の機器を表示します。 |
+| `pixctl` | daemon の状態を調べる制御 CLI です（`list` / `status`）。 |
+| `pix-ts` | daemon から TS を受け取り、標準出力またはファイルへ出力するクライアントです。 |
+
+引数は各コマンドの `--help`、版は `--version` で確認できます。3コマンドは `core-integration/` の CMake でビルドし、固定した [dtv-userland-core](https://github.com/Khronos31/dtv-userland-core) のソース（`core-integration/dtv-userland-core.revision`）から静的リンクします。
+
+従来の standalone C 実装（`make` が生成する `pix-ts-legacy`）は内部診断と既存テスト用で、配布アーカイブには含めません。公開 `pix-ts` とは引数も出力も異なります。以下の「最短の使用例」「CLI 仕様」は従来 standalone CLI の記録であり、コマンド名を `pix-ts-legacy` に読み替えています。
+
 ## 対応機器・動作環境
 
 ### 対応機種
@@ -24,6 +38,9 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 > PIX-DT141、PIX-DT195 など、他の CaptyTV や StationTV シリーズは未対応かつ未検証です。PIX-DT295 の C 経路は開発中で、macOS arm64・地上波 T27・ターゲット0では 15 秒、5 分、5 時間の受信と保存 TS 検査を確認しました。5 時間の TS は 194,054,187 パケット（36,482,187,156 バイト）で、CC、TEI、scramble、invalid、section CRC の各異常は 0 件でした。PID 273 の追加イベントも実機診断で確認しました（機器レジスター readback は未実施）。追加音声の出現・消失境界における部分 PES の Issue #2 は未解決です。DT295 はまだ RC や配布パッケージに含まれません。各 OS の検証範囲と制限は[DT295 の状況](docs/dt295.md)を参照してください。
 
 ### 配布ターゲットと検証状況
+
+> [!NOTE]
+> 下の表と r8 の記述は、従来 standalone CLI を配布した既存 Release の記録です。`pixd` / `pixctl` / `pix-ts` の3コマンド配布は、この表の検証済みという意味にはなりません。3コマンドの配布接続の状況は [docs/releases.md](docs/releases.md) の「3コマンド配布の検証状況」を参照してください。
 
 バイナリは 7 種類のターゲット向けに配布しています。すべて tar.gz 形式で、libusb 1.0.30 を静的リンクしています。Linux 向けバイナリは musl による完全静的リンクとなっており、glibc 環境と musl 環境の両方でそのまま動作します。一般のバイナリ利用者がコンパイラやビルドツールを準備する必要はありません。
 
@@ -83,13 +100,14 @@ DT295用C経路は専用の `dt295.assets` を使います。DT181の3ファイ�
 非公開リポジトリの Release（非 Draft）から、利用環境に合わせたバイナリパッケージ（`pix-userland-*-<target>.tar.gz`）を取得して展開します。ソースアーカイブ（`pix-userland-*-source.tar.gz`）および `SHA256SUMS` も同リリースに配置しています。
 
 配布アーカイブの同梱内容:
-- `pix-ts`（Windows 向けパッケージは `pix-ts.exe`）
+- `pixd`, `pixctl`, `pix-ts`（Windows 向けパッケージは `.exe`）
+- `build-info.txt`（固定した Core のコミットとビルド環境）
 - `assets/`（`fpga.bin`, `bootstrap.bin`, `validation.bin`）
 - `README.md`, `docs/`, `packaging/`, `licenses/`
 
 > [!IMPORTANT]
-> `pix-ts` は実行ファイルの配置場所を基準にした assets の自動探索をしません。既定では**カレントディレクトリ相対**の `./assets` を参照します。
-> 展開したアーカイブルートを作業ディレクトリにしてコマンドを実行するか、別ディレクトリから起動する場合は `--assets /path/to/assets` で assets ディレクトリの絶対パスを必ず指定してください。
+> `pixd` は実行ファイルの配置場所を基準にした assets の自動探索をしません。既定では**カレントディレクトリ相対**の `./assets` を参照します。
+> 展開したアーカイブルートを作業ディレクトリにして `pixd` を起動するか、別ディレクトリから起動する場合は `--assets /path/to/assets` で assets ディレクトリの絶対パスを必ず指定してください。`pixctl` と `pix-ts` は assets を読みません。
 
 ### Linux: USB デバイスのアクセス権限設定
 
@@ -112,23 +130,26 @@ Linux で一般ユーザーが USB チューナーを直接操作するには、
 
 Windows で使用する場合は、Zadig などのユーティリティを使い、接続した PIX-DT181-PU0 のドライバを WinUSB に設定してください。
 
-## 最短の使用例
+## 最短の使用例（従来 standalone CLI）
+
+> [!NOTE]
+> この節と「CLI 仕様」は従来 standalone C CLI の記録です。`make` で生成する `pix-ts-legacy` を使い、配布される `pix-ts`（`--device` / `--instance` を取るクライアント）とは別のコマンドです。
 
 展開したアーカイブルートに移動した状態で実行します。
 
 ### 認識されている対応機器の確認
 ```sh
-./pix-ts --list
+./pix-ts-legacy --list
 ```
 Windows (PowerShell) の場合:
 ```powershell
-.\pix-ts.exe --list
+.\pix-ts-legacy.exe --list
 ```
 
 ### 地上デジタル放送の受信
 物理チャンネル 27ch を 15 秒間受信し、`terrestrial.ts` に保存します。
 ```sh
-./pix-ts -c 27 -t 15 -o terrestrial.ts
+./pix-ts-legacy -c 27 -t 15 -o terrestrial.ts
 ```
 - `-c` にはリモコンの番号やサービス番号ではなく、物理チャンネル（13〜62）を指定します。
 - 物理チャンネル 27ch は今回の東京地域での受信確認例です。お住まいの地域に合わせて適切な物理チャンネル番号を指定してください。
@@ -136,13 +157,13 @@ Windows (PowerShell) の場合:
 
 Windows (PowerShell) での保存例:
 ```powershell
-.\pix-ts.exe -c 27 -t 15 -o terrestrial.ts
+.\pix-ts-legacy.exe -c 27 -t 15 -o terrestrial.ts
 ```
 
 ### BS デジタル放送の受信
 BS 15ch（TSID: `0x40f1`）を 15 秒間受信し、`bs.ts` に保存します。
 ```sh
-./pix-ts -s bs -c 15 --tsid 0x40f1 -t 15 -o bs.ts
+./pix-ts-legacy -s bs -c 15 --tsid 0x40f1 -t 15 -o bs.ts
 ```
 - BS 15ch および TSID `0x40f1` は実際に受信を確認した例です。衛星放送の物理チャンネルや TSID は衛星のトランスポンダ編成等で変化し得るため、最新の放送編成等を確認して指定してください。
 - `--tsid` を省略した場合は、該当のトランスポンダで最初に検出した TS を受信します。
@@ -150,20 +171,20 @@ BS 15ch（TSID: `0x40f1`）を 15 秒間受信し、`bs.ts` に保存します�
 ### 110 度 CS デジタル放送の受信
 CS 22ch（TSID: `0x7160`）を 15 秒間受信し、`cs.ts` に保存します。
 ```sh
-./pix-ts -s cs -c 22 --tsid 0x7160 -t 15 -o cs.ts
+./pix-ts-legacy -s cs -c 22 --tsid 0x7160 -t 15 -o cs.ts
 ```
 - CS 22ch および TSID `0x7160` も実際に受信を確認した例です。BS と同様に放送編成等を確認して指定してください。
 
 ### 別のディレクトリから実行する場合
 作業ディレクトリがアーカイブルート以外の場合は、`--assets` でディレクトリのパスを明示します。
 ```sh
-/path/to/pix-ts --assets /path/to/assets -c 27 -t 15 -o terrestrial.ts
+/path/to/pix-ts-legacy --assets /path/to/assets -c 27 -t 15 -o terrestrial.ts
 ```
 
 ### 標準出力と標準エラー出力
 `-o` を省略するか `-o -` を指定すると、標準出力へ TS パケットを出力します。診断メッセージや終了時の統計情報はすべて標準エラー出力へ送られます。
 ```sh
-./pix-ts -s bs -c 15 --tsid 0x40f1 -t 30 > capture.ts 2> capture.log
+./pix-ts-legacy -s bs -c 15 --tsid 0x40f1 -t 30 > capture.ts 2> capture.log
 ```
 - `-t` を省略した場合は継続して受信し、SIGINT（Ctrl+C）または SIGTERM で停止します。
 - Windows の PowerShell ではバージョンによってリダイレクト時にバイナリデータが破損することがあるため、ファイル保存には `-o` オプションを使用してください。
@@ -172,16 +193,16 @@ CS 22ch（TSID: `0x7160`）を 15 秒間受信し、`cs.ts` に保存します�
 Termux 環境では `termux-usb` でデバイスのファイルディスクリプタを取得し、引数として渡して受信します。実行には `Termux:API` アプリおよび `termux-api` パッケージが必要です。
 ```sh
 # /dev/bus/usb/001/002 は実際の USB デバイスノードに合わせて変更してください
-termux-usb -r -e './pix-ts --assets ./assets -c 27 -t 15 -o terrestrial.ts' /dev/bus/usb/001/002
+termux-usb -r -e './pix-ts-legacy --assets ./assets -c 27 -t 15 -o terrestrial.ts' /dev/bus/usb/001/002
 ```
 
 ### 取得した TS の検査
 取得した TS ファイル（188 バイトパケット）の構造やパケット整合性を検査します（チューナーの接続や assets は不要です）。
 ```sh
-./pix-ts --inspect capture.ts
+./pix-ts-legacy --inspect capture.ts
 ```
 
-## CLI 仕様
+## CLI 仕様（従来 standalone CLI）
 
 ### mirakc / siano-ts 互換の使用方法
 
@@ -207,7 +228,7 @@ mirakc設定例（展開先とUSB位置は実際の環境に置換）:
 tuners:
   - name: pix-dt181
     types: [GR, BS, CS]
-    command: /opt/pix-userland/pix-ts --assets /opt/pix-userland/assets --device 1-2 --channel {{{channel}}} --time {{{duration}}} {{{extra_args}}}
+    command: /opt/pix-userland/pix-ts-legacy --assets /opt/pix-userland/assets --device 1-2 --channel {{{channel}}} --time {{{duration}}} {{{extra_args}}}
     decoded: true
 ```
 
@@ -227,12 +248,12 @@ service IDによる分離はmirakc側で行います。本機内のB-CAS処理�
 - 地上波は13〜62ch、LNB電源とソフトB25復号は非対応です。
 - ログ文言・統計JSONはPIX固有です。終了コードはsiano/px4の共通分類に合わせています。
 - PIDフィルターは復号・全入力検査後に適用し、統計のpacketsはフィルター前の数です。
-- `--fail-on-drop` は互換引数です。pix-tsは常にキュー欠落をエラー終了させます。
+- `--fail-on-drop` は互換引数です。pix-ts-legacyは常にキュー欠落をエラー終了させます。
 
 
 ### 書式
 ```text
-pix-ts --system terrestrial|bs|cs --channel N [options]
+pix-ts-legacy --system terrestrial|bs|cs --channel N [options]
 ```
 
 ### オプション一覧
@@ -274,7 +295,7 @@ pix-ts --system terrestrial|bs|cs --channel N [options]
 正常なSIGINT/SIGTERM停止は初期化中も0です。ただし停止処理で新たな障害を検知した場合は該当コードになります。
 最初の障害分類を保持し、後続の終了処理の障害で置き換えません。
 px4のコード6はIPCに固有で、本ツールには該当する経路がありません。
-sianoには汎用エラー1もありますが、pix-tsでは原因に応じて上記へ分類します。
+sianoには汎用エラー1もありますが、pix-ts-legacyでは原因に応じて上記へ分類します。
 
 地上波53〜62chの番号・周波数変換は対応していますが、この帯域の実機受信は未検証です。
 以前の52ch上限はソフトウェアの入力検証であり、ハード制約を示す根拠ではありません。
@@ -295,9 +316,21 @@ sianoには汎用エラー1もありますが、pix-tsでは原因に応じて�
 
 配布バイナリを利用する場合はビルド環境の準備は不要です。ソースからビルドする場合の手順を以下に示します。
 
-### 通常ビルド（動的リンク）
+### 3コマンドのビルド（pixd / pixctl / pix-ts）
 
-C11 対応コンパイラ、make、pkg-config、および libusb 開発ヘッダー・ライブラリが必要です。
+C++17 対応コンパイラ、CMake 3.16 以上、pkg-config、libusb 開発ヘッダー・ライブラリが必要です。固定した Core のソースは、ソースアーカイブでは `third_party/dtv-userland-core/` から、通常の checkout では GitHub から取得します。
+
+```sh
+cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/cmake --parallel 4
+ctest --test-dir build/cmake --output-on-failure
+```
+
+`pixd`、`pixctl`、`pix-ts` が `build/cmake/` に生成されます。ローカルの Core を使う場合は `-DPIX_CORE_SOURCE_DIR=/path/to/dtv-userland-core` を指定します（固定コミットとの一致は確認されません）。
+
+### 従来 standalone CLI のビルド（内部診断・テスト用）
+
+C11 対応コンパイラ、make、pkg-config、および libusb 開発ヘッダー・ライブラリが必要です。`make` が生成するのは `pix-ts-legacy` で、配布アーカイブには含まれません。
 
 ```sh
 # macOS (Homebrew)
@@ -314,9 +347,9 @@ make test
 
 ### ポータブルビルド（静的リンクスクリプト）
 
-各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。
+各種プラットフォーム向けに、libusb 1.0.30 を静的リンクした `pixd` / `pixctl` / `pix-ts` を `build/` に生成するスクリプトを用意しています。従来 standalone CLI のテスト（`make test`）も同時に実行しますが、その成果物は `build/` に出力しません。CMake が必要です（Alpine では `cmake git python3` も追加）。
 `tools/build-portable.sh` は、source アーカイブに同梱されている `third_party/libusb-1.0.30.tar.bz2` があればそれを優先して使用し、無ければ自動でダウンロードします。いずれの場合も公式未改変ソースの SHA-256 チェックサムを照合します。
-なお、改変した libusb をリンクする場合は、Makefile の `USB_CFLAGS` / `USB_LIBS` を指定して通常ビルドを行います（詳細は [docs/releases.md](docs/releases.md) を参照してください）。
+なお、改変した libusb をリンクする場合は、改変した libusb のソースアーカイブを `LIBUSB_SOURCE_TARBALL` と `LIBUSB_ALLOW_MODIFIED=1` で指定して同じスクリプトを実行します（詳細は [docs/releases.md](docs/releases.md) を参照してください）。
 
 ```sh
 # ネイティブ環境（Linux: glibc 動的 + libusb 静的、macOS: Apple 標準ライブラリ動的 + libusb 静的）
@@ -333,11 +366,14 @@ ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-por
 
 ### Windows でのビルド
 
-MSYS2 の MINGW64 環境でビルドします。環境内に gcc, make, curl, p7zip 等のツールが必要です。
+MSYS2 の MINGW64 環境でビルドします。環境内に gcc, make, curl, p7zip, CMake, pkgconf, python 等のツールが必要です。
 ```sh
 ./tools/build-windows.sh
 ```
-libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pix-ts.exe`）を生成します。
+libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe` / `pixctl.exe` / `pix-ts.exe`）を生成する手順です。
+
+> [!WARNING]
+> 現在の `pixd` / `pix-ts` の製品コードは POSIX 前提（`pthread`、`sigaction`、`O_CLOEXEC` など）で、MinGW-w64 でのコンパイルが通りません。Windows x64 の3コマンド配布は、製品コードの Windows 対応が済むまで生成できません。詳細は [docs/releases.md](docs/releases.md) を参照してください。
 
 ## 関連ドキュメント
 
@@ -352,6 +388,7 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
 - 本プロジェクトの自作ソースコードには **MIT License** を適用しています（本リポジトリ自体は非公開です）。
 - プロジェクト全体を一括して MIT License と表記することはできません。静的リンクおよび同梱される各コンポーネントには、それぞれのライセンスが適用されます。
   - **libusb**: LGPL-2.1-or-later（詳細は `COPYING.libusb` を参照してください）
+  - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
 - 手動同梱の source アーカイブ（`pix-userland-*-source.tar.gz`）には、再ビルド用のアプリソースコードやスクリプトに加え、静的リンクに対応した libusb のソースコードを同梱しています（GitHub が自動生成する Source code アーカイブとは内容が異なります）。
