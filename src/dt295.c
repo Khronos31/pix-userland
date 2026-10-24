@@ -983,6 +983,19 @@ int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en)
     if (tuner_initialize(d) || sat_initialize(d) || sat_terrestrial_sleep(d) ||
         sat_tune(d, if_hz, tsid))
         return fail(d, e, en, "satellite tune failed; no command was retried");
+    if (tsid >= 0) {
+        dt295_satellite_state state = {0};
+        const uint64_t end = now_ms(d) + 3000;
+        for (;;) {
+            if (dt295_satellite_status(d, &state, e, en))
+                return -1;
+            if (state.locked && state.selected_tsid == (uint16_t)tsid)
+                break;
+            if (now_ms(d) >= end)
+                return fail(d, e, en, "satellite did not lock the target TSID");
+            sleep_ms(d, 100);
+        }
+    }
     d->tuned = 1;
     seterr(e, en, "");
     return 0;
