@@ -20,6 +20,7 @@ int dt295_actual_fixture_interrupt(uint8_t, unsigned char *, int, int *);
 void dt295_actual_fixture_bootstrap(uint8_t packets[3][188]);
 void dt295_actual_fixture_recording_packet(uint8_t packet[188], unsigned continuity);
 void dt295_actual_fixture_encrypt(uint8_t packet[188]);
+uint16_t dt295_actual_fixture_satellite_tsid(void);
 }
 
 namespace {
@@ -97,14 +98,15 @@ bool read_ts(pix::capture::dt295::ReceiverAdapter& adapter, const Attachment& at
     return total >= minimum;
 }
 
-Attachment attachment_for(std::uint64_t id)
+Attachment attachment_for(std::uint64_t id,
+                          ReceiverSystem system = ReceiverSystem::terrestrial)
 {
     Attachment attachment{};
     attachment.owner_client_id = 7U;
     attachment.lease_id = id;
     attachment.attachment_id = id;
     attachment.receiver = 0U;
-    attachment.system = ReceiverSystem::terrestrial;
+    attachment.system = system;
     attachment.token[0] = static_cast<std::uint8_t>(id);
     return attachment;
 }
@@ -246,10 +248,27 @@ int main()
     CHECK_RESULT(adapter.detach(second), "redetach");
     drain_attachment(adapter, second);
     CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "restop_capture");
+
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
+                 "tune BS");
+    CHECK_RESULT(adapter.select_satellite_tsid(0U, 16400U, 1000U), "select BS TSID");
+    auto locked = adapter.is_locked(0U, ReceiverSystem::satellite);
+    CHECK(locked && locked.value());
+    CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
+    Attachment satellite = attachment_for(3U, ReceiverSystem::satellite);
+    CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::satellite), "start satellite");
+    CHECK_RESULT(adapter.attach(satellite), "attach satellite");
+    CHECK(read_ts(adapter, satellite, 188U * 8U));
+    CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::satellite), "stop satellite");
+    CHECK_RESULT(adapter.detach(satellite), "detach satellite");
+    drain_attachment(adapter, satellite);
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "return T13");
+
     CHECK_RESULT(adapter.close(0U), "close");
     CHECK_RESULT(adapter.shutdown(), "shutdown");
 
-    CHECK(g_stream.generations >= 2U);
+    CHECK(g_stream.generations >= 4U);
     dt295_actual_fixture_close();
     std::fprintf(stderr, "DT295 adapter lifecycle: open->tune->start->TS->stop->retune OK\n");
     return 0;

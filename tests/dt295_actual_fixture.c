@@ -16,6 +16,46 @@ static unsigned pipeline_route_writes;
 static unsigned pipeline_pid273_route_writes;
 static int pipeline_fail_route_once;
 static unsigned pipeline_route_failures;
+static uint8_t pipeline_sat_regs[256];
+static uint8_t pipeline_sat_pending;
+static int pipeline_sat_rf_read;
+
+static void pipeline_satellite_write(uint8_t sub)
+{
+    const uint8_t *p = pipeline_fake.mem + 0x800c0;
+    if (p[0] == 0xfe && p[1] == 0xc1) {
+        pipeline_sat_rf_read = 1;
+    } else if (p[0] == 0xfe && p[1] == 0xc0) {
+        if (sub == 0 && p[2] == 0x11)
+            pipeline_sat_regs[0x11] = p[4];
+    } else if (sub == 0) {
+        pipeline_sat_regs[p[0]] = p[1];
+        if (p[0] == 0x8f)
+            pipeline_sat_regs[0xe6] = p[1];
+        if (p[0] == 0x90)
+            pipeline_sat_regs[0xe7] = p[1];
+    } else {
+        pipeline_sat_pending = p[0];
+        pipeline_sat_rf_read = 0;
+    }
+}
+
+static void pipeline_satellite_read(uint8_t sub, uint16_t length)
+{
+    uint8_t *reply = pipeline_fake.mem + 0x823be + 2;
+    const unsigned n = length & 255u;
+    memset(reply, 0, 66);
+    if (pipeline_sat_rf_read) {
+        if (n > 1)
+            reply[1] = 0x60;
+        pipeline_sat_rf_read = 0;
+        return;
+    }
+    if (sub != 1 && sub != 3)
+        return;
+    for (unsigned i = 0; i < n; i++)
+        reply[i] = pipeline_sat_regs[(uint8_t)(pipeline_sat_pending + i)];
+}
 
 int dt295_actual_fixture_open(const char *assets_path)
 {
@@ -28,6 +68,9 @@ int dt295_actual_fixture_open(const char *assets_path)
     if (!pipeline_fake.mem)
         return -1;
     pipeline_fake.now = 1000;
+    memset(pipeline_sat_regs, 0, sizeof(pipeline_sat_regs));
+    pipeline_sat_pending = 0;
+    pipeline_sat_rf_read = 0;
     wr16(pipeline_fake.mem + 0x82008, 0x10);
     pipeline_fake.mem[0x822ac] = 0x30;
     create_assets(assets_path, &pipeline_fake);
@@ -59,8 +102,13 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
                 pending_route_pid);
         return LIBUSB_ERROR_IO;
     }
+    const int satellite = request == 0xb9 && length == 4 && data[0] == 9 && data[2] == 0x22;
+    if (satellite)
+        pipeline_satellite_write(data[1]);
     const int rc = control(&pipeline_fake, request_type, request, value, index, data,
                            length, 500, &actual);
+    if (satellite)
+        pipeline_satellite_read(data[1], (uint16_t)(data[2] << 8 | data[3]));
     if (!rc && (request == 0xb8 || request == 0xb9) && length == 4 &&
         data[0] == 5 && data[1] == 1) {
         ++pipeline_route_writes;
@@ -122,6 +170,14 @@ void dt295_actual_fixture_advance(uint64_t milliseconds)
     pthread_mutex_lock(&pipeline_mutex);
     pipeline_fake.now += milliseconds;
     pthread_mutex_unlock(&pipeline_mutex);
+}
+
+uint16_t dt295_actual_fixture_satellite_tsid(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const uint16_t value = (uint16_t)(pipeline_sat_regs[0xe6] << 8 | pipeline_sat_regs[0xe7]);
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
 }
 
 unsigned dt295_actual_fixture_key_requests(void)
