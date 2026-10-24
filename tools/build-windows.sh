@@ -31,7 +31,12 @@ fetch() {
 }
 fetch "$llvm_archive" "https://github.com/mstorsjo/llvm-mingw/releases/download/$llvm_version/$llvm_name.tar.xz"
 fetch "$usb_archive" https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2
-printf '%s  %s\n' "$llvm_sha" "$llvm_archive" "$usb_sha" "$usb_archive" | sha256sum -c -
+printf '%s  %s\n' "$llvm_sha" "$llvm_archive" | sha256sum -c -
+usb_actual=$(sha256sum "$usb_archive" | awk '{print $1}')
+if [[ "$usb_actual" != "$usb_sha" ]] && { [[ -z "${LIBUSB_SOURCE_ARCHIVE:-}" ]] || [[ "${LIBUSB_ALLOW_MODIFIED:-0}" != 1 ]]; }; then
+    echo 'libusb SHA-256 mismatch; modified source requires LIBUSB_SOURCE_ARCHIVE and LIBUSB_ALLOW_MODIFIED=1' >&2
+    exit 1
+fi
 tar -xf "$llvm_archive" -C "$build"
 chain=$build/$llvm_name
 export PATH="$chain/bin:$PATH"
@@ -86,8 +91,13 @@ cmake -S "$root/core-integration" -B "$build/cmake" \
     "${source_args[@]}"
 cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 cp "$build/bin/pixd.exe" "$build/bin/pixctl.exe" "$build/bin/pix-ts.exe" "$out/"
+if [[ "${PIX_WINDOWS_PROOFS:-0}" == 1 ]]; then
+    cmake --build "$build/cmake" --target pixd_fixture pix_windows_os_thread_proof --parallel "${JOBS:-4}"
+    mkdir -p "$out/proofs"
+    cp "$build/bin/pixd_fixture.exe" "$build/bin/pix_windows_os_thread_proof.exe" "$out/proofs/"
+fi
 {
-    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\n' "$version" "$usb_sha"
+    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\n' "$version" "$usb_actual"
     printf 'dtv-userland-core %s\nllvm-mingw %s UCRT\nSHA256 %s\n' "$core_pin" "$llvm_version" "$llvm_sha"
     "$chain/bin/x86_64-w64-mingw32-clang" --version | head -n 1
     for program in pixd.exe pixctl.exe pix-ts.exe; do

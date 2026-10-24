@@ -10,6 +10,7 @@
 #ifdef _WIN32
 #include <px4/windows_tuner_nonce.h>
 #include "px4_windows_args.h"
+#include <dtv/userland/host_facade/windows_stdin.h>
 #else
 #include <px4/posix_tuner_nonce.h>
 #endif
@@ -38,6 +39,9 @@ struct Arguments final {
     std::string runtime_directory;
     std::string assets = "assets";
     bool group = false;
+#ifdef _WIN32
+    bool exit_on_stdin_eof = false;
+#endif
 };
 
 void usage(FILE* output) noexcept
@@ -47,7 +51,11 @@ void usage(FILE* output) noexcept
         "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
-        "       pixd --list-json\n");
+        "       pixd --list-json\n"
+#ifdef _WIN32
+        "       Windows: --exit-on-stdin-eof stops when parent stdin closes\n"
+#endif
+        );
 }
 
 bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
@@ -56,6 +64,13 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
+#ifdef _WIN32
+        if (option == "--exit-on-stdin-eof") {
+            if (out.exit_on_stdin_eof) return false;
+            out.exit_on_stdin_eof = true;
+            continue;
+        }
+#endif
         if (option == "--group") {
             if (out.group) return false;
             out.group = true;
@@ -337,6 +352,12 @@ int run(int argc, char** argv)
         return fail(published.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
+#ifdef _WIN32
+    px4::userland::cli::StdinEofMonitor eof_monitor;
+    if (arguments.exit_on_stdin_eof &&
+        !eof_monitor.start(::GetStdHandle(STD_INPUT_HANDLE),
+            [](void*) noexcept { px4::userland::px4d::request_stop(); }, nullptr)) return 70;
+#endif
     std::fprintf(stderr, "pixd ready: model=%s endpoint=%s\n",
                  model_name(located.value().model),
                  config.runtime_directory.empty() ? "Core-selected" : config.runtime_directory.c_str());
@@ -354,6 +375,9 @@ int run(int argc, char** argv)
     const auto closed = context->close(Timeout{PIX_RUNTIME_TEST_CLOSE_BUDGET_MS});
 #else
     const auto closed = context->close(Timeout{15000U});
+#endif
+#ifdef _WIN32
+    eof_monitor.stop();
 #endif
 #ifdef PIX_RUNTIME_TEST_CLOSE_BUDGET_MS
     if (closed && closed.value() != CloseState::quiesced)
