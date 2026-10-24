@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* Offline DT295 incremental adapter lifecycle proof. */
 #include "pix-dt295-receiver-adapter.h"
 
