@@ -17,7 +17,7 @@ fi
 # Extract only this target: older p7zip cannot decode unrelated ARM64 BCJ members.
 7z x "$build/libusb.7z" -o"$build/usb" 'include/*' 'MinGW64/*' >/dev/null
 mkdir "$build/app"
-cp -R "$root/src" "$root/include" "$root/tests" "$root/tools" "$root/Makefile" "$build/app/"
+sh "$root/tools/copy-legacy-test-source.sh" "$root" "$build/app"
 cd "$build/app"
 make clean
 make -j4 test CC=gcc PKG_CONFIG=false USB_CFLAGS="-I$build/usb/include" USB_LIBS="$build/usb/MinGW64/static/libusb-1.0.a" OS_LIBS="-lbcrypt -lsetupapi -luser32 -ladvapi32 -lole32" LDFLAGS=-static-libgcc CFLAGS='-O2 -g -Werror'
