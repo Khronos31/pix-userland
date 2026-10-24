@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: MIT
 #include "pix_runtime.h"
 
 #include <dtv/userland/host_listener_context/enclosure_context.h>
@@ -32,13 +32,14 @@ struct Arguments final {
     std::string instance;
     std::string runtime_directory;
     std::string assets = "assets";
+    bool group = false;
 };
 
 void usage(FILE* output) noexcept
 {
     std::fprintf(output,
         "usage: pixd --device serial:SELECTOR|usb:SELECTOR [--assets DIR] "
-        "[--runtime-dir DIR] [--instance TOKEN] [-h|--help]\n"
+        "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n");
@@ -50,6 +51,11 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
+        if (option == "--group") {
+            if (out.group) return false;
+            out.group = true;
+            continue;
+        }
         if (i + 1 >= argc) return false;
         const char* value = argv[++i];
         if (option == "--device" && !device) { out.device = value; device = true; }
@@ -58,8 +64,9 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
         else if (option == "--assets" && !assets) { out.assets = value; assets = true; }
         else return false;
     }
-    return device && (out.device.rfind("serial:", 0U) == 0U ||
-                      out.device.rfind("usb:", 0U) == 0U);
+    return device && (!out.group || (runtime && !out.runtime_directory.empty())) &&
+           (out.device.rfind("serial:", 0U) == 0U ||
+            out.device.rfind("usb:", 0U) == 0U);
 }
 
 int write_models()
@@ -74,8 +81,6 @@ int write_models()
 
 
 // Passive USB observation is separate from the actual receiver runtime.
-// DT295 may be physically identified by USB serial even before its existing
-// capture backend is connected to the public pixd daemon.
 int write_discovery_json()
 {
     namespace w = dtv::userland::wire;
@@ -118,8 +123,8 @@ int write_discovery_json()
         if (libusb_get_device_descriptor(usb, &desc) != LIBUSB_SUCCESS) continue;
         if (desc.idVendor != 0x06b8U ||
             (desc.idProduct != 0x102bU && desc.idProduct != 0x103bU)) continue;
-        const bool public_runtime = desc.idProduct == 0x102bU;
-        const char* model = public_runtime ? "PIX-DT181-PU0" : "PIX-DT295";
+        const bool dt181 = desc.idProduct == 0x102bU;
+        const char* model = dt181 ? "PIX-DT181-PU0" : "PIX-DT295";
         w::DiscoveryDevice device{};
         device.device = static_cast<std::uint16_t>(devices.size());
         device.vid = desc.idVendor;
@@ -176,17 +181,15 @@ int write_discovery_json()
             ungrouped.push_back(observation);
             continue;
         }
-        if (public_runtime) {
-            w::DiscoveryReceiver receiver{};
-            receiver.receiver = 0U;
-            receiver.device = device.device;
-            receiver.local = 0U;
-            receiver.systems.mask = 0x03U;
-            receivers.push_back(receiver);
-            device.receivers_known = true;
-            device.receiver_count = 1U;
-            device.receivers = &receivers.back();
-        }
+        w::DiscoveryReceiver receiver{};
+        receiver.receiver = 0U;
+        receiver.device = device.device;
+        receiver.local = 0U;
+        receiver.systems.mask = dt181 ? 0x03U : 0x01U;
+        receivers.push_back(receiver);
+        device.receivers_known = true;
+        device.receiver_count = 1U;
+        device.receivers = &receivers.back();
         devices.push_back(device);
         w::DiscoveryEnclosure enclosure{};
         enclosure.enclosure = static_cast<std::uint16_t>(enclosures.size());
@@ -197,9 +200,8 @@ int write_discovery_json()
             return 70;
         }
         enclosure.serial = device.serial;
-        enclosure.status = public_runtime ? w::DiscoveryEnclosureStatus::ready
-                                          : w::DiscoveryEnclosureStatus::unknown;
-        enclosure.readers_known = public_runtime;
+        enclosure.status = w::DiscoveryEnclosureStatus::ready;
+        enclosure.readers_known = true;
         enclosure.device_count = 1U;
         enclosure.devices = &devices.back();
         enclosures.push_back(enclosure);
@@ -290,11 +292,13 @@ int main(int argc, char** argv)
     const auto epoch = nonce_source->generate();
     if (!epoch) return fail(epoch.error());
     dtv::userland::wire::ListResponse list{};
-    const auto listed = pix::runtime::build_list(located.value(), "0.0.0-dev",
+    const auto listed = pix::runtime::build_list(located.value(), PIX_RUNTIME_VERSION,
                                                   epoch.value(), list);
     if (!listed) return fail(listed.error());
     ContextConfig config{};
     config.runtime_directory = arguments.runtime_directory;
+    if (arguments.group)
+        config.access = dtv::userland::host_runtime::EndpointAccess::shared_group;
     config.product = "pix-userland";
     config.instance = instance;
     config.server.epoch = epoch.value();

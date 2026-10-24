@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #include <libusb.h>
 #include "pixy.h"
 #include "pix-runtime-vectors.h"
@@ -12,9 +12,10 @@
 #include <time.h>
 #include <unistd.h>
 
-static int device_storage;
+static int device_storage[2];
 static int handle_storage;
-static libusb_device *device_list[2];
+static libusb_device *device_list[3];
+static unsigned opened_device;
 static unsigned release_count;
 static unsigned close_count;
 static unsigned shutdown_count;
@@ -25,14 +26,20 @@ unsigned pix_test_release_count(void) { return release_count; }
 unsigned pix_test_close_count(void) { return close_count; }
 unsigned pix_test_shutdown_count(void) { return shutdown_count; }
 unsigned pix_test_usb_completions(void);
+unsigned pix_test_usb_device_index(libusb_device *device)
+{ return device == (libusb_device *)&device_storage[1] ? 1U : 0U; }
+void pix_test_usb_set_opened_device(libusb_device *device)
+{ opened_device = pix_test_usb_device_index(device); }
+unsigned pix_test_usb_opened_device(void) { return opened_device; }
 
 ssize_t LIBUSB_CALL libusb_get_device_list(libusb_context *context, libusb_device ***list)
 {
     (void)context;
-    device_list[0] = (libusb_device *)&device_storage;
-    device_list[1] = NULL;
+    device_list[0] = (libusb_device *)&device_storage[0];
+    device_list[1] = (libusb_device *)&device_storage[1];
+    device_list[2] = NULL;
     *list = device_list;
-    return 1;
+    return 2;
 }
 
 void LIBUSB_CALL libusb_free_device_list(libusb_device **list, int unref_devices)
@@ -46,17 +53,29 @@ uint8_t LIBUSB_CALL libusb_get_device_address(libusb_device *device)
 
 int LIBUSB_CALL libusb_get_port_numbers(libusb_device *device, uint8_t *ports, int length)
 {
-    (void)device;
     if (length < 1) return LIBUSB_ERROR_OVERFLOW;
-    ports[0] = 2U;
+    ports[0] = pix_test_usb_device_index(device) == 0U ? 2U : 3U;
     return 1;
 }
 
 int LIBUSB_CALL libusb_open(libusb_device *device, libusb_device_handle **handle)
 {
-    (void)device;
+    pix_test_usb_set_opened_device(device);
     *handle = (libusb_device_handle *)&handle_storage;
     return LIBUSB_SUCCESS;
+}
+
+int LIBUSB_CALL libusb_get_string_descriptor_ascii(libusb_device_handle *handle,
+                                                    uint8_t descriptor_index,
+                                                    unsigned char *data, int length)
+{
+    static const unsigned char serials[2][10] = {
+        "PIXDT18101", "PIXDT29501"
+    };
+    (void)handle;
+    if (descriptor_index != 1U || length < 10) return LIBUSB_ERROR_INVALID_PARAM;
+    memcpy(data, serials[opened_device], 10U);
+    return 10;
 }
 
 int __wrap_pixy_power(pixy *device, const uint8_t *firmware, size_t length)

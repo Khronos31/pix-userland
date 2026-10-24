@@ -199,7 +199,8 @@ target_include_directories(pix_public_runtime_proof PRIVATE
     tests "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests"
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_compile_definitions(pix_public_runtime_proof PRIVATE
-    _POSIX_C_SOURCE=200809L PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
     PIXTS_PATH="$<TARGET_FILE:pix-ts>" PIXCTL_PATH="$<TARGET_FILE:pixctl>")
 target_compile_features(pix_public_runtime_proof PRIVATE cxx_std_17)
 target_link_libraries(pix_public_runtime_proof PRIVATE pix_product_runtime Threads::Threads)

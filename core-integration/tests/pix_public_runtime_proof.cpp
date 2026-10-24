@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #include <cstdint>
 #include "pix-runtime-vectors.h"
 #include "pix_runtime.h"
@@ -36,6 +36,9 @@ namespace {
 
 #ifndef PIXCTL_PATH
 #error "PIXCTL_PATH must name the built pixctl client"
+#endif
+#ifndef PIX_RUNTIME_VERSION
+#error "PIX_RUNTIME_VERSION must be provided by CMake"
 #endif
 
 bool write_file(const std::string& path, const std::uint8_t* bytes, std::size_t length)
@@ -107,11 +110,13 @@ std::vector<std::uint8_t> read_file(const std::string& path)
     return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), {});
 }
 
-int run_status(const std::string& runtime_dir, std::string& output, bool log_argv = true)
+int run_status(const std::string& runtime_dir, std::string& output,
+               const char* selector = "usb:1-2", bool group = false,
+               bool log_argv = true)
 {
     if (log_argv) {
-        std::fprintf(stderr, "PROOF status_argv=%s --runtime-dir %s --device usb:1-2 status\n",
-                     PIXCTL_PATH, runtime_dir.c_str());
+        std::fprintf(stderr, "PROOF status_argv=%s --runtime-dir %s --device %s status\n",
+                     PIXCTL_PATH, runtime_dir.c_str(), selector);
     }
     int output_pipe[2];
     if (::pipe(output_pipe) != 0) return -1;
@@ -121,8 +126,11 @@ int run_status(const std::string& runtime_dir, std::string& output, bool log_arg
         if (::dup2(output_pipe[1], STDOUT_FILENO) < 0) _exit(127);
         (void)::close(output_pipe[1]);
         const char* argv[] = {PIXCTL_PATH, "--runtime-dir", runtime_dir.c_str(),
-                              "--device", "usb:1-2",
-                              "status", nullptr};
+                              "--device", selector, "status", nullptr};
+        const char* grouped[] = {PIXCTL_PATH, "--runtime-dir", runtime_dir.c_str(),
+                                 "--device", selector, "--group", "status", nullptr};
+        if (group)
+            ::execv(PIXCTL_PATH, const_cast<char* const*>(grouped));
         ::execv(PIXCTL_PATH, const_cast<char* const*>(argv));
         _exit(127);
     }
@@ -154,7 +162,8 @@ bool check_status(std::string_view json, const char* receiver_state, bool leased
     return json.size() > 2U && json.front() == '{' && json.back() == '\n' &&
            json.find("\"name\":\"userland.status\"") != std::string_view::npos &&
            json.find("\"product\":\"pix-userland\"") != std::string_view::npos &&
-           json.find("\"version\":\"0.0.0-dev\"") != std::string_view::npos &&
+           json.find(std::string("\"version\":\"") + PIX_RUNTIME_VERSION + "\"") !=
+               std::string_view::npos &&
            json.find("\"instance\":\"") != std::string_view::npos &&
            json.find("\"descriptor\":{\"receiver\":0") != std::string_view::npos &&
            json.find(std::string("\"state\":\"") + receiver_state + "\"") !=
@@ -186,7 +195,7 @@ bool wait_streaming_status(const std::string& runtime_dir, const std::string& ep
     do {
         ++attempts;
         status.clear();
-        if (run_status(runtime_dir, status, false) == 0 &&
+        if (run_status(runtime_dir, status, "serial:PIXDT18101", true, false) == 0 &&
             check_status(status, "streaming", true, "1") &&
             json_string(status, "epoch") == epoch &&
             json_string(status, "instance") == instance) return true;
@@ -219,6 +228,17 @@ std::size_t line_count(const std::string& path)
     return count;
 }
 
+std::size_t occurrence_count(std::string_view text, std::string_view needle)
+{
+    std::size_t count = 0U;
+    std::size_t position = 0U;
+    while ((position = text.find(needle, position)) != std::string_view::npos) {
+        ++count;
+        position += needle.size();
+    }
+    return count;
+}
+
 }  // namespace
 
 int main()
@@ -231,17 +251,66 @@ int main()
     if (::mkdir(assets.c_str(), 0700) != 0 ||
         !write_zero_file(assets + "/fpga.bin", 699673U) ||
         !write_zero_file(assets + "/bootstrap.bin", 16U) ||
-        !write_zero_file(assets + "/validation.bin", 64U)) return 2;
+        !write_zero_file(assets + "/validation.bin", 64U) ||
+        ::chmod(root.c_str(), 0770) != 0) return 2;
     const std::string expected_path = root + "/expected.ts";
     const std::string output_path = root + "/client.ts";
     const std::string off_grid_path = root + "/off-grid.ts";
     const std::string satellite_path = root + "/satellite.ts";
+    const std::string satellite_slot_path = root + "/satellite-slot.ts";
     const std::string tune_log = root + "/tunes.log";
+    const std::string list_json_log = root + "/list-json.log";
+    const std::string ts_version_log = root + "/pix-ts-version.log";
+    const std::string pixd_version_log = root + "/pixd-version.log";
+    const std::string unsupported_lnb_log = root + "/unsupported-lnb.log";
+    const std::string missing_group_root_log = root + "/missing-group-root.log";
     (void)::setenv("PIX_TEST_TUNE_LOG", tune_log.c_str(), 1);
     if (!write_file(expected_path, plain, sizeof(plain))) return 3;
 
+    const pid_t list_process = launch(PIXD_PATH, {"--list-json"}, list_json_log);
+    int list_status = 0;
+    if (list_process <= 0 || ::waitpid(list_process, &list_status, 0) != list_process ||
+        !WIFEXITED(list_status) || WEXITSTATUS(list_status) != 0) return 22;
+    const auto list_json = read_file(list_json_log);
+    const std::string list_text(list_json.begin(), list_json.end());
+    if (list_text.find("\"model\":\"PIX-DT295\"") == std::string::npos ||
+        list_text.find("\"usb\":\"06b8:103b\"") == std::string::npos ||
+        list_text.find("\"serial\":\"PIXDT29501\"") == std::string::npos ||
+        list_text.find("\"systems\":[\"ISDB-T\"]") == std::string::npos) return 24;
+    const pid_t ts_version = launch(PIXTS_PATH, {"--version"}, ts_version_log);
+    int ts_version_status = 0;
+    if (ts_version <= 0 || ::waitpid(ts_version, &ts_version_status, 0) != ts_version ||
+        !WIFEXITED(ts_version_status) || WEXITSTATUS(ts_version_status) != 0) return 25;
+    const auto ts_version_bytes = read_file(ts_version_log);
+    const std::string ts_version_text(ts_version_bytes.begin(), ts_version_bytes.end());
+    if (ts_version_text != std::string("pix-ts ") + PIX_RUNTIME_VERSION + "\n") return 26;
+    const pid_t pixd_version = launch(PIXD_PATH, {"--version"}, pixd_version_log);
+    int pixd_version_status = 0;
+    if (pixd_version <= 0 ||
+        ::waitpid(pixd_version, &pixd_version_status, 0) != pixd_version ||
+        !WIFEXITED(pixd_version_status) || WEXITSTATUS(pixd_version_status) != 0) return 31;
+    const auto pixd_version_bytes = read_file(pixd_version_log);
+    const std::string pixd_version_text(pixd_version_bytes.begin(), pixd_version_bytes.end());
+    if (pixd_version_text != std::string("pix-userland ") + PIX_RUNTIME_VERSION + "\n")
+        return 32;
+    const pid_t unsupported_lnb = launch(PIXTS_PATH,
+        {"--channel", "T13", "--lnb-voltage", "15"}, unsupported_lnb_log);
+    int unsupported_lnb_status = 0;
+    if (unsupported_lnb <= 0 ||
+        ::waitpid(unsupported_lnb, &unsupported_lnb_status, 0) != unsupported_lnb ||
+        !WIFEXITED(unsupported_lnb_status) || WEXITSTATUS(unsupported_lnb_status) != 2)
+        return 33;
+    const pid_t missing_group_root = launch(PIXD_PATH,
+        {"--device", "usb:1-2", "--group"}, missing_group_root_log);
+    int missing_group_root_status = 0;
+    if (missing_group_root <= 0 ||
+        ::waitpid(missing_group_root, &missing_group_root_status, 0) != missing_group_root ||
+        !WIFEXITED(missing_group_root_status) ||
+        WEXITSTATUS(missing_group_root_status) != 2) return 34;
+
     const pid_t daemon = launch(PIXD_PATH,
-        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", root},
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", root, "--group"},
         root + "/pixd.log");
     if (daemon <= 0 || !wait_ready(root + "/pixd.log", daemon)) {
         std::fprintf(stderr, "PROOF pixd startup failed root=%s\n", root.c_str());
@@ -251,7 +320,7 @@ int main()
 
     std::string idle_status;
     const std::size_t idle_tunes = line_count(tune_log);
-    if (run_status(root, idle_status) != 0 ||
+    if (run_status(root, idle_status, "serial:PIXDT18101", true) != 0 ||
         !check_status(idle_status, "free", false, "0") ||
         !write_text(root + "/status-idle.json", idle_status) ||
         line_count(tune_log) != idle_tunes) {
@@ -264,8 +333,8 @@ int main()
     const std::string idle_instance = json_string(idle_status, "instance");
 
     const pid_t client = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--freq", "473142857", "--time", "3",
-         "--output", output_path, "--runtime-dir", root}, root + "/pix-ts.log");
+        {"--device", "serial:PIXDT18101", "--freq", "473142857", "--time", "3",
+         "--output", output_path, "--runtime-dir", root, "--group"}, root + "/pix-ts.log");
     std::string streaming_ready_status;
     unsigned readiness_attempts = 0U;
     const bool capture_ready = client > 0 &&
@@ -278,7 +347,7 @@ int main()
     if (!capture_ready || !write_text(root + "/status-streaming-ready.json",
                                       streaming_ready_status) ||
         stream_tunes == 0U ||
-        run_status(root, streaming_status) != 0 ||
+        run_status(root, streaming_status, "serial:PIXDT18101", true) != 0 ||
         !check_status(streaming_status, "streaming", true, "1") ||
         json_string(streaming_status, "epoch") != idle_epoch ||
         json_string(streaming_status, "instance") != idle_instance ||
@@ -303,8 +372,9 @@ int main()
         return 5;
     }
     const pid_t off_grid = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--freq", "473142000", "--time", "1",
-         "--output", off_grid_path, "--runtime-dir", root}, root + "/pix-ts-off-grid.log");
+        {"--device", "serial:PIXDT18101", "--freq", "473142000", "--time", "1",
+         "--output", off_grid_path, "--runtime-dir", root, "--group"},
+        root + "/pix-ts-off-grid.log");
     int off_grid_status = 0;
     if (off_grid <= 0 || ::waitpid(off_grid, &off_grid_status, 0) != off_grid ||
         !WIFEXITED(off_grid_status) || WEXITSTATUS(off_grid_status) != 0) {
@@ -313,8 +383,9 @@ int main()
         return 22;
     }
     const pid_t satellite = launch(PIXTS_PATH,
-        {"--device", "usb:1-2", "--channel", "BS01_3", "--time", "1",
-         "--output", satellite_path, "--runtime-dir", root}, root + "/pix-ts-satellite.log");
+        {"--device", "serial:PIXDT18101", "--channel", "BS01", "--tsid", "4660",
+         "--time", "1", "--output", satellite_path,
+         "--runtime-dir", root, "--group"}, root + "/pix-ts-satellite.log");
     int satellite_status = 0;
     if (satellite <= 0 || ::waitpid(satellite, &satellite_status, 0) != satellite ||
         !WIFEXITED(satellite_status) || WEXITSTATUS(satellite_status) != 0) {
@@ -322,6 +393,18 @@ int main()
         (void)::kill(daemon, SIGTERM);
         (void)::waitpid(daemon, nullptr, 0);
         return 11;
+    }
+    const pid_t satellite_slot = launch(PIXTS_PATH,
+        {"--device", "serial:PIXDT18101", "--channel", "BS01", "--slot", "3",
+         "--time", "1", "--output", satellite_slot_path, "--runtime-dir", root,
+         "--group"}, root + "/pix-ts-satellite-slot.log");
+    int satellite_slot_status = 0;
+    if (satellite_slot <= 0 ||
+        ::waitpid(satellite_slot, &satellite_slot_status, 0) != satellite_slot ||
+        !WIFEXITED(satellite_slot_status) || WEXITSTATUS(satellite_slot_status) != 0) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 27;
     }
     (void)::kill(daemon, SIGTERM);
     int daemon_status = 0;
@@ -340,9 +423,11 @@ int main()
     const auto actual = read_file(output_path);
     const auto off_grid_actual = read_file(off_grid_path);
     const auto satellite_actual = read_file(satellite_path);
+    const auto satellite_slot_actual = read_file(satellite_slot_path);
     std::ifstream tune_file(tune_log);
     const std::string tunes((std::istreambuf_iterator<char>(tune_file)), {});
     if (actual != expected || off_grid_actual != expected || satellite_actual != expected ||
+        satellite_slot_actual != expected ||
         tunes.find("system=0 hz=473142857 slot=-1 tsid=-1") == std::string::npos ||
         tunes.find("system=0 hz=473142000 slot=-1 tsid=-1") == std::string::npos ||
         tunes.find("system=1 hz=1049480000 slot=3 tsid=4660") == std::string::npos) {
@@ -354,14 +439,16 @@ int main()
                 actual.size(), root.c_str());
 
     const std::string no_ts_path = root + "/no-ts.ts";
+    const std::string no_ts_runtime = root + "/no-ts-runtime";
+    if (::mkdir(no_ts_runtime.c_str(), 0700) != 0) return 28;
     (void)::setenv("PIX_NO_TS", "1", 1);
     const pid_t no_ts_daemon = launch(PIXD_PATH,
-        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", root,
+        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", no_ts_runtime,
          "--instance", "pix-no-ts"}, root + "/pixd-no-ts.log");
     if (no_ts_daemon <= 0 || !wait_ready(root + "/pixd-no-ts.log", no_ts_daemon)) return 13;
     const pid_t no_ts_client = launch(PIXTS_PATH,
         {"--instance", "pix-no-ts", "--channel", "T13", "--time", "1",
-         "--output", no_ts_path, "--runtime-dir", root}, root + "/pix-ts-no-ts.log");
+         "--output", no_ts_path, "--runtime-dir", no_ts_runtime}, root + "/pix-ts-no-ts.log");
     int no_ts_status = 0;
     if (no_ts_client <= 0 || ::waitpid(no_ts_client, &no_ts_status, 0) != no_ts_client ||
         !WIFEXITED(no_ts_status) || WEXITSTATUS(no_ts_status) != 0 ||
@@ -379,15 +466,21 @@ int main()
 
     const std::string gate_path = root + "/callback-held";
     const std::string release_path = root + "/callback-release";
+    const std::string held_runtime = root + "/held-runtime";
+    if (::mkdir(held_runtime.c_str(), 0700) != 0) return 29;
     (void)::setenv("PIX_HOLD_CALLBACK_FILE", gate_path.c_str(), 1);
     (void)::setenv("PIX_RELEASE_CALLBACK_FILE", release_path.c_str(), 1);
     const pid_t held_daemon = launch(PIXD_PATH,
-        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", root,
+        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", held_runtime,
          "--instance", "pix-held"}, root + "/pixd-held.log");
     if (held_daemon <= 0 || !wait_ready(root + "/pixd-held.log", held_daemon)) return 16;
+    std::ifstream held_start_file(root + "/pixd-held.log");
+    const std::string held_start_log((std::istreambuf_iterator<char>(held_start_file)), {});
+    const std::size_t held_start_closes = occurrence_count(
+        held_start_log, "PIX_CLEANUP close-handle=");
     const pid_t held_client = launch(PIXTS_PATH,
         {"--instance", "pix-held", "--channel", "T13", "--time", "3",
-         "--output", root + "/held.ts", "--runtime-dir", root}, root + "/pix-ts-held.log");
+         "--output", root + "/held.ts", "--runtime-dir", held_runtime}, root + "/pix-ts-held.log");
     bool callback_held = false;
     for (unsigned attempt = 0U; attempt < 1000U; ++attempt) {
         if (::access(gate_path.c_str(), F_OK) == 0) { callback_held = true; break; }
@@ -406,7 +499,8 @@ int main()
         std::ifstream held_log_file(root + "/pixd-held.log");
         const std::string held_log((std::istreambuf_iterator<char>(held_log_file)), {});
         if (held_log.find("PIX_CLOSE deadline_expired=1") != std::string::npos) {
-            if (held_log.find("PIX_CLEANUP close-handle=") != std::string::npos) return 18;
+            if (occurrence_count(held_log, "PIX_CLEANUP close-handle=") !=
+                held_start_closes) return 18;
             deadline_seen = true;
             break;
         }
@@ -421,7 +515,8 @@ int main()
     const std::string released_log((std::istreambuf_iterator<char>(released_log_file)), {});
     if (released_log.find("PIX_CLEANUP shutdown=1") == std::string::npos ||
         released_log.find("PIX_CLEANUP release-interface=1") == std::string::npos ||
-        released_log.find("PIX_CLEANUP close-handle=1") == std::string::npos) return 21;
+        occurrence_count(released_log, "PIX_CLEANUP close-handle=") !=
+            held_start_closes + 1U) return 21;
     int held_client_status = 0;
     for (unsigned attempt = 0U; attempt < 500U; ++attempt) {
         const pid_t result = ::waitpid(held_client, &held_client_status, WNOHANG);
@@ -444,11 +539,13 @@ int main()
     std::unique_ptr<dtv::userland::host_runtime::EnclosureFamily> family(
         std::move(family_result.value()));
     pix_test_fail_thread_create();
+    const std::string unwind_runtime = root + "/unwind-runtime";
+    if (::mkdir(unwind_runtime.c_str(), 0700) != 0) return 30;
     std::array<std::uint8_t, 16U> epoch{};
     dtv::userland::wire::ListResponse list{};
     if (!pix::runtime::build_list(located.value(), "0.0.0-dev", epoch, list)) return 10;
     dtv::userland::host_listener_context::ContextConfig config{};
-    config.runtime_directory = root;
+    config.runtime_directory = unwind_runtime;
     config.product = "pix-userland";
     config.instance = "pix-proof";
     config.server.epoch = epoch;
@@ -465,7 +562,7 @@ int main()
             new (std::nothrow) px4::userland::ipc::posix::PosixTunerNonceSource()),
         config);
     if (assembled || pix_test_shutdown_count() != 1U ||
-        pix_test_release_count() != 1U || pix_test_close_count() != 1U) {
+        pix_test_release_count() != 1U || pix_test_close_count() != 3U) {
         std::fprintf(stderr, "PROOF early unwind cleanup counts shutdown=%u release=%u close=%u\n",
             pix_test_shutdown_count(), pix_test_release_count(), pix_test_close_count());
         return 10;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: MIT
 #include "dtv/userland/identity.h"
 
 #include "host_ctl.h"
@@ -28,7 +28,8 @@ bool matches_pix_serial(const wire::ListResponse& list,
         !list.functions.items[0U].present)
         return false;
     const wire::UsbFunction& function = list.functions.items[0U];
-    if (function.vid != 0x06b8U || function.pid != 0x103bU) return false;
+    if (function.vid != 0x06b8U ||
+        (function.pid != 0x102bU && function.pid != 0x103bU)) return false;
     const auto& serial = observed.serial;
     return serial.value.length == expected.serial.length &&
            std::memcmp(serial.value.bytes.data(), expected.serial.bytes.data(),

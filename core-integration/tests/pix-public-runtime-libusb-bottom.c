@@ -6,7 +6,7 @@
 #include <string.h>
 
 static int fake_context_storage;
-static int fake_device_storage;
+static int fake_device_storage[2];
 static int fake_handle_storage;
 static struct libusb_transfer *active[32];
 static unsigned active_count;
@@ -18,6 +18,8 @@ static unsigned completions;
 static unsigned cancellations;
 static unsigned frees;
 static int fail_cancel;
+unsigned pix_test_usb_device_index(libusb_device *device);
+unsigned pix_test_usb_opened_device(void);
 
 void pix_test_usb_queue(const uint8_t *bytes, size_t length)
 {
@@ -41,12 +43,16 @@ int LIBUSB_CALL libusb_wrap_sys_device(libusb_context *ctx, intptr_t fd,
                                        libusb_device_handle **handle)
 { (void)ctx; (void)fd; *handle = (libusb_device_handle *)&fake_handle_storage; return 0; }
 libusb_device * LIBUSB_CALL libusb_get_device(libusb_device_handle *handle)
-{ (void)handle; return (libusb_device *)&fake_device_storage; }
+{ (void)handle; return (libusb_device *)&fake_device_storage[pix_test_usb_opened_device()]; }
 int LIBUSB_CALL libusb_get_device_descriptor(libusb_device *device,
                                               struct libusb_device_descriptor *desc)
 {
-    (void)device; memset(desc, 0, sizeof(*desc));
-    desc->idVendor = 0x06b8; desc->idProduct = 0x102b; return 0;
+    const unsigned index = pix_test_usb_device_index(device);
+    memset(desc, 0, sizeof(*desc));
+    desc->idVendor = 0x06b8;
+    desc->idProduct = index == 0U ? 0x102b : 0x103b;
+    desc->iSerialNumber = 1U;
+    return 0;
 }
 int LIBUSB_CALL libusb_kernel_driver_active(libusb_device_handle *handle, int interface)
 { (void)handle; (void)interface; return 0; }

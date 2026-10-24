@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: MIT
 #include "pix_runtime.h"
 
 #include "pix-dt295-receiver-adapter.h"
