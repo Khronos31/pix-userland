@@ -67,6 +67,8 @@ static inline int os_thread_create(os_thread *t, void *unused, void *(*fn)(void 
 }
 /* Repeated cancellation also covers the narrow interval before a blocking write starts. */
 static inline int os_thread_join(os_thread t, int cancel_io) {
+    if (!t || t == INVALID_HANDLE_VALUE)
+        return -1;
     DWORD timeout = cancel_io ? 50 : 3500;
     DWORD result;
     while ((result = WaitForSingleObject(t, timeout)) == WAIT_TIMEOUT) {
