@@ -1021,6 +1021,25 @@ int dt295_select_satellite_tsid(dt295 *d, uint16_t tsid, char *e, size_t en) {
     seterr(e, en, "");
     return 0;
 }
+int dt295_satellite_wait_lock(dt295 *d, unsigned timeout_ms, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session || !d->tuned)
+        return fail(d, e, en, "satellite lock wait requires tuned authenticated session");
+    if (timeout_ms == 0 || timeout_ms > 5000)
+        return fail(d, e, en, "satellite lock timeout must be 1..5000 ms");
+    const uint64_t end = now_ms(d) + timeout_ms;
+    for (;;) {
+        dt295_satellite_state state = {0};
+        if (dt295_satellite_status(d, &state, e, en))
+            return -1;
+        if (state.locked) {
+            seterr(e, en, "");
+            return 0;
+        }
+        if (now_ms(d) >= end)
+            return fail(d, e, en, "satellite did not lock before the timeout");
+        sleep_ms(d, 100);
+    }
+}
 int dt295_satellite_tsid_table(dt295 *d, uint16_t tsids[8], char *e, size_t en) {
     if (!d || !tsids || d->cleanup_only || !d->has_session || !d->tuned)
         return fail(d, e, en, "satellite TSID table requires tuned authenticated session");
@@ -1034,6 +1053,8 @@ int dt295_satellite_tsid_table(dt295 *d, uint16_t tsids[8], char *e, size_t en) 
 }
 int dt295_select_satellite_slot(dt295 *d, unsigned slot, char *e, size_t en) {
     uint16_t tsids[8];
+    if (dt295_satellite_wait_lock(d, 3000, e, en))
+        return -1;
     if (dt295_satellite_tsid_table(d, tsids, e, en))
         return -1;
     if (slot > 7)

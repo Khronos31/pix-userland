@@ -221,8 +221,12 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiv
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
     if (!satellite_tuned_) return Result::failure(Error::NOT_READY);
     if (slot > 7U) return Result::failure(Error::INVALID_ARGUMENT);
-    uint16_t table[8]{};
+    const std::uint32_t total_budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
+    const std::uint64_t deadline = clock_.monotonic_ms() + total_budget;
     char error[256]{};
+    if (dt295_satellite_wait_lock(device_, total_budget, error, sizeof(error)) != 0)
+        return Result::failure(Error::TIMEOUT);
+    uint16_t table[8]{};
     if (dt295_satellite_tsid_table(device_, table, error, sizeof(error)) != 0)
         return Result::failure(Error::USB_IO);
     const std::uint16_t tsid = table[slot];
@@ -231,8 +235,6 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiv
     satellite_tsid_valid_ = true;
     if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
         return Result::failure(Error::USB_IO);
-    const std::uint32_t budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
-    const std::uint64_t deadline = clock_.monotonic_ms() + budget;
     for (;;) {
         dt295_satellite_state state{};
         if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
