@@ -53,7 +53,7 @@ struct dt295_routes {
     table_state table[TABLE_LIMIT];
     dt295_pat_program programs[64];
     uint16_t program_count, tsid;
-    uint8_t have_pat, have_cat;
+    uint8_t have_pat, have_cat, satellite;
     pmt_info pmts[64];
     uint16_t pmt_count;
     uint16_t network_pid[64];
@@ -81,6 +81,10 @@ static int has_pid(const uint16_t *pids, unsigned n, uint16_t pid) {
     return 0;
 }
 
+void dt295_routes_set_satellite(dt295_routes *r, int satellite) {
+    if (r)
+        r->satellite = satellite != 0;
+}
 dt295_routes *dt295_routes_create(void) {
     return (dt295_routes *)calloc(1, sizeof(dt295_routes));
 }
@@ -587,7 +591,7 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->program_count = r->program_count;
     memcpy(s->programs, r->programs, r->program_count * sizeof(r->programs[0]));
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
-    s->ready = r->have_pat && r->have_cat && s->missing_pmts == 0;
+    s->ready = r->have_pat && (r->satellite || r->have_cat) && s->missing_pmts == 0;
     s->invalid_sections = r->invalid_sections;
     s->continuity_errors = r->continuity_errors;
     s->unsupported_tables = r->unsupported_tables;
@@ -701,7 +705,7 @@ int dt295_routes_bootstrap_plan(const dt295_routes *r, const dt295_route_plan *c
     }
     if (r->have_pat) {
         p.missing_pmts = (uint16_t)(r->program_count - r->pmt_count);
-        p.ready = r->have_cat && p.missing_pmts == 0;
+        p.ready = (r->satellite || r->have_cat) && p.missing_pmts == 0;
     }
     p.cat_received = r->have_cat;
     *out = p;

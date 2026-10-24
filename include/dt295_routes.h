@@ -58,6 +58,8 @@ typedef struct {
 
 /* The watcher owns bounded memory; create returns NULL on allocation failure. */
 dt295_routes *dt295_routes_create(void);
+/* Satellite streams may omit CAT; terrestrial readiness keeps requiring it. */
+void dt295_routes_set_satellite(dt295_routes *, int satellite);
 void dt295_routes_destroy(dt295_routes *);
 void dt295_routes_reset(dt295_routes *);
 /* Feed one complete 188-byte TS packet. 0=accepted/ignored, -1=bad arguments. */

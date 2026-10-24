@@ -403,6 +403,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         rc = 70;
         goto done;
     }
+    dt295_routes_set_satellite(tables, cfg->system != PIXY_TERRESTRIAL);
     /* Both helpers must be created before libusb can create internal threads. */
     int e = ts_output_open(cfg->output, STDOUT_FILENO, NULL, &output);
     if (e) {
