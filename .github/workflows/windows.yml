@@ -62,11 +62,17 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb make python
+          install: mingw-w64-x86_64-gcc make python curl bzip2
       - shell: msys2 {0}
         run: |
+          mkdir -p build
+          curl -fL --retry 3 https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2 -o libusb-1.0.30.tar.bz2
+          echo 'fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf  libusb-1.0.30.tar.bz2' | sha256sum -c -
+          tar -xjf libusb-1.0.30.tar.bz2 -C build
+          prefix="$PWD/build/legacy-usb-prefix"
+          (cd build/libusb-1.0.30 && ./configure --host=x86_64-w64-mingw32 --prefix="$prefix" --enable-static --disable-shared --disable-udev CC=gcc && make -j4 && make install)
           mkdir -p build/legacy-tests
           sh tools/copy-legacy-test-source.sh "$PWD" "$PWD/build/legacy-tests"
           cd build/legacy-tests
           make clean
-          make -j4 test CFLAGS='-O2 -g -Werror' OS_LIBS='-lbcrypt' USB_CFLAGS='-I/mingw64/include/libusb-1.0' USB_LIBS='-L/mingw64/lib -lusb-1.0'
+          make -j4 test CFLAGS='-O2 -g -Werror' OS_LIBS='-lbcrypt' USB_CFLAGS="-I$prefix/include/libusb-1.0" USB_LIBS="$prefix/lib/libusb-1.0.a"
