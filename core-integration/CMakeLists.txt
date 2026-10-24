@@ -77,3 +77,51 @@ target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
     -Wl,--wrap=pthread_mutex_lock)
 add_test(NAME pix_dt181_receiver_adapter_proof
     COMMAND pix_dt181_receiver_adapter_proof)
+
+add_library(pix_dt295_c_backend STATIC
+    "${PIX_SOURCE_DIR}/src/dt295.c"
+    "${PIX_SOURCE_DIR}/src/dt295_crypto.c"
+    "${PIX_SOURCE_DIR}/src/dt295_routes.c"
+    "${PIX_SOURCE_DIR}/src/dt295_stream.c"
+    "${PIX_SOURCE_DIR}/src/ts_output.c"
+    "${PIX_SOURCE_DIR}/src/dt295_capture.c"
+    "${PIX_SOURCE_DIR}/src/dt295_capture_host.c")
+target_compile_definitions(pix_dt295_c_backend PRIVATE
+    _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+target_include_directories(pix_dt295_c_backend PUBLIC
+    "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_link_libraries(pix_dt295_c_backend PUBLIC
+    pix_dt181_c_backend PkgConfig::LIBUSB Threads::Threads)
+
+add_library(pix_dt295_composition STATIC
+    "${PIX_SOURCE_DIR}/pix-dt295-receiver-adapter.cpp")
+target_compile_features(pix_dt295_composition PUBLIC cxx_std_17)
+target_include_directories(pix_dt295_composition PUBLIC "${PIX_SOURCE_DIR}")
+target_link_libraries(pix_dt295_composition PUBLIC
+    dtv::receiver dtv::capture pix_dt295_c_backend)
+target_compile_options(pix_dt295_composition PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+
+add_executable(pix_dt295_adapter_lifecycle_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_adapter_lifecycle_proof.cpp"
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_adapter_lifecycle_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
+    "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")
+target_compile_definitions(pix_dt295_adapter_lifecycle_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_adapter_lifecycle_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_adapter_lifecycle_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_dt295_adapter_lifecycle_proof PRIVATE
+    pix_dt295_composition Threads::Threads)
+target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=random_bytes)
+add_test(NAME pix_dt295_adapter_lifecycle_proof
+    COMMAND pix_dt295_adapter_lifecycle_proof)
