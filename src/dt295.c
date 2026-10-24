@@ -810,6 +810,10 @@ static int sat_reg_write(dt295 *d, uint8_t r, uint8_t v) {
 static int sat_reg_read(dt295 *d, uint8_t r, uint8_t *p, size_t n) {
     return i2c(d, 0x22, &r, 1, p, n);
 }
+static int sat_rf_reg(dt295 *d, uint8_t r, uint8_t v) {
+    uint8_t b[4] = {0xfe, 0xc0, r, v};
+    return sat_wr(d, b, sizeof(b));
+}
 static int sat_rf_block(dt295 *d, uint8_t r, const uint8_t *p, size_t n) {
     uint8_t b[16] = {0xfe, 0xc0, r};
     if (n > sizeof(b) - 3)
@@ -827,9 +831,9 @@ static int sat_mute(dt295 *d, int enabled) {
                : 0;
 }
 static int sat_rf_sleep(dt295 *d) {
-    if (sat_reg_write(d, 0x2a, 0xb9) || sat_reg_write(d, 0x29, 0x70) ||
-        sat_reg_write(d, 0x28, 0x3e) || sat_reg_write(d, 0x2a, 0x19) ||
-        sat_reg_write(d, 0x1c, 0))
+    if (sat_rf_reg(d, 0x2a, 0xb9) || sat_rf_reg(d, 0x29, 0x70) ||
+        sat_rf_reg(d, 0x28, 0x3e) || sat_rf_reg(d, 0x2a, 0x19) ||
+        sat_rf_reg(d, 0x1c, 0))
         return -1;
     const uint8_t b[2] = {0xc0, 0xa7};
     return sat_rf_block(d, 0x11, b, sizeof(b));
@@ -838,8 +842,8 @@ static int sat_rf_wake(dt295 *d) {
     const uint8_t b[2] = {0x00, 0xa7};
     if (sat_rf_block(d, 0x11, b, sizeof(b)))
         return -1;
-    return sat_reg_write(d, 0x2a, 0xb9) || sat_reg_write(d, 0x1c, 0xc0) ||
-                   sat_reg_write(d, 0x29, 0x71)
+    return sat_rf_reg(d, 0x2a, 0xb9) || sat_rf_reg(d, 0x1c, 0xc0) ||
+                   sat_rf_reg(d, 0x29, 0x71)
                ? -1
                : 0;
 }
@@ -878,11 +882,11 @@ static int sat_initialize(dt295 *d) {
             return -1;
     }
     sleep_ms(d, 4);
-    if (sat_reg_write(d, 0x2a, 0xb9))
+    if (sat_rf_reg(d, 0x2a, 0xb9))
         return -1;
     const uint8_t mode[3] = {0x10, 0x10, 0};
-    if (sat_rf_block(d, 6, mode, sizeof(mode)) || sat_reg_write(d, 0x0a, 0) ||
-        sat_reg_write(d, 0x0e, 0) || sat_rf_sleep(d))
+    if (sat_rf_block(d, 6, mode, sizeof(mode)) || sat_rf_reg(d, 0x0a, 0) ||
+        sat_rf_reg(d, 0x0e, 0) || sat_rf_sleep(d))
         return -1;
     sleep_ms(d, 6);
     return 0;
@@ -918,10 +922,10 @@ static int sat_frequency(dt295 *d, uint32_t hz) {
     const uint8_t params[5] = {(uint8_t)(n >> 7), (uint8_t)(n * 2u), 0, 0,
                                f <= 1100000u ? 0x80 : 0};
     if (sat_rf_block(d, 0, params, sizeof(params)) ||
-        sat_reg_write(d, 9, (uint8_t)(mode << 5 | band)))
+        sat_rf_reg(d, 9, (uint8_t)(mode << 5 | band)))
         return -1;
-    if (sat_reg_write(d, 0x37, 0xac) || sat_reg_write(d, 5, 0x80) ||
-        sat_reg_write(d, 0x2a, 0xbb))
+    if (sat_rf_reg(d, 0x37, 0xac) || sat_rf_reg(d, 5, 0x80) ||
+        sat_rf_reg(d, 0x2a, 0xbb))
         return -1;
     sleep_ms(d, 10);
     return 0;
@@ -960,7 +964,7 @@ static int sat_tune(dt295 *d, uint32_t hz, int tsid) {
     uint8_t rf[2];
     if (sat_rf_read(d, rf, sizeof(rf)))
         return -1;
-    if (sat_reg_write(d, 0x50, (uint8_t)((rf[1] & 0x60) == 0x60 ? 0xf1 : 0xf0)))
+    if (sat_rf_reg(d, 0x50, (uint8_t)((rf[1] & 0x60) == 0x60 ? 0xf1 : 0xf0)))
         return -1;
     sleep_ms(d, 40);
     if (sat_reg_write(d, 0x1e, 0x20) || sat_reg_write(d, 0x0a, 0xff) ||
