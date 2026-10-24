@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: MIT */
 // Product-local glue for the existing PIX DT181 C session and capture host.
 #ifndef PIX_DT181_RECEIVER_ADAPTER_H
 #define PIX_DT181_RECEIVER_ADAPTER_H
