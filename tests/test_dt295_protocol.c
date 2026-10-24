@@ -271,6 +271,13 @@ static void create_assets(const char *path, fake *f) {
     memset(f->material + (0x84630 - 0x841d0), 0, 26 * 8);
     memset(f->material + (0x84700 - 0x841d0), 0, 28 * 8);
     memcpy(f->material + (0x85218 - 0x841d0), (uint8_t[16]){0}, 16);
+    for (unsigned i = 0; i < 18; i++) {
+        uint8_t *row = f->material + (0x845a0 - 0x841d0) + i * 8;
+        row[0] = (uint8_t)(0x20 + i);
+        row[1] = row[2] = row[3] = 0;
+        row[4] = (uint8_t)(i + 1);
+        row[5] = row[6] = row[7] = 0;
+    }
     memset(f->iv, 0, 16);
     for (unsigned i = 0; i < sizeof(f->ts_iv); i++)
         f->ts_iv[i] = (uint8_t)(0xa0 + i);

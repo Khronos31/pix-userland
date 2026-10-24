@@ -40,6 +40,8 @@ tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt2
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $(filter-out src/dt295_capture.c,$^) $(OS_LIBS)
 tests/test-dt295-protocol: tests/test_dt295_protocol.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
 	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
+tests/test-dt295-satellite: tests/test_dt295_satellite.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
+	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 tests/test-dt295: tests/test_dt295.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
 	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 tests/test-dt295-routes: tests/test_dt295_routes.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c
@@ -49,8 +51,9 @@ tests/test-dt295-stream: tests/test_dt295_stream.c src/dt295_stream.c
 tests/test-ts-output: tests/test_ts_output.c src/ts_output.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -DTS_OUTPUT_TESTING $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 
-test: pix-ts tests/test-dt295-protocol tests/test-dt295-capture tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
+test: pix-ts tests/test-dt295-protocol tests/test-dt295-satellite tests/test-dt295-capture tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
 	./tests/test-dt295-protocol
+	./tests/test-dt295-satellite
 	./tests/test-dt295-capture
 	./tests/test-dt295
 	./tests/test-dt295-routes
@@ -70,5 +73,5 @@ test: pix-ts tests/test-dt295-protocol tests/test-dt295-capture tests/test-dt295
 	$(PYTHON) tests/test_dt295_packaging.py
 	$(PYTHON) tests/test_dt295_assets.py
 clean:
-	rm -f pix-ts pix-ts.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-dt295-capture tests/test-dt295-protocol
+	rm -f pix-ts pix-ts.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-dt295-capture tests/test-dt295-protocol tests/test-dt295-satellite
 -include $(OBJ:.o=.d) tests/test_crypto.d tests/test_transport.d tests/test_usb_log.d

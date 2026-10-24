@@ -36,3 +36,4 @@ tests/test-usb-restart
 /tests/test-dt295-capture
 
 /tests/test-dt295-protocol
+/tests/test-dt295-satellite
