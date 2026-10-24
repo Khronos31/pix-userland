@@ -17,9 +17,11 @@ ctest --test-dir build/core-integration --output-on-failure
 The adapter proofs use synthetic USB and tuner behavior. They do not claim a
 physical receive test or provide a daemon/CLI entry point.
 
-The DT295 adapter currently provides terrestrial tuning only. The accepted
-PIX product capability includes ISDB-T and ISDB-S; satellite adapter support
-remains a follow-up and is not redefined by this terrestrial increment.
+The DT295 adapter provides terrestrial tuning and satellite IF tuning with an
+explicit TSID. Satellite support reuses the DT295 satellite register sequence
+from the existing research and is covered by the offline lifecycle proof only;
+physical satellite reception, slot selection, and long-running behavior remain
+unverified.
 
 Core's owner lifecycle releases/detaches the receiver before backend shutdown.
 The adapter proof covers that order; direct shutdown while still attached is

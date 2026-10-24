@@ -280,7 +280,7 @@ public:
     explicit Dt295TunerBackend(dt295::ReceiverAdapter& adapter) noexcept : adapter_(adapter) {}
     std::uint8_t receiver_count() const noexcept override { return 1U; }
     bool receiver_supports(std::uint8_t receiver, ipc::System system) const noexcept override
-    { return receiver == 0U && system == ipc::System::ISDB_T; }
+    { return receiver == 0U && (system == ipc::System::ISDB_T || system == ipc::System::ISDB_S); }
     bool selects_satellite_stream_before_tune() const noexcept override { return false; }
     Result<void> open_receiver(std::uint8_t receiver) noexcept override
     { return adapter_.open(receiver); }
@@ -288,16 +288,18 @@ public:
                                   std::uint32_t timeout) noexcept override
     { return adapt(adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::terrestrial,
                                        static_cast<std::uint64_t>(khz) * 1000U, timeout)); }
-    Result<void> tune_satellite(std::uint8_t, std::uint32_t,
-                                std::uint32_t) noexcept override
-    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<void> tune_satellite(std::uint8_t receiver, std::uint32_t khz,
+                                std::uint32_t timeout) noexcept override
+    { return adapt(adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::satellite,
+                                       static_cast<std::uint64_t>(khz) * 1000U, timeout)); }
     Result<TunerHzProgramming> tune_terrestrial_hz(
         std::uint8_t receiver, std::uint64_t hz, std::uint32_t timeout) noexcept override
     { return adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::terrestrial,
                                  hz, timeout); }
     Result<TunerHzProgramming> tune_satellite_hz(
-        std::uint8_t, std::uint64_t, std::uint32_t) noexcept override
-    { return Result<TunerHzProgramming>::failure(Error::UNSUPPORTED); }
+        std::uint8_t receiver, std::uint64_t hz, std::uint32_t timeout) noexcept override
+    { return adapter_.program_hz(receiver, dt295::ReceiverAdapter::ReceiverSystem::satellite,
+                                 hz, timeout); }
     TunerStrictProfile strict_profile(std::uint8_t receiver,
                                       ipc::System system) const noexcept override
     {
@@ -305,19 +307,24 @@ public:
         TunerStrictProfile profile{};
         profile.native_hz = true;
         profile.readiness = dtv::userland::detail::TuneReadiness::commands;
-        profile.min_hz = 473142857U;
-        profile.max_hz = 767142857U;
+        profile.min_hz = system == ipc::System::ISDB_S ? 950000000U : 473142857U;
+        profile.max_hz = system == ipc::System::ISDB_S ? 2150000000U : 767142857U;
         profile.slot_count = 0U;
         return profile;
     }
-    Result<bool> is_locked(std::uint8_t, ipc::System) noexcept override
-    { return Result<bool>::failure(Error::UNSUPPORTED); }
-    Result<void> select_satellite_slot(std::uint8_t, std::uint8_t,
-                                       std::uint32_t) noexcept override
-    { return Result<void>::failure(Error::UNSUPPORTED); }
-    Result<void> select_satellite_tsid(std::uint8_t, std::uint16_t,
-                                       std::uint32_t) noexcept override
-    { return Result<void>::failure(Error::UNSUPPORTED); }
+    Result<bool> is_locked(std::uint8_t receiver, ipc::System system) noexcept override
+    {
+        if (!receiver_supports(receiver, system)) return Result<bool>::failure(Error::UNSUPPORTED);
+        return adapter_.is_locked(receiver, system == ipc::System::ISDB_T
+            ? dt295::ReceiverAdapter::ReceiverSystem::terrestrial
+            : dt295::ReceiverAdapter::ReceiverSystem::satellite);
+    }
+    Result<void> select_satellite_slot(std::uint8_t receiver, std::uint8_t slot,
+                                       std::uint32_t timeout) noexcept override
+    { return adapter_.select_satellite_slot(receiver, slot, timeout); }
+    Result<void> select_satellite_tsid(std::uint8_t receiver, std::uint16_t tsid,
+                                       std::uint32_t timeout) noexcept override
+    { return adapter_.select_satellite_tsid(receiver, tsid, timeout); }
     Result<void> close_receiver(std::uint8_t receiver) noexcept override
     { return adapter_.close(receiver); }
     Result<void> begin_tune_power(std::uint8_t receiver, ipc::System system,
