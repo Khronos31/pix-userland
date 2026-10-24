@@ -18,10 +18,11 @@ The adapter proofs use synthetic USB and tuner behavior. They do not claim a
 physical receive test or provide a daemon/CLI entry point.
 
 The DT295 adapter provides terrestrial tuning and satellite IF tuning with an
-explicit TSID. Satellite support reuses the DT295 satellite register sequence
-from the existing research and is covered by the offline lifecycle proof only;
-physical satellite reception, slot selection, and long-running behavior remain
-unverified.
+explicit TSID or a slot from the live demod TSID table. Satellite support reuses
+the DT295 satellite register sequence from the existing research. The offline
+lifecycle proof covers satellite tune/TSID/slot, CAT-less satellite tables,
+terrestrial CAT retention, and delayed TSID reflection; physical satellite
+reception and long-running behavior remain separate verification.
 
 Core's owner lifecycle releases/detaches the receiver before backend shutdown.
 The adapter proof covers that order; direct shutdown while still attached is

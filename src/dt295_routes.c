@@ -995,7 +995,7 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
             if (!existing->ecm_slot && binding)
                 existing->ecm_slot = binding;
         }
-    p.ready = r->have_cat && p.missing_pmts == 0;
+    p.ready = (r->satellite || r->have_cat) && p.missing_pmts == 0;
     if (error)
         error[0] = 0;
     *desired = p;

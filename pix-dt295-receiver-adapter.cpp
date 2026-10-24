@@ -164,6 +164,8 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
     }
     plan_complete_ = false;
     std::memset(&live_, 0, sizeof(live_));
+    dt295_routes_reset(routes_);
+    dt295_routes_set_satellite(routes_, system == ReceiverSystem::satellite ? 1 : 0);
     char error[256]{};
     std::uint64_t programmed_hz = 0U;
     if (system == ReceiverSystem::terrestrial) {
@@ -212,11 +214,33 @@ dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
     return dtv::userland::Result<bool>::success(state.locked != 0U && target);
 }
 
-ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiver, std::uint8_t,
-                                               std::uint32_t) noexcept
+ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiver, std::uint8_t slot,
+                                               std::uint32_t timeout_ms) noexcept
 {
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
-    return Result::failure(Error::UNSUPPORTED);
+    if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
+    if (!satellite_tuned_) return Result::failure(Error::NOT_READY);
+    if (slot > 7U) return Result::failure(Error::INVALID_ARGUMENT);
+    uint16_t table[8]{};
+    char error[256]{};
+    if (dt295_satellite_tsid_table(device_, table, error, sizeof(error)) != 0)
+        return Result::failure(Error::USB_IO);
+    const std::uint16_t tsid = table[slot];
+    if (tsid == 0U || tsid == 0xffffU) return Result::failure(Error::INVALID_ARGUMENT);
+    satellite_tsid_ = tsid;
+    satellite_tsid_valid_ = true;
+    if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
+        return Result::failure(Error::USB_IO);
+    const std::uint32_t budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
+    const std::uint64_t deadline = clock_.monotonic_ms() + budget;
+    for (;;) {
+        dt295_satellite_state state{};
+        if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
+            return Result::failure(Error::USB_IO);
+        if (state.selected_tsid == tsid && state.locked) return Result::success();
+        if (clock_.monotonic_ms() >= deadline) return Result::failure(Error::TIMEOUT);
+        clock_.sleep_ms(100U);
+    }
 }
 
 ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiver, std::uint16_t tsid,
@@ -236,8 +260,7 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiv
         dt295_satellite_state state{};
         if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
             return Result::failure(Error::USB_IO);
-        if (state.selected_tsid != tsid) return Result::failure(Error::INTERNAL);
-        if (state.locked) return Result::success();
+        if (state.selected_tsid == tsid && state.locked) return Result::success();
         if (clock_.monotonic_ms() >= deadline) return Result::failure(Error::TIMEOUT);
         clock_.sleep_ms(100U);
     }

@@ -43,7 +43,7 @@ for args in \
     '--channel 27 --tsid 5' \
     '--model unknown' \
     '--model dt295 --control' \
-    '--model dt295 -c BS01_0' \
+    '--model dt295 -c BS01_0 --tsid 1' \
     '--model dt295 -c T27 --freq 557142857' \
     '--fd 1 --list' \
     '--fd 1 --device 2' \

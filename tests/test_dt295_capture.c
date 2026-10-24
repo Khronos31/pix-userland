@@ -38,7 +38,7 @@ struct ts_output {
 };
 static uint64_t fake_time;
 static int opens, boots, prepares, reprepares, stops, cancels, closed, shutdowns;
-static int satellite_tunes;
+static int satellite_tunes, satellite_slots;
 static int fail_assets, fail_recording_output, fail_final_stop, fail_shutdown, fail_start,
     output_count;
 static uint8_t continuity[8192];
@@ -229,8 +229,24 @@ int dt295_tune_satellite(dt295 *d, uint32_t hz, int tsid, char *e, size_t n) {
     (void)d;
     (void)e;
     (void)n;
-    assert(hz == 1049480000u && tsid == 16400);
+    assert(hz == 1049480000u && (tsid == 16400 || tsid == -1));
     ++satellite_tunes;
+    return 0;
+}
+int dt295_select_satellite_slot(dt295 *d, unsigned slot, char *e, size_t n) {
+    (void)d;
+    (void)e;
+    (void)n;
+    assert(slot == 0);
+    ++satellite_slots;
+    return 0;
+}
+int dt295_satellite_status(dt295 *d, dt295_satellite_state *st, char *e, size_t n) {
+    (void)d;
+    (void)e;
+    (void)n;
+    st->selected_tsid = 1;
+    st->locked = 1;
     return 0;
 }
 int dt295_prepare_plan(dt295 *d, const dt295_route_plan *p, char *e, size_t n) {
@@ -590,6 +606,7 @@ static void reset(void) {
     fake_time = 1000;
     opens = boots = prepares = reprepares = stops = cancels = closed = shutdowns = 0;
     satellite_tunes = 0;
+    satellite_slots = 0;
     fail_assets = fail_recording_output = fail_final_stop = fail_shutdown = fail_start =
         output_count = 0;
     saved = 0;
@@ -664,7 +681,7 @@ int main(void) {
     uint8_t mask[8192] = {0};
     volatile sig_atomic_t stop = 0;
     dt295_capture_config c = {"/synthetic", "-", NULL, {0}, 27, 1, -1, 0, 0, mask, 0, &stop,
-                                  PIXY_TERRESTRIAL, 0, -1};
+                                  PIXY_TERRESTRIAL, 0, -1, -1};
     reset();
     assert(!dt295_capture_run(&c));
     assert(opens == 1 && prepares == 1 && reprepares == 1 && stops == 2 && cancels == 2 &&
@@ -692,10 +709,15 @@ int main(void) {
     sat.if_hz = 1049480000u;
     sat.tsid = 16400;
     sat.channel = 1;
+    sat.slot = -1;
     assert(!dt295_capture_run(&sat));
     assert(satellite_tunes == 1 && opens == 1 && shutdowns == 1 && closed == 1);
     sat.tsid = -1;
     assert(dt295_capture_run(&sat) == 2 && opens == 1 && satellite_tunes == 1);
+    sat.tsid = -1;
+    sat.slot = 0;
+    assert(!dt295_capture_run(&sat));
+    assert(satellite_tunes == 2 && satellite_slots == 1);
     reset();
     fail_assets = 1;
     assert(dt295_capture_run(&c) == 10 && opens == 0 && boots == 0);

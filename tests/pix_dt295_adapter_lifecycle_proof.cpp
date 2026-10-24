@@ -21,6 +21,8 @@ void dt295_actual_fixture_bootstrap(uint8_t packets[3][188]);
 void dt295_actual_fixture_recording_packet(uint8_t packet[188], unsigned continuity);
 void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 uint16_t dt295_actual_fixture_satellite_tsid(void);
+void dt295_actual_fixture_set_omit_cat(int);
+void dt295_actual_fixture_set_tsid_delay(unsigned);
 }
 
 namespace {
@@ -264,6 +266,41 @@ int main()
     drain_attachment(adapter, satellite);
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
                  "return T13");
+
+    dt295_actual_fixture_set_omit_cat(1);
+    unsigned generations = g_stream.generations;
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "no-CAT T13");
+    Attachment no_cat_t = attachment_for(4U);
+    CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial), "no-CAT start");
+    CHECK_RESULT(adapter.attach(no_cat_t), "no-CAT attach");
+    CHECK(read_ts(adapter, no_cat_t, 188U * 8U));
+    CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "no-CAT stop");
+    CHECK_RESULT(adapter.detach(no_cat_t), "no-CAT detach");
+    drain_attachment(adapter, no_cat_t);
+    CHECK(g_stream.generations == generations + 1U);
+
+    generations = g_stream.generations;
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
+                 "no-CAT BS");
+    Attachment no_cat_s = attachment_for(5U, ReceiverSystem::satellite);
+    CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::satellite), "no-CAT start sat");
+    CHECK_RESULT(adapter.attach(no_cat_s), "no-CAT attach sat");
+    CHECK(read_ts(adapter, no_cat_s, 188U * 8U));
+    CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::satellite), "no-CAT stop sat");
+    CHECK_RESULT(adapter.detach(no_cat_s), "no-CAT detach sat");
+    drain_attachment(adapter, no_cat_s);
+    CHECK(g_stream.generations == generations + 2U);
+    dt295_actual_fixture_set_omit_cat(0);
+
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
+                 "slot tune");
+    CHECK_RESULT(adapter.select_satellite_slot(0U, 1U, 1000U), "slot select");
+    CHECK(dt295_actual_fixture_satellite_tsid() == 16401U);
+    dt295_actual_fixture_set_tsid_delay(5U);
+    CHECK_RESULT(adapter.select_satellite_tsid(0U, 16400U, 1500U), "delayed TSID select");
+    CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
+    dt295_actual_fixture_set_tsid_delay(0U);
 
     CHECK_RESULT(adapter.close(0U), "close");
     CHECK_RESULT(adapter.shutdown(), "shutdown");

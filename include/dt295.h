@@ -61,6 +61,8 @@ int dt295_terrestrial_rf_divider(unsigned channel, uint16_t *divider);
  * register table. Pass tsid < 0 to tune without selecting a TSID. */
 int dt295_tune_satellite(dt295 *device, uint32_t if_hz, int tsid, char *error, size_t error_size);
 int dt295_select_satellite_tsid(dt295 *device, uint16_t tsid, char *error, size_t error_size);
+int dt295_satellite_tsid_table(dt295 *device, uint16_t tsids[8], char *error, size_t error_size);
+int dt295_select_satellite_slot(dt295 *device, unsigned slot, char *error, size_t error_size);
 int dt295_sleep_satellite(dt295 *device, char *error, size_t error_size);
 int dt295_satellite_status(dt295 *device, dt295_satellite_state *status, char *error,
                            size_t error_size);

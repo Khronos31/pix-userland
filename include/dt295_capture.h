@@ -15,6 +15,7 @@ typedef struct {
     unsigned system;
     uint32_t if_hz;
     int tsid;
+    int slot;
 } dt295_capture_config;
 /* Explicit target-0 terrestrial DT295 path; no automatic retries. */
 int dt295_capture_run(const dt295_capture_config *);

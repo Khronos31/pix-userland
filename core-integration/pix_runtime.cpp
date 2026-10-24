@@ -309,7 +309,7 @@ public:
         profile.readiness = dtv::userland::detail::TuneReadiness::commands;
         profile.min_hz = system == ipc::System::ISDB_S ? 950000000U : 473142857U;
         profile.max_hz = system == ipc::System::ISDB_S ? 2150000000U : 767142857U;
-        profile.slot_count = 0U;
+        profile.slot_count = system == ipc::System::ISDB_S ? 8U : 0U;
         return profile;
     }
     Result<bool> is_locked(std::uint8_t receiver, ipc::System system) noexcept override

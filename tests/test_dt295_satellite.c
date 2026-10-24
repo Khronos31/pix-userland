@@ -95,6 +95,16 @@ int main(void) {
     sat_regs[0xba] = 0xff;
     sat_regs[0xbc] = 0x12;
     sat_regs[0xbd] = 0x34;
+    sat_regs[0xce] = 0x40;
+    sat_regs[0xcf] = 0x10;
+    sat_regs[0xd0] = 0x40;
+    sat_regs[0xd1] = 0x11;
+    sat_regs[0xd2] = 0x40;
+    sat_regs[0xd3] = 0x12;
+    for (unsigned i = 3; i < 8; i++) {
+        sat_regs[0xce + i * 2] = 0xff;
+        sat_regs[0xce + i * 2 + 1] = 0xff;
+    }
     check("BS tune", dt295_tune_satellite(d, 1049480000u, 16400, error, sizeof(error)) == 0);
     check("satellite table applied", sat_regs[0x20] == 1 && sat_regs[0x31] == 18);
     dt295_satellite_state st = {0};
@@ -110,6 +120,15 @@ int main(void) {
     check("TSID reselect", dt295_select_satellite_tsid(d, 29024, error, sizeof(error)) == 0);
     check("TSID reselect status", dt295_satellite_status(d, &st, error, sizeof(error)) == 0);
     check("TSID reselect value", st.selected_tsid == 29024);
+    uint16_t table[8] = {0};
+    check("TSID table", dt295_satellite_tsid_table(d, table, error, sizeof(error)) == 0);
+    check("TSID table values", table[0] == 16400 && table[1] == 16401 && table[2] == 16402 &&
+                                   table[3] == 0xffff && table[7] == 0xffff);
+    check("slot select", dt295_select_satellite_slot(d, 1, error, sizeof(error)) == 0);
+    check("slot status", dt295_satellite_status(d, &st, error, sizeof(error)) == 0);
+    check("slot value", st.selected_tsid == 16401);
+    check("empty slot", dt295_select_satellite_slot(d, 3, error, sizeof(error)) < 0);
+    check("slot range", dt295_select_satellite_slot(d, 8, error, sizeof(error)) < 0);
     check("CS tune", dt295_tune_satellite(d, 2013000000u, 16400, error, sizeof(error)) == 0);
     check("CS tune status", dt295_satellite_status(d, &st, error, sizeof(error)) == 0);
     check("CS tune TSID", st.selected_tsid == 16400);

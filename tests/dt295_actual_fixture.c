@@ -19,6 +19,9 @@ static unsigned pipeline_route_failures;
 static uint8_t pipeline_sat_regs[256];
 static uint8_t pipeline_sat_pending;
 static int pipeline_sat_rf_read;
+static uint8_t pipeline_sat_pending_tsid[2];
+static unsigned pipeline_sat_tsid_delay;
+static int pipeline_omit_cat;
 
 static void pipeline_satellite_write(uint8_t sub)
 {
@@ -30,10 +33,16 @@ static void pipeline_satellite_write(uint8_t sub)
             pipeline_sat_regs[0x11] = p[4];
     } else if (sub == 0) {
         pipeline_sat_regs[p[0]] = p[1];
-        if (p[0] == 0x8f)
-            pipeline_sat_regs[0xe6] = p[1];
-        if (p[0] == 0x90)
-            pipeline_sat_regs[0xe7] = p[1];
+        if (p[0] == 0x8f) {
+            pipeline_sat_pending_tsid[0] = p[1];
+            if (!pipeline_sat_tsid_delay)
+                pipeline_sat_regs[0xe6] = p[1];
+        }
+        if (p[0] == 0x90) {
+            pipeline_sat_pending_tsid[1] = p[1];
+            if (!pipeline_sat_tsid_delay)
+                pipeline_sat_regs[0xe7] = p[1];
+        }
     } else {
         pipeline_sat_pending = p[0];
         pipeline_sat_rf_read = 0;
@@ -53,6 +62,12 @@ static void pipeline_satellite_read(uint8_t sub, uint16_t length)
     }
     if (sub != 1 && sub != 3)
         return;
+    if (pipeline_sat_pending == 0xe6 && pipeline_sat_tsid_delay) {
+        if (--pipeline_sat_tsid_delay == 0) {
+            pipeline_sat_regs[0xe6] = pipeline_sat_pending_tsid[0];
+            pipeline_sat_regs[0xe7] = pipeline_sat_pending_tsid[1];
+        }
+    }
     for (unsigned i = 0; i < n; i++)
         reply[i] = pipeline_sat_regs[(uint8_t)(pipeline_sat_pending + i)];
 }
@@ -69,8 +84,21 @@ int dt295_actual_fixture_open(const char *assets_path)
         return -1;
     pipeline_fake.now = 1000;
     memset(pipeline_sat_regs, 0, sizeof(pipeline_sat_regs));
+    pipeline_sat_regs[0xce] = 0x40;
+    pipeline_sat_regs[0xcf] = 0x10;
+    pipeline_sat_regs[0xd0] = 0x40;
+    pipeline_sat_regs[0xd1] = 0x11;
+    pipeline_sat_regs[0xd2] = 0x40;
+    pipeline_sat_regs[0xd3] = 0x12;
+    for (unsigned i = 3; i < 8; i++) {
+        pipeline_sat_regs[0xce + i * 2] = 0xff;
+        pipeline_sat_regs[0xce + i * 2 + 1] = 0xff;
+    }
     pipeline_sat_pending = 0;
     pipeline_sat_rf_read = 0;
+    pipeline_sat_pending_tsid[0] = pipeline_sat_pending_tsid[1] = 0;
+    pipeline_sat_tsid_delay = 0;
+    pipeline_omit_cat = 0;
     wr16(pipeline_fake.mem + 0x82008, 0x10);
     pipeline_fake.mem[0x822ac] = 0x30;
     create_assets(assets_path, &pipeline_fake);
@@ -172,6 +200,28 @@ void dt295_actual_fixture_advance(uint64_t milliseconds)
     pthread_mutex_unlock(&pipeline_mutex);
 }
 
+void dt295_actual_fixture_set_omit_cat(int enabled)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_omit_cat = enabled != 0;
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+void dt295_actual_fixture_set_tsid_delay(unsigned reads)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_sat_tsid_delay = reads;
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+unsigned dt295_actual_fixture_route_writes(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_route_writes;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
 uint16_t dt295_actual_fixture_satellite_tsid(void)
 {
     pthread_mutex_lock(&pipeline_mutex);
@@ -208,14 +258,6 @@ unsigned dt295_actual_fixture_renewal_challenges(void)
 {
     pthread_mutex_lock(&pipeline_mutex);
     const unsigned value = pipeline_fake.renewal_challenges;
-    pthread_mutex_unlock(&pipeline_mutex);
-    return value;
-}
-
-unsigned dt295_actual_fixture_route_writes(void)
-{
-    pthread_mutex_lock(&pipeline_mutex);
-    const unsigned value = pipeline_route_writes;
     pthread_mutex_unlock(&pipeline_mutex);
     return value;
 }
@@ -336,7 +378,15 @@ void dt295_actual_fixture_bootstrap(uint8_t packets[3][188])
         0x0f, 0xe1, 0x02, 0xf0, 0
     };
     actual_table(packets[0], 0, 0, 1, pat, sizeof(pat));
-    actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+    if (pipeline_omit_cat) {
+        memset(packets[1], 0xff, 188);
+        packets[1][0] = 0x47;
+        packets[1][1] = 0x1f;
+        packets[1][2] = 0xff;
+        packets[1][3] = 0x10;
+    } else {
+        actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+    }
     actual_table(packets[2], 0x100, 2, 1, pmt, sizeof(pmt));
 }
 

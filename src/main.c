@@ -515,17 +515,17 @@ int main(int argc, char **argv) {
     if (system == PIXY_TERRESTRIAL && (tsid >= 0 || slot >= 0)) goto bad;
     if (slot >= 0 && tsid >= 0) goto bad;
     if (model == USB_MODEL_DT295) {
-        if (inspect || raw || replay || control || slot >= 0 || firmware || lna >= 0) {
+        if (inspect || raw || replay || control || firmware || lna >= 0) {
             fprintf(stderr,"DT295 supports terrestrial channel or satellite IF capture only; unsupported options rejected before USB access\n");
             goto bad;
         }
         if (system == PIXY_TERRESTRIAL) {
-            if (frequency || tsid >= 0 || !channel) {
-                fprintf(stderr,"DT295 terrestrial capture requires a channel and no --freq/--tsid\n");
+            if (frequency || tsid >= 0 || slot >= 0 || !channel) {
+                fprintf(stderr,"DT295 terrestrial capture requires a channel and no --freq/--tsid/--slot\n");
                 goto bad;
             }
-        } else if (tsid < 0) {
-            fprintf(stderr,"DT295 satellite capture requires --tsid\n");
+        } else if (tsid < 0 && slot < 0) {
+            fprintf(stderr,"DT295 satellite capture requires --tsid or --slot\n");
             goto bad;
         } else if (!hz) {
             fprintf(stderr,"DT295 satellite capture requires --channel or --freq\n");
@@ -560,7 +560,7 @@ int main(int argc, char **argv) {
         if (!strcmp(output,"-") && os_output_is_terminal(STDOUT_FILENO)) {
             fprintf(stderr,"Refusing binary TS output to a terminal; use -o FILE or a pipe\n");return 2;
         }
-        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted,system,hz,tsid};
+        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted,system,hz,tsid,slot};
         return dt295_capture_run(&cfg);
     }
     stream *s = calloc(1, sizeof(*s));

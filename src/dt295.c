@@ -1021,6 +1021,42 @@ int dt295_select_satellite_tsid(dt295 *d, uint16_t tsid, char *e, size_t en) {
     seterr(e, en, "");
     return 0;
 }
+int dt295_satellite_tsid_table(dt295 *d, uint16_t tsids[8], char *e, size_t en) {
+    if (!d || !tsids || d->cleanup_only || !d->has_session || !d->tuned)
+        return fail(d, e, en, "satellite TSID table requires tuned authenticated session");
+    uint8_t b[16];
+    if (sat_reg_read(d, 0xce, b, sizeof(b)))
+        return fail(d, e, en, "satellite TSID table read failed");
+    for (unsigned i = 0; i < 8; i++)
+        tsids[i] = (uint16_t)(b[i * 2] << 8 | b[i * 2 + 1]);
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_select_satellite_slot(dt295 *d, unsigned slot, char *e, size_t en) {
+    uint16_t tsids[8];
+    if (dt295_satellite_tsid_table(d, tsids, e, en))
+        return -1;
+    if (slot > 7)
+        return fail(d, e, en, "satellite slot must be 0..7");
+    const uint16_t tsid = tsids[slot];
+    if (tsid == 0 || tsid == 0xffff)
+        return fail(d, e, en, "satellite slot has no usable TSID");
+    if (dt295_select_satellite_tsid(d, tsid, e, en))
+        return -1;
+    const uint64_t end = now_ms(d) + 3000;
+    for (;;) {
+        dt295_satellite_state state = {0};
+        if (dt295_satellite_status(d, &state, e, en))
+            return -1;
+        if (state.locked && state.selected_tsid == tsid)
+            break;
+        if (now_ms(d) >= end)
+            return fail(d, e, en, "satellite slot TSID did not lock");
+        sleep_ms(d, 100);
+    }
+    seterr(e, en, "");
+    return 0;
+}
 int dt295_satellite_status(dt295 *d, dt295_satellite_state *status, char *e, size_t en) {
     if (!d || !status || d->cleanup_only || !d->has_session)
         return fail(d, e, en, "satellite status requires authenticated session");
