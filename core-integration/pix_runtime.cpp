@@ -764,7 +764,7 @@ Result<void> build_list(const LocatedDevice& device, const std::string& version,
     list.receivers.value.count = 1U;
     ReceiverDescriptor& receiver = list.receivers.value.items[0];
     receiver.id = 0U;
-    receiver.systems.mask = dt295 ? 0x01U : 0x03U;
+    receiver.systems.mask = 0x03U;
     receiver.binding.present = true;
     receiver.binding.value = Binding{0U, 0U};
     receiver.capabilities.ts_scope = TsScope::multiplex;
