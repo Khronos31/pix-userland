@@ -7,7 +7,7 @@ find_package(Threads REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
 
 set(PIX_CORE_SOURCE_DIR "" CACHE PATH "Local dtv-userland-core source override")
-set(PIX_CORE_REVISION "5c392159f1fb3803f416a2907eb20ccc52f65254" CACHE STRING
+set(PIX_CORE_REVISION "a50fef9b45bd497c1214cdc20e268dfda897fa9c" CACHE STRING
     "dtv-userland-core revision")
 
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
