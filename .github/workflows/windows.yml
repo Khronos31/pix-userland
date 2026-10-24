@@ -58,6 +58,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Select native Windows Python for the existing platform checks
+        shell: pwsh
+        run: '"PIX_LEGACY_PYTHON=$((Get-Command python).Source)" >> $env:GITHUB_ENV'
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
         with:
           msystem: MINGW64
@@ -75,4 +78,5 @@ jobs:
           sh tools/copy-legacy-test-source.sh "$PWD" "$PWD/build/legacy-tests"
           cd build/legacy-tests
           make clean
-          make -j4 test CFLAGS='-O2 -g -Werror' OS_LIBS='-lbcrypt' USB_CFLAGS="-I$prefix/include/libusb-1.0" USB_LIBS="$prefix/lib/libusb-1.0.a"
+          native_python=$(cygpath -u "$PIX_LEGACY_PYTHON")
+          make -j4 test PYTHON="$native_python" CFLAGS='-O2 -g -Werror' OS_LIBS='-lbcrypt' USB_CFLAGS="-I$prefix/include/libusb-1.0" USB_LIBS="$prefix/lib/libusb-1.0.a"

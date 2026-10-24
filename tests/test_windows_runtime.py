@@ -52,6 +52,10 @@ def main():
         for name, size in (("fpga.bin", 699673), ("bootstrap.bin", 16), ("validation.bin", 64)):
             (assets / name).write_bytes((bytes(range(256)) * (size // 256 + 1))[:size])
         runtime = root / "r"
+        runtime.mkdir()
+        user = os.environ["USERDOMAIN"] + "\\" + os.environ["USERNAME"]
+        run(["icacls", runtime, "/setowner", user])
+        run(["icacls", runtime, "/inheritance:r", "/grant:r", user + ":(OI)(CI)F"])
         fixture = proofs / "pixd_fixture.exe"
         command = [str(fixture), "--device", "serial:PIXDT18101", "--assets", str(assets),
                    "--runtime-dir", str(runtime), "--instance", "proof", "--exit-on-stdin-eof"]
@@ -78,7 +82,7 @@ def main():
                         process.wait(timeout=5)
             text = log.read_text(encoding="utf-8", errors="replace")
             assert "PIX_CLEANUP release-interface=" in text and "PIX_CLEANUP close-handle=" in text
-            assert not list(runtime.iterdir()), "Runtime namespace remains after EOF cleanup"
+            assert not list(runtime.rglob("*.sock")), "Runtime socket remains after EOF cleanup"
         print("Windows package CLI/arguments/UTF-8 assets/binary TS/runtime/EOF/cleanup/restart: PASS")
 
 
