@@ -9,7 +9,7 @@
 struct dt181_capture_host {
     dt181_session *session;
     dt181_capture_bridge *bridge;
-    pthread_t worker_thread;
+    os_thread worker_thread;
     int worker_started;
     int usb_started;
     int first_error;
@@ -44,7 +44,7 @@ int dt181_capture_host_start(dt181_capture_host **out, void *opaque_session,
     host->usb_started = 1;
     dt181_capture_bridge_init_decoder(host->bridge, context, sink, user,
                                      &host->bridge->check);
-    rc = pthread_create(&host->worker_thread, NULL, worker, host->bridge);
+    rc = os_thread_create(&host->worker_thread, NULL, worker, host->bridge);
     if (rc != 0) {
         (void)dt181_session_stop_hardware(session);
         (void)dt181_session_stop_usb(session);
@@ -87,7 +87,10 @@ int dt181_capture_host_stop(dt181_capture_host *host)
         host->bridge->done = 1;
         os_cond_signal(&host->bridge->cond);
         os_mutex_unlock(&host->bridge->mutex);
-        if (pthread_join(host->worker_thread, NULL) != 0) return -1;
+        if (os_thread_join(host->worker_thread, 0) != 0) {
+            if (!host->first_error) host->first_error = -1;
+            return host->first_error;
+        }
         host->worker_started = 0;
     }
     if (host->bridge->error && !host->first_error) host->first_error = -1;

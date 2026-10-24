@@ -178,7 +178,7 @@ add_executable(pix-ts tools/pix_ts.cpp)
 target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
-target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning)
+target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
 
 add_executable(pixd_fixture pixd.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)

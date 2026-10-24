@@ -7,7 +7,12 @@
 #include "dtv/userland/identity.h"
 #include <dtv/userland/json.h>
 #include <libusb.h>
+#ifdef _WIN32
+#include <px4/windows_tuner_nonce.h>
+#include "px4_windows_args.h"
+#else
 #include <px4/posix_tuner_nonce.h>
+#endif
 #include "px4d_signals.h"
 
 #include <array>
@@ -243,7 +248,7 @@ const char* model_name(pix::runtime::Model model) noexcept
 
 }  // namespace
 
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     if (argc == 2 && argv != nullptr && argv[1] != nullptr) {
         const std::string_view option(argv[1]);
@@ -287,7 +292,11 @@ int main(int argc, char** argv)
         instance.assign(canonical.value().bytes.data(), canonical.value().length);
     }
     std::unique_ptr<TunerNonceSource> nonce_source(new (std::nothrow)
+#ifdef _WIN32
+        px4::userland::ipc::windows::WindowsTunerNonceSource());
+#else
         px4::userland::ipc::posix::PosixTunerNonceSource());
+#endif
     if (!nonce_source) return fail(Error::RESOURCE_LIMIT);
     const auto epoch = nonce_source->generate();
     if (!epoch) return fail(epoch.error());
@@ -358,4 +367,20 @@ int main(int argc, char** argv)
     }
     if (loop_error != Error::OK) return fail(loop_error);
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+#ifdef _WIN32
+    std::vector<std::string> owned = px4::userland::cli::windows_argv_utf8(argc, argv);
+    if (owned.empty()) return 2;
+    std::vector<char*> views;
+    views.reserve(owned.size());
+    for (std::string& value : owned) views.push_back(value.data());
+    const int result = run(static_cast<int>(views.size()), views.data());
+    px4::userland::px4d::notify_cleanup_complete();
+    return result;
+#else
+    return run(argc, argv);
+#endif
 }
