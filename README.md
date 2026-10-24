@@ -366,14 +366,13 @@ ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-por
 
 ### Windows でのビルド
 
-MSYS2 の MINGW64 環境でビルドします。環境内に gcc, make, curl, p7zip, CMake, pkgconf, python 等のツールが必要です。
+Linux x86_64 で固定 llvm-mingw 20250910 UCRT を使いクロスビルドします。make, curl, tar, xz, bzip2, CMake, pkg-config, Python 3 が必要です。Core・製品・libusb 1.0.30 を同じ toolchain でソースからビルドし、他ABIの静的ライブラリは混ぜません。
 ```sh
 ./tools/build-windows.sh
 ```
 libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe` / `pixctl.exe` / `pix-ts.exe`）を生成する手順です。
 
-> [!WARNING]
-> 現在の `pixd` / `pix-ts` の製品コードは POSIX 前提（`pthread`、`sigaction`、`O_CLOEXEC` など）で、MinGW-w64 でのコンパイルが通りません。Windows x64 の3コマンド配布は、製品コードの Windows 対応が済むまで生成できません。詳細は [docs/releases.md](docs/releases.md) を参照してください。
+`pixd --exit-on-stdin-eof` は親の標準入力が閉じたときに停止・解放します。Windowsの引数とasset/output pathはUTF-8から変換し、TSはbinaryで書き込みます。クロスビルド・PE監査とWindows runner上の実行proofは別々に確認します。対応sourceからの追加取得なし再ビルドは [docs/releases.md](docs/releases.md) を参照してください。
 
 ## 関連ドキュメント
 

@@ -70,6 +70,10 @@ def source_members(commit):
         "core-integration/dtv-userland-core.revision": verify.CORE_PIN.encode() + b"\n",
         "core-integration/pixd.cpp": b"pixd", "core-integration/tools/pixctl.cpp": b"pixctl",
         "core-integration/tools/pix_ts.cpp": b"pix-ts",
+        "tools/build-windows.sh": b"build", "include/os.h": b"os",
+        "src/dt181_capture_host.c": b"capture", "pix-dt181-consumer.cpp": b"consumer",
+        "core-integration/tests/windows_os_thread_proof.c": b"thread-proof",
+        "tests/test_windows_runtime.py": b"runtime-proof",
         "third_party/dtv-userland-core/LICENSE": b"mit",
         "third_party/dtv-userland-core/PROVENANCE.json": b"{}",
         "third_party/dtv-userland-core/CMakeLists.txt": b"project()",
@@ -83,7 +87,7 @@ def source_members(commit):
     }
     metadata = {
         "project": "pix-userland", "version": finalize.pack.VERSION, "target": "source",
-        "commit": commit, "libusb": "1.0.30", "private": True, "libusb_linkage": "static",
+        "commit": commit, "libusb": "1.0.30", "private": False, "libusb_linkage": "static",
         "device_assets": False, **identity,
     }
     files["release-info.json"] = json.dumps(metadata).encode() + b"\n"
@@ -103,7 +107,7 @@ def binary_members(target, commit):
         "release-info.json": json.dumps({
             "project": "pix-userland", "version": finalize.pack.VERSION,
             "target": target, "commit": commit, "libusb": "1.0.30",
-            "private": True, "libusb_linkage": "static", "device_assets": False,
+            "private": False, "libusb_linkage": "static", "device_assets": False,
             "dtv_userland_core_commit": verify.CORE_PIN,
         }).encode() + b"\n",
         "LICENSE": b"license", "COPYING.libusb": b"copying",
@@ -297,7 +301,9 @@ class TestDT295Packaging(unittest.TestCase):
     for required in ("core-integration/CMakeLists.txt", "core-integration/dtv-userland-core.revision",
                      "core-integration/pixd.cpp", "core-integration/tools/pixctl.cpp",
                      "core-integration/tools/pix_ts.cpp", "pix-dt181-receiver-adapter.cpp",
-                     "pix-dt295-receiver-adapter.cpp", "tests/pix_dt295_adapter_lifecycle_proof.cpp"):
+                     "pix-dt295-receiver-adapter.cpp", "tests/pix_dt295_adapter_lifecycle_proof.cpp",
+                     "tools/build-windows.sh", "core-integration/tests/windows_os_thread_proof.c",
+                     "tests/test_windows_runtime.py"):
       self.assertIn(required, names)
 
 

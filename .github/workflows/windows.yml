@@ -1,0 +1,72 @@
+name: Windows three commands
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  cross-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config make curl xz-utils bzip2 binutils
+      - name: Fetch the fixed Core source
+        run: |
+          git init build/windows-core
+          git -C build/windows-core fetch --depth=1 https://github.com/Khronos31/dtv-userland-core.git "$(cat core-integration/dtv-userland-core.revision)"
+          git -C build/windows-core checkout --detach FETCH_HEAD
+      - name: Build and audit the three PEs and native fixture
+        run: |
+          DTV_USERLAND_CORE_SOURCE_DIR="$PWD/build/windows-core" PIX_WINDOWS_PROOFS=1 tools/build-windows.sh
+          for program in pixd pixctl pix-ts; do
+            python3 tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"
+          done
+          python3 tools/package-release.py windows-x64 build/windows-x64 --output-dir build/windows-dist
+      - name: Rebuild the corresponding source without downloads
+        run: |
+          tools/package-source.sh --core-source-root build/windows-core --output-dir build/windows-source
+          LLVM_MINGW_CACHE="$PWD/build/deps" tools/check-source-rebuild.sh build/windows-source/pix-userland-*-source.tar.gz "$RUNNER_TEMP/windows-source-rebuild" windows-x64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-three-commands
+          path: |
+            build/windows-dist/*.tar.gz
+            build/windows-x64/proofs/*.exe
+          if-no-files-found: error
+  runtime:
+    needs: cross-build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-three-commands
+          path: build/incoming
+      - shell: pwsh
+        run: |
+          $archive = (Get-ChildItem build/incoming/windows-dist/*.tar.gz).FullName
+          python tests/test_windows_runtime.py $archive build/incoming/windows-x64/proofs
+          if ($LASTEXITCODE -ne 0) { throw "Windows runtime proof failed" }
+  legacy-tests:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-libusb make python
+      - shell: msys2 {0}
+        run: |
+          mkdir -p build/legacy-tests
+          sh tools/copy-legacy-test-source.sh "$PWD" "$PWD/build/legacy-tests"
+          cd build/legacy-tests
+          make clean
+          make -j4 test CFLAGS='-O2 -g -Werror' OS_LIBS='-lbcrypt' USB_CFLAGS='-I/mingw64/include/libusb-1.0' USB_LIBS='-L/mingw64/lib -lusb-1.0'
