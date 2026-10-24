@@ -347,8 +347,18 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     fprintf(stderr, "DT295 capture currently supports macOS terrestrial target 0 only\n");
     return 2;
 #else
-    if (!cfg || !cfg->assets || !cfg->output || cfg->channel < 13 || cfg->channel > 62)
+    if (!cfg || !cfg->assets || !cfg->output)
         return 2;
+    if (cfg->system == PIXY_TERRESTRIAL) {
+        if (cfg->channel < 13 || cfg->channel > 62)
+            return 2;
+    } else if (cfg->system == PIXY_BS || cfg->system == PIXY_CS) {
+        if (cfg->if_hz < 950000000u || cfg->if_hz > 2150000000u || cfg->tsid < 0 ||
+            cfg->tsid > 65535)
+            return 2;
+    } else {
+        return 2;
+    }
     char error[256] = {0}, stop_error[256] = {0}, shutdown_error[256] = {0},
          diag_path[4096];
     int rc = 0, recording = 0, native_abandoned = 0, lock_fd = -1;
@@ -439,7 +449,10 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         rc = 9;
         goto done;
     }
-    if (dt295_tune_terrestrial(d, cfg->channel, error, sizeof(error))) {
+    int tuned = cfg->system == PIXY_TERRESTRIAL
+                    ? dt295_tune_terrestrial(d, cfg->channel, error, sizeof(error))
+                    : dt295_tune_satellite(d, cfg->if_hz, cfg->tsid, error, sizeof(error));
+    if (tuned) {
         rc = 5;
         goto done;
     }

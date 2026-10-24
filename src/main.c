@@ -181,7 +181,7 @@ static void usage(FILE *f) {
         f,
         "pix-ts " VERSION " — PIX-DT181-PU0 libusb TS receiver\n"
         "Usage: pix-ts --system terrestrial|bs|cs --channel N [options]\n"
-        "      --model MODEL   dt181 (default) or dt295 (macOS terrestrial target 0)\n"
+        "      --model MODEL   dt181 (default) or dt295 (macOS target 0)\n"
         "  -c, --channel N       number or T27/BS01_0/CS02 (terrestrial 13..62, BS odd 1..23, CS even "
         "2..24)\n"
         "  -s, --system TYPE     terrestrial (default), bs, cs\n"
@@ -515,9 +515,20 @@ int main(int argc, char **argv) {
     if (system == PIXY_TERRESTRIAL && (tsid >= 0 || slot >= 0)) goto bad;
     if (slot >= 0 && tsid >= 0) goto bad;
     if (model == USB_MODEL_DT295) {
-        if (inspect || raw || replay || control || frequency || system != PIXY_TERRESTRIAL ||
-            tsid >= 0 || slot >= 0 || firmware || lna >= 0 || !channel) {
-            fprintf(stderr,"DT295 supports terrestrial channel capture only; unsupported options rejected before USB access\n");
+        if (inspect || raw || replay || control || slot >= 0 || firmware || lna >= 0) {
+            fprintf(stderr,"DT295 supports terrestrial channel or satellite IF capture only; unsupported options rejected before USB access\n");
+            goto bad;
+        }
+        if (system == PIXY_TERRESTRIAL) {
+            if (frequency || tsid >= 0 || !channel) {
+                fprintf(stderr,"DT295 terrestrial capture requires a channel and no --freq/--tsid\n");
+                goto bad;
+            }
+        } else if (tsid < 0) {
+            fprintf(stderr,"DT295 satellite capture requires --tsid\n");
+            goto bad;
+        } else if (!hz) {
+            fprintf(stderr,"DT295 satellite capture requires --channel or --freq\n");
             goto bad;
         }
     }
@@ -549,7 +560,7 @@ int main(int argc, char **argv) {
         if (!strcmp(output,"-") && os_output_is_terminal(STDOUT_FILENO)) {
             fprintf(stderr,"Refusing binary TS output to a terminal; use -o FILE or a pipe\n");return 2;
         }
-        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted};
+        dt295_capture_config cfg = {assets,output,diag_dir,selector,channel,seconds,fd,detach,verbose,pid_mask,filter_pids,&interrupted,system,hz,tsid};
         return dt295_capture_run(&cfg);
     }
     stream *s = calloc(1, sizeof(*s));
