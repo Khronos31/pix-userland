@@ -515,7 +515,24 @@ static void test_bad_crc_same_version_and_capacity(void) {
     dt295_routes_destroy(r);
 }
 
+static void test_satellite_readiness_without_cat(void) {
+    dt295_routes *r = dt295_routes_create();
+    assert(r);
+    dt295_routes_snapshot s;
+    uint8_t b[TEST_SECTION_MAX];
+    feed_pat(r, 31, 0, 1, 1, 0x100);
+    feed_pat(r, 31, 1, 1, 1, 0x100);
+    size_t n = make_pmt(b, 0, 1, 0x100, 0, 0);
+    feed_section(r, 0x100, b, n);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.have_pat && s.missing_pmts == 0 && !s.have_cat && !s.ready);
+    dt295_routes_set_satellite(r, 1);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.ready);
+    dt295_routes_destroy(r);
+}
 int main(void) {
+    test_satellite_readiness_without_cat();
     test_completeness_versions_and_planning();
     test_stable_bootstrap_slots();
     test_unsupported_multi_ecm_pmt_update_preserves_commit();

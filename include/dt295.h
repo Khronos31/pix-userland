@@ -19,6 +19,13 @@ typedef struct {
     uint16_t value;
 } dt295_field;
 
+typedef struct {
+    uint16_t selected_tsid;
+    uint8_t locked;
+    uint8_t agc_raw;
+    uint16_t cn_raw;
+} dt295_satellite_state;
+
 /* USB operations return 0 on success. actual must equal the requested length
  * for control transfers and OUT transfers; a timed-out IN may return bytes. */
 typedef struct {
@@ -49,6 +56,17 @@ int dt295_card_initialize(dt295 *device, char *error, size_t error_size);
 int dt295_card_activate(dt295 *device, unsigned timeout_ms, char *error, size_t error_size);
 int dt295_tune_terrestrial(dt295 *device, unsigned channel, char *error, size_t error_size);
 int dt295_terrestrial_rf_divider(unsigned channel, uint16_t *divider);
+
+/* Satellite IF tuning requires a bundle rebuilt with the driver satellite
+ * register table. Pass tsid < 0 to tune without selecting a TSID. */
+int dt295_tune_satellite(dt295 *device, uint32_t if_hz, int tsid, char *error, size_t error_size);
+int dt295_select_satellite_tsid(dt295 *device, uint16_t tsid, char *error, size_t error_size);
+int dt295_satellite_tsid_table(dt295 *device, uint16_t tsids[8], char *error, size_t error_size);
+int dt295_satellite_wait_lock(dt295 *device, unsigned timeout_ms, char *error, size_t error_size);
+int dt295_select_satellite_slot(dt295 *device, unsigned slot, char *error, size_t error_size);
+int dt295_sleep_satellite(dt295 *device, char *error, size_t error_size);
+int dt295_satellite_status(dt295 *device, dt295_satellite_state *status, char *error,
+                           size_t error_size);
 
 /* Routes must already have passed dt295_routes validation. Fields are the
  * bounded, private TRC configuration supplied in the asset bundle. */

@@ -54,7 +54,7 @@ def extract_driver_material(path):
         raise ValueError(f"required material at VA {va:x} is outside driver sections")
 
     material = bytearray(MAT_END - MAT_BASE)
-    spans = ((0x841D0, 22 * 8), (0x84630, 26 * 8), (0x84700, 28 * 8),
+    spans = ((0x841D0, 22 * 8), (0x845A0, 18 * 8), (0x84630, 26 * 8), (0x84700, 28 * 8),
              (0x85148, 30), (0x85168, 12), (0x85178, 28),
              (0x85198, 16), (0x851A8, 16), (0x851B8, 16), (0x851C8, 16),
              (0x851D8, 16), (0x851E8, 16), (0x851F8, 16), (0x85208, 16),

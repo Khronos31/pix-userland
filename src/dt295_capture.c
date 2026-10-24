@@ -347,8 +347,19 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     fprintf(stderr, "DT295 capture currently supports macOS terrestrial target 0 only\n");
     return 2;
 #else
-    if (!cfg || !cfg->assets || !cfg->output || cfg->channel < 13 || cfg->channel > 62)
+    if (!cfg || !cfg->assets || !cfg->output)
         return 2;
+    if (cfg->system == PIXY_TERRESTRIAL) {
+        if (cfg->channel < 13 || cfg->channel > 62)
+            return 2;
+    } else if (cfg->system == PIXY_BS || cfg->system == PIXY_CS) {
+        if (cfg->if_hz < 950000000u || cfg->if_hz > 2150000000u || cfg->tsid < -1 ||
+            cfg->tsid > 65535 || cfg->slot < -1 || cfg->slot > 7 ||
+            ((cfg->tsid >= 0) == (cfg->slot >= 0)))
+            return 2;
+    } else {
+        return 2;
+    }
     char error[256] = {0}, stop_error[256] = {0}, shutdown_error[256] = {0},
          diag_path[4096];
     int rc = 0, recording = 0, native_abandoned = 0, lock_fd = -1;
@@ -393,6 +404,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         rc = 70;
         goto done;
     }
+    dt295_routes_set_satellite(tables, cfg->system != PIXY_TERRESTRIAL);
     /* Both helpers must be created before libusb can create internal threads. */
     int e = ts_output_open(cfg->output, STDOUT_FILENO, NULL, &output);
     if (e) {
@@ -439,8 +451,19 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         rc = 9;
         goto done;
     }
-    if (dt295_tune_terrestrial(d, cfg->channel, error, sizeof(error))) {
+    int tuned = cfg->system == PIXY_TERRESTRIAL
+                    ? dt295_tune_terrestrial(d, cfg->channel, error, sizeof(error))
+                    : dt295_tune_satellite(d, cfg->if_hz, cfg->tsid, error, sizeof(error));
+    if (!tuned && cfg->system != PIXY_TERRESTRIAL && cfg->slot >= 0)
+        tuned = dt295_select_satellite_slot(d, (unsigned)cfg->slot, error, sizeof(error));
+    if (tuned) {
         rc = 5;
+        goto done;
+    }
+    dt295_satellite_state sat_state = {0};
+    if (cfg->system != PIXY_TERRESTRIAL &&
+        dt295_satellite_status(d, &sat_state, error, sizeof(error))) {
+        rc = 7;
         goto done;
     }
     dt295_route_plan live = {0}, bootstrap;
@@ -538,6 +561,14 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         }
         dt295_routes_snapshot snapshot;
         dt295_routes_snapshot_get(tables, &snapshot);
+        if (cfg->system != PIXY_TERRESTRIAL && snapshot.have_pat &&
+            snapshot.tsid != sat_state.selected_tsid) {
+            rc = 8;
+            snprintf(error, sizeof(error),
+                     "PAT TSID %u differs from selected TSID %u", (unsigned)snapshot.tsid,
+                     (unsigned)sat_state.selected_tsid);
+            break;
+        }
         if (snapshot.unsupported_tables) {
             rc = 8;
             snprintf(error, sizeof(error),

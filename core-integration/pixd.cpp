@@ -185,7 +185,7 @@ int write_discovery_json()
         receiver.receiver = 0U;
         receiver.device = device.device;
         receiver.local = 0U;
-        receiver.systems.mask = dt181 ? 0x03U : 0x01U;
+        receiver.systems.mask = 0x03U;
         receivers.push_back(receiver);
         device.receivers_known = true;
         device.receiver_count = 1U;

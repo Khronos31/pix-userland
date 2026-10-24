@@ -276,7 +276,7 @@ int main()
     if (list_text.find("\"model\":\"PIX-DT295\"") == std::string::npos ||
         list_text.find("\"usb\":\"06b8:103b\"") == std::string::npos ||
         list_text.find("\"serial\":\"PIXDT29501\"") == std::string::npos ||
-        list_text.find("\"systems\":[\"ISDB-T\"]") == std::string::npos) return 24;
+        list_text.find("\"systems\":[\"ISDB-T\",\"ISDB-S\"]") == std::string::npos) return 24;
     const pid_t ts_version = launch(PIXTS_PATH, {"--version"}, ts_version_log);
     int ts_version_status = 0;
     if (ts_version <= 0 || ::waitpid(ts_version, &ts_version_status, 0) != ts_version ||

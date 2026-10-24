@@ -762,16 +762,12 @@ static int tune_channel(dt295 *d, unsigned ch) {
     return demod_write(d, 0x1d, 2) || demod_write(d, 0x1e, 0x2a) || demod_write(d, 0x1f, 0x8a) ? -1
                                                                                                : 0;
 }
-int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
-    if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
-        return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
-    if (drain_state(d) || d->state != 0x11)
-        return fail(d, e, en, "terrestrial tuning requires authenticated idle state");
+static int tuner_initialize(dt295 *d) {
     if (field(d, 0x90014, 1, 1, 1) || field(d, 0x90018, 1, 1, 0))
-        return fail(d, e, en, "tuner reset failed");
+        return -1;
     sleep_ms(d, 20);
     if (field(d, 0x90018, 1, 1, 1))
-        return fail(d, e, en, "tuner reset failed");
+        return -1;
     sleep_ms(d, 5);
     if (table_write(d, 0x841d0, 22, 0) || rf_write(d, 255, 0) || table_write(d, 0x84630, 26, 1) ||
         rf_write(d, 0, 1) || rf_field(d, 0x31, 0x2f, 0xd0) || rf_write(d, 0, 0) ||
@@ -780,15 +776,319 @@ int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
         rf_field(d, 8, 0xf2, 5) || rf_field(d, 9, 0x80, 0x42) || rf_field(d, 0x5e, 0xef, 0) ||
         rf_write(d, 10, 0) || table_write(d, 0x84700, 28, 1) || rf_write(d, 0x6d, 10) ||
         rf_write(d, 3, 0) || rf_write(d, 3, 1))
-        return fail(d, e, en, "terrestrial tuner initialization failed");
+        return -1;
     sleep_ms(d, 100);
     if (frequency(d, 473142857) || rf_write(d, 0x0b, 1) || rf_write(d, 0x12, 1))
-        return fail(d, e, en, "terrestrial tuner setup failed");
+        return -1;
     sleep_ms(d, 20);
     if (rf_write(d, 0x12, 0) || rf_write(d, 0x0b, 0) || demod_write(d, 0x25, 0) ||
-        demod_write(d, 0x23, 0x4d) || demod_write(d, 3, 0x90) || tune_channel(d, channel))
+        demod_write(d, 0x23, 0x4d) || demod_write(d, 3, 0x90))
+        return -1;
+    return 0;
+}
+int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
+        return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
+    if (drain_state(d) || d->state != 0x11)
+        return fail(d, e, en, "terrestrial tuning requires authenticated idle state");
+    if (tuner_initialize(d))
+        return fail(d, e, en, "terrestrial tuner initialization failed");
+    if (tune_channel(d, channel))
         return fail(d, e, en, "terrestrial channel tune failed; no command was retried");
     d->tuned = 1;
+    seterr(e, en, "");
+    return 0;
+}
+
+static int sat_wr(dt295 *d, const uint8_t *p, size_t n) {
+    return i2c(d, 0x22, p, n, NULL, 0);
+}
+static int sat_reg_write(dt295 *d, uint8_t r, uint8_t v) {
+    uint8_t b[2] = {r, v};
+    return sat_wr(d, b, 2);
+}
+static int sat_reg_read(dt295 *d, uint8_t r, uint8_t *p, size_t n) {
+    return i2c(d, 0x22, &r, 1, p, n);
+}
+static int sat_rf_reg(dt295 *d, uint8_t r, uint8_t v) {
+    uint8_t b[4] = {0xfe, 0xc0, r, v};
+    return sat_wr(d, b, sizeof(b));
+}
+static int sat_rf_block(dt295 *d, uint8_t r, const uint8_t *p, size_t n) {
+    uint8_t b[16] = {0xfe, 0xc0, r};
+    if (n > sizeof(b) - 3)
+        return -1;
+    memcpy(b + 3, p, n);
+    return sat_wr(d, b, 3 + n);
+}
+static int sat_rf_read(dt295 *d, uint8_t *p, size_t n) {
+    uint8_t b[2] = {0xfe, 0xc1};
+    return i2c(d, 0x22, b, sizeof(b), p, n);
+}
+static int sat_mute(dt295 *d, int enabled) {
+    return sat_reg_write(d, 0x1c, enabled ? 0xaa : 8) || sat_reg_write(d, 0x1f, enabled ? 0x2a : 8)
+               ? -1
+               : 0;
+}
+static int sat_rf_sleep(dt295 *d) {
+    if (sat_rf_reg(d, 0x2a, 0xb9) || sat_rf_reg(d, 0x29, 0x70) ||
+        sat_rf_reg(d, 0x28, 0x3e) || sat_rf_reg(d, 0x2a, 0x19) ||
+        sat_rf_reg(d, 0x1c, 0))
+        return -1;
+    const uint8_t b[2] = {0xc0, 0xa7};
+    return sat_rf_block(d, 0x11, b, sizeof(b));
+}
+static int sat_rf_wake(dt295 *d) {
+    const uint8_t b[2] = {0x00, 0xa7};
+    if (sat_rf_block(d, 0x11, b, sizeof(b)))
+        return -1;
+    return sat_rf_reg(d, 0x2a, 0xb9) || sat_rf_reg(d, 0x1c, 0xc0) ||
+                   sat_rf_reg(d, 0x29, 0x71)
+               ? -1
+               : 0;
+}
+static int sat_wake(dt295 *d) {
+    uint8_t v;
+    if (sat_reg_read(d, 0x1e, &v, 1) || sat_reg_write(d, 0x1e, (uint8_t)((v & 0xcf) | 0x20)) ||
+        sat_rf_wake(d))
+        return -1;
+    return sat_reg_write(d, 0x17, 0) || sat_reg_write(d, 0x1e, 0x20) ||
+                   sat_reg_write(d, 0x0a, 0xff) || sat_reg_write(d, 3, 1)
+               ? -1
+               : 0;
+}
+static int sat_sleep_sequence(dt295 *d) {
+    uint8_t v;
+    if (sat_reg_write(d, 0x1e, 0x28) || sat_reg_write(d, 0x0a, 0) || sat_reg_write(d, 3, 1) ||
+        sat_reg_write(d, 0x17, 1) || sat_reg_read(d, 0x1e, &v, 1) ||
+        sat_reg_write(d, 0x1e, (uint8_t)((v & 0xcf) | 0x30)))
+        return -1;
+    return sat_rf_sleep(d);
+}
+static int sat_initialize(dt295 *d) {
+    const uint8_t *p = mat(d, 0x845a0, 18 * 8);
+    if (!p)
+        return -1;
+    unsigned nonzero = 0;
+    for (size_t i = 0; i < 18 * 8; i++)
+        nonzero |= p[i];
+    if (!nonzero)
+        return -1;
+    if (sat_reg_write(d, 1, 0x90))
+        return -1;
+    for (size_t i = 0; i < 18; i++) {
+        uint32_t r = le32(p + i * 8), v = le32(p + i * 8 + 4);
+        if (r > 255 || v > 255 || sat_reg_write(d, (uint8_t)r, (uint8_t)v))
+            return -1;
+    }
+    sleep_ms(d, 4);
+    if (sat_rf_reg(d, 0x2a, 0xb9))
+        return -1;
+    const uint8_t mode[3] = {0x10, 0x10, 0};
+    if (sat_rf_block(d, 6, mode, sizeof(mode)) || sat_rf_reg(d, 0x0a, 0) ||
+        sat_rf_reg(d, 0x0e, 0) || sat_rf_sleep(d))
+        return -1;
+    sleep_ms(d, 6);
+    return 0;
+}
+static int sat_terrestrial_sleep(dt295 *d) {
+    return demod_write(d, 0x25, 0) || demod_write(d, 0x23, 0x4d) || demod_write(d, 3, 0x90) ||
+                   rf_write(d, 0x12, 0) || rf_write(d, 0x0b, 0)
+               ? -1
+               : 0;
+}
+static int sat_frequency(dt295 *d, uint32_t hz) {
+    if (hz < 950000000u || hz > 2150000000u)
+        return -1;
+    uint64_t f = ((uint64_t)hz / 1000u + 500u) / 1000u * 1000u;
+    unsigned div = f <= 1100000u ? 4u : 2u;
+    uint32_t n = (uint32_t)(((uint64_t)div * f / 2u + 500u) / 1000u);
+    static const struct {
+        uint32_t limit;
+        uint8_t band;
+        uint8_t mode;
+    } bands[] = {{975000u, 0x1c, 1}, {1050000u, 0x18, 2}, {1150000u, 0x14, 2},
+                 {1250000u, 0x10, 3}, {1350000u, 0x0c, 4}, {1450000u, 0x0a, 4},
+                 {1600000u, 7, 5},    {1800000u, 4, 2},    {2000000u, 2, 1},
+                 {2151000u, 0, 0}};
+    uint8_t band = 0, mode = 0;
+    for (size_t i = 0; i < sizeof(bands) / sizeof(bands[0]); i++) {
+        if (f < bands[i].limit) {
+            band = bands[i].band;
+            mode = bands[i].mode;
+            break;
+        }
+    }
+    const uint8_t params[5] = {(uint8_t)(n >> 7), (uint8_t)(n * 2u), 0, 0,
+                               f <= 1100000u ? 0x80 : 0};
+    if (sat_rf_block(d, 0, params, sizeof(params)) ||
+        sat_rf_reg(d, 9, (uint8_t)(mode << 5 | band)))
+        return -1;
+    if (sat_rf_reg(d, 0x37, 0xac) || sat_rf_reg(d, 5, 0x80) ||
+        sat_rf_reg(d, 0x2a, 0xbb))
+        return -1;
+    sleep_ms(d, 10);
+    return 0;
+}
+static int sat_mode(dt295 *d) {
+    uint8_t v;
+    if (sat_reg_read(d, 0xa5, &v, 1) || sat_reg_write(d, 0xa5, (uint8_t)(v | 0x40)) ||
+        sat_reg_read(d, 0xa3, &v, 1))
+        return -1;
+    return sat_reg_write(d, 0xa3, (uint8_t)((v & 0x88) | 0x11));
+}
+static int sat_select_tsid(dt295 *d, uint16_t tsid) {
+    return sat_reg_write(d, 0x8f, (uint8_t)(tsid >> 8)) ||
+                   sat_reg_write(d, 0x90, (uint8_t)tsid)
+               ? -1
+               : 0;
+}
+static int sat_tune(dt295 *d, uint32_t hz, int tsid) {
+    if (sat_wake(d) || sat_mute(d, 1))
+        return -1;
+    if (tsid >= 0 && sat_select_tsid(d, 0))
+        return -1;
+    if (sat_reg_write(d, 0x1e, 0x28) || sat_reg_write(d, 0x0a, 0) || sat_reg_write(d, 3, 1) ||
+        sat_frequency(d, hz))
+        return -1;
+    uint8_t clock[2] = {0x0e, 0x77};
+    if (i2c(d, 0x20, clock, sizeof(clock), NULL, 0))
+        return -1;
+    clock[0] = 0x0f;
+    if (i2c(d, 0x20, clock, sizeof(clock), NULL, 0))
+        return -1;
+    uint8_t v;
+    if (sat_reg_read(d, 7, &v, 1) || sat_reg_write(d, 7, (uint8_t)((v & 0x70) | 1)) ||
+        sat_reg_write(d, 8, 0x10))
+        return -1;
+    uint8_t rf[2];
+    if (sat_rf_read(d, rf, sizeof(rf)))
+        return -1;
+    if (sat_rf_reg(d, 0x50, (uint8_t)((rf[1] & 0x60) == 0x60 ? 0xf1 : 0xf0)))
+        return -1;
+    sleep_ms(d, 40);
+    if (sat_reg_write(d, 0x1e, 0x20) || sat_reg_write(d, 0x0a, 0xff) ||
+        sat_reg_write(d, 3, 1) || sat_reg_write(d, 3, 1))
+        return -1;
+    sleep_ms(d, 100);
+    if (sat_mute(d, 0) || sat_mode(d))
+        return -1;
+    return tsid >= 0 ? sat_select_tsid(d, (uint16_t)tsid) : 0;
+}
+int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session || if_hz < 950000000u ||
+        if_hz > 2150000000u || tsid < -1 || tsid > 65535)
+        return fail(d, e, en, "satellite tuning requires IF 950..2150 MHz and TSID 0..65535");
+    if (drain_state(d) || d->state != 0x11)
+        return fail(d, e, en, "satellite tuning requires authenticated idle state");
+    const uint8_t *table = mat(d, 0x845a0, 18 * 8);
+    if (!table)
+        return fail(d, e, en, "satellite register table is missing from the asset bundle");
+    if (tuner_initialize(d) || sat_initialize(d) || sat_terrestrial_sleep(d) ||
+        sat_tune(d, if_hz, tsid))
+        return fail(d, e, en, "satellite tune failed; no command was retried");
+    if (tsid >= 0) {
+        dt295_satellite_state state = {0};
+        const uint64_t end = now_ms(d) + 3000;
+        for (;;) {
+            if (dt295_satellite_status(d, &state, e, en))
+                return -1;
+            if (state.locked && state.selected_tsid == (uint16_t)tsid)
+                break;
+            if (now_ms(d) >= end)
+                return fail(d, e, en, "satellite did not lock the target TSID");
+            sleep_ms(d, 100);
+        }
+    }
+    d->tuned = 1;
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_sleep_satellite(dt295 *d, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session)
+        return fail(d, e, en, "satellite sleep requires authenticated session");
+    if (sat_sleep_sequence(d))
+        return fail(d, e, en, "satellite sleep failed; no command was retried");
+    d->tuned = 0;
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_select_satellite_tsid(dt295 *d, uint16_t tsid, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session)
+        return fail(d, e, en, "satellite TSID selection requires authenticated session");
+    if (sat_select_tsid(d, tsid))
+        return fail(d, e, en, "satellite TSID selection failed; command was not retried");
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_satellite_wait_lock(dt295 *d, unsigned timeout_ms, char *e, size_t en) {
+    if (!d || d->cleanup_only || !d->has_session || !d->tuned)
+        return fail(d, e, en, "satellite lock wait requires tuned authenticated session");
+    if (timeout_ms == 0 || timeout_ms > 5000)
+        return fail(d, e, en, "satellite lock timeout must be 1..5000 ms");
+    const uint64_t end = now_ms(d) + timeout_ms;
+    for (;;) {
+        dt295_satellite_state state = {0};
+        if (dt295_satellite_status(d, &state, e, en))
+            return -1;
+        if (state.locked) {
+            seterr(e, en, "");
+            return 0;
+        }
+        if (now_ms(d) >= end)
+            return fail(d, e, en, "satellite did not lock before the timeout");
+        sleep_ms(d, 100);
+    }
+}
+int dt295_satellite_tsid_table(dt295 *d, uint16_t tsids[8], char *e, size_t en) {
+    if (!d || !tsids || d->cleanup_only || !d->has_session || !d->tuned)
+        return fail(d, e, en, "satellite TSID table requires tuned authenticated session");
+    uint8_t b[16];
+    if (sat_reg_read(d, 0xce, b, sizeof(b)))
+        return fail(d, e, en, "satellite TSID table read failed");
+    for (unsigned i = 0; i < 8; i++)
+        tsids[i] = (uint16_t)(b[i * 2] << 8 | b[i * 2 + 1]);
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_select_satellite_slot(dt295 *d, unsigned slot, char *e, size_t en) {
+    uint16_t tsids[8];
+    if (dt295_satellite_wait_lock(d, 3000, e, en))
+        return -1;
+    if (dt295_satellite_tsid_table(d, tsids, e, en))
+        return -1;
+    if (slot > 7)
+        return fail(d, e, en, "satellite slot must be 0..7");
+    const uint16_t tsid = tsids[slot];
+    if (tsid == 0 || tsid == 0xffff)
+        return fail(d, e, en, "satellite slot has no usable TSID");
+    if (dt295_select_satellite_tsid(d, tsid, e, en))
+        return -1;
+    const uint64_t end = now_ms(d) + 3000;
+    for (;;) {
+        dt295_satellite_state state = {0};
+        if (dt295_satellite_status(d, &state, e, en))
+            return -1;
+        if (state.locked && state.selected_tsid == tsid)
+            break;
+        if (now_ms(d) >= end)
+            return fail(d, e, en, "satellite slot TSID did not lock");
+        sleep_ms(d, 100);
+    }
+    seterr(e, en, "");
+    return 0;
+}
+int dt295_satellite_status(dt295 *d, dt295_satellite_state *status, char *e, size_t en) {
+    if (!d || !status || d->cleanup_only || !d->has_session)
+        return fail(d, e, en, "satellite status requires authenticated session");
+    uint8_t c3 = 0, ba = 0, tsid[2] = {0, 0}, cn[2] = {0, 0};
+    if (sat_reg_read(d, 0xc3, &c3, 1) || sat_reg_read(d, 0xe6, tsid, sizeof(tsid)) ||
+        sat_reg_read(d, 0xba, &ba, 1) || sat_reg_read(d, 0xbc, cn, sizeof(cn)))
+        return fail(d, e, en, "satellite status read failed");
+    status->locked = (c3 & 0x10) ? 0 : 1;
+    status->selected_tsid = (uint16_t)(tsid[0] << 8 | tsid[1]);
+    status->agc_raw = (uint8_t)(ba & 0x7f);
+    status->cn_raw = (uint16_t)(cn[0] << 8 | cn[1]);
     seterr(e, en, "");
     return 0;
 }

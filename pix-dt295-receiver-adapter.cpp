@@ -96,7 +96,8 @@ bool ReceiverAdapter::matches(ReceiverId receiver) const noexcept
 
 bool ReceiverAdapter::supports(ReceiverId receiver, ReceiverSystem system) const noexcept
 {
-    return matches(receiver) && system == ReceiverSystem::terrestrial;
+    return matches(receiver) && (system == ReceiverSystem::terrestrial ||
+                                 system == ReceiverSystem::satellite);
 }
 
 bool ReceiverAdapter::selects_satellite_stream_before_tune() const noexcept { return false; }
@@ -110,7 +111,7 @@ ReceiverAdapter::Result ReceiverAdapter::configure(Engine& engine, ReceiverId re
                                   std::uint64_t epoch) noexcept
 {
     using namespace dtv::userland::detail;
-    const ReceiverCapability capability{receiver, true, false, true,
+    const ReceiverCapability capability{receiver, true, true, true,
                                         TuneReadiness::commands, false};
     auto strict = engine.configure_strict_capabilities(&capability, 1U);
     if (!strict) return strict;
@@ -146,8 +147,13 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         return TuneResult::failure(Error::UNSUPPORTED);
     if (!opened_ || init_error_ != Error::OK)
         return TuneResult::failure(Error::NOT_FOUND);
-    const unsigned channel = channel_for_hz(requested_hz);
-    if (channel == 0U) return TuneResult::failure(Error::INVALID_ARGUMENT);
+    unsigned channel = 0U;
+    if (system == ReceiverSystem::terrestrial) {
+        channel = channel_for_hz(requested_hz);
+        if (channel == 0U) return TuneResult::failure(Error::INVALID_ARGUMENT);
+    } else if (requested_hz < 950000000U || requested_hz > 2150000000U) {
+        return TuneResult::failure(Error::INVALID_ARGUMENT);
+    }
 
     if (stream_attached_) {
         const auto stopped = stop_attached(attachment_);
@@ -158,13 +164,29 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
     }
     plan_complete_ = false;
     std::memset(&live_, 0, sizeof(live_));
+    dt295_routes_reset(routes_);
+    dt295_routes_set_satellite(routes_, system == ReceiverSystem::satellite ? 1 : 0);
     char error[256]{};
-    if (dt295_tune_terrestrial(device_, channel, error, sizeof(error)) != 0) {
-        return TuneResult::failure(Error::USB_IO);
+    std::uint64_t programmed_hz = 0U;
+    if (system == ReceiverSystem::terrestrial) {
+        if (satellite_tuned_ && dt295_sleep_satellite(device_, error, sizeof(error)) != 0)
+            return TuneResult::failure(Error::USB_IO);
+        satellite_tuned_ = false;
+        if (dt295_tune_terrestrial(device_, channel, error, sizeof(error)) != 0)
+            return TuneResult::failure(Error::USB_IO);
+        programmed_hz = center_for_channel(channel);
+    } else {
+        const int tsid = satellite_tsid_valid_ ? satellite_tsid_ : -1;
+        if (dt295_tune_satellite(device_, static_cast<std::uint32_t>(requested_hz), tsid,
+                                 error, sizeof(error)) != 0)
+            return TuneResult::failure(Error::USB_IO);
+        satellite_tuned_ = true;
+        const std::uint64_t rounded = ((requested_hz / 1000U + 500U) / 1000U) * 1000U;
+        programmed_hz = rounded * 1000U;
     }
 
     TuneProgramming programming{};
-    programming.programmed_hz = center_for_channel(channel);
+    programming.programmed_hz = programmed_hz;
     return TuneResult::success(programming);
 }
 
@@ -177,21 +199,73 @@ ReceiverAdapter::Result ReceiverAdapter::tune(ReceiverId receiver, ReceiverSyste
     return programmed ? Result::success() : Result::failure(programmed.error());
 }
 
-dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId, ReceiverSystem) noexcept
+dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
+                                             ReceiverSystem system) noexcept
 {
-    return dtv::userland::Result<bool>::failure(Error::UNSUPPORTED);
+    if (!supports(receiver, system) || system != ReceiverSystem::satellite)
+        return dtv::userland::Result<bool>::failure(Error::UNSUPPORTED);
+    if (!opened_ || init_error_ != Error::OK)
+        return dtv::userland::Result<bool>::failure(Error::NOT_FOUND);
+    dt295_satellite_state state{};
+    char error[256]{};
+    if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
+        return dtv::userland::Result<bool>::failure(Error::USB_IO);
+    const bool target = !satellite_tsid_valid_ || state.selected_tsid == satellite_tsid_;
+    return dtv::userland::Result<bool>::success(state.locked != 0U && target);
 }
 
-ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId, std::uint8_t,
-                                               std::uint32_t) noexcept
+ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiver, std::uint8_t slot,
+                                               std::uint32_t timeout_ms) noexcept
 {
-    return Result::failure(Error::UNSUPPORTED);
+    if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
+    if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
+    if (!satellite_tuned_) return Result::failure(Error::NOT_READY);
+    if (slot > 7U) return Result::failure(Error::INVALID_ARGUMENT);
+    const std::uint32_t total_budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
+    const std::uint64_t deadline = clock_.monotonic_ms() + total_budget;
+    char error[256]{};
+    if (dt295_satellite_wait_lock(device_, total_budget, error, sizeof(error)) != 0)
+        return Result::failure(Error::TIMEOUT);
+    uint16_t table[8]{};
+    if (dt295_satellite_tsid_table(device_, table, error, sizeof(error)) != 0)
+        return Result::failure(Error::USB_IO);
+    const std::uint16_t tsid = table[slot];
+    if (tsid == 0U || tsid == 0xffffU) return Result::failure(Error::INVALID_ARGUMENT);
+    satellite_tsid_ = tsid;
+    satellite_tsid_valid_ = true;
+    if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
+        return Result::failure(Error::USB_IO);
+    for (;;) {
+        dt295_satellite_state state{};
+        if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
+            return Result::failure(Error::USB_IO);
+        if (state.selected_tsid == tsid && state.locked) return Result::success();
+        if (clock_.monotonic_ms() >= deadline) return Result::failure(Error::TIMEOUT);
+        clock_.sleep_ms(100U);
+    }
 }
 
-ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId, std::uint16_t,
-                                               std::uint32_t) noexcept
+ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiver, std::uint16_t tsid,
+                                               std::uint32_t timeout_ms) noexcept
 {
-    return Result::failure(Error::UNSUPPORTED);
+    if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
+    if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
+    satellite_tsid_ = tsid;
+    satellite_tsid_valid_ = true;
+    if (!satellite_tuned_) return Result::success();
+    char error[256]{};
+    if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
+        return Result::failure(Error::USB_IO);
+    const std::uint32_t budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
+    const std::uint64_t deadline = clock_.monotonic_ms() + budget;
+    for (;;) {
+        dt295_satellite_state state{};
+        if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
+            return Result::failure(Error::USB_IO);
+        if (state.selected_tsid == tsid && state.locked) return Result::success();
+        if (clock_.monotonic_ms() >= deadline) return Result::failure(Error::TIMEOUT);
+        clock_.sleep_ms(100U);
+    }
 }
 
 ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
@@ -203,6 +277,8 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
         if (!stopped) return stopped;
     }
     opened_ = false;
+    satellite_tuned_ = false;
+    satellite_tsid_valid_ = false;
     return Result::success();
 }
 

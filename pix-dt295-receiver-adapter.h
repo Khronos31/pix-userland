@@ -115,6 +115,9 @@ private:
     bool streaming_ = false;
     bool plan_complete_ = false;
     bool key_retained_ = false;
+    bool satellite_tuned_ = false;
+    bool satellite_tsid_valid_ = false;
+    std::uint16_t satellite_tsid_ = 0U;
     bool stream_attached_ = false;
     Attachment attachment_{};
     std::uint64_t attachment_incarnation_ = 0U;
