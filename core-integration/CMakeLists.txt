@@ -6,9 +6,13 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
 
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/dtv-userland-core.revision" PIX_CORE_PIN LIMIT_COUNT 1)
 set(PIX_CORE_SOURCE_DIR "" CACHE PATH "Local dtv-userland-core source override")
-set(PIX_CORE_REVISION "8c9e7f68aacbfde32790c800aec69a08a1270328" CACHE STRING
-    "dtv-userland-core revision")
+set(PIX_CORE_REVISION "${PIX_CORE_PIN}" CACHE STRING "dtv-userland-core revision")
+set(PIX_CORE_BUNDLED_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/dtv-userland-core")
+if(NOT PIX_CORE_SOURCE_DIR AND EXISTS "${PIX_CORE_BUNDLED_DIR}/CMakeLists.txt")
+    set(PIX_CORE_SOURCE_DIR "${PIX_CORE_BUNDLED_DIR}")
+endif()
 
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
 set(DTV_USERLAND_BUILD_CARD ON CACHE BOOL "Build card ownership engine" FORCE)

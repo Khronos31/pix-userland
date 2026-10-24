@@ -14,3 +14,37 @@ jobs:
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
       - run: make -j4 test CFLAGS='-O2 -g -Werror'
+  three-commands:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config cmake
+      - name: Build pixd, pixctl, pix-ts and run the CMake proofs
+        run: |
+          version=$(sed -n 's/^#define VERSION "\([0-9][0-9.]*\)"/\1/p' include/version.h)
+          cmake -S core-integration -B build/ci -DCMAKE_BUILD_TYPE=Release -DPIX_RUNTIME_VERSION="$version"
+          cmake --build build/ci --parallel 4
+          ctest --test-dir build/ci --output-on-failure
+          for program in pixd pixctl pix-ts; do
+            build/ci/$program --version | grep -F "$version"
+            build/ci/$program --help > /dev/null
+          done
+      - name: Package linux-x86_64 programs and run them from the extracted archive
+        run: |
+          stage=build/stage
+          mkdir -p "$stage/licenses"
+          cp build/ci/pixd build/ci/pixctl build/ci/pix-ts "$stage/"
+          printf 'dtv-userland-core %s\n' "$(cat core-integration/dtv-userland-core.revision)" > "$stage/build-info.txt"
+          python3 tools/core-notices.py build/ci/_deps/dtv_userland_core-src "$stage/licenses"
+          python3 tools/package-release.py linux-x86_64 "$stage" --output-dir build/dist
+          mkdir build/extract
+          tar -xzf build/dist/pix-userland-*-linux-x86_64.tar.gz -C build/extract
+          for program in pixd pixctl pix-ts; do
+            build/extract/pix-userland-*-linux-x86_64/$program --version
+          done
+      - name: Package the corresponding source and rebuild it offline
+        run: |
+          tools/package-source.sh --output-dir build/source-dist
+          tools/check-source-rebuild.sh build/source-dist/pix-userland-*-source.tar.gz "$RUNNER_TEMP/source-rebuild"
