@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: MIT
+#include <dtv/host_ts/px4_ts_core.h>
+#include <dtv/host_ts/px4_ts_posix.h>
+
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <signal.h>
+#include <string>
+#include <thread>
+#include <unistd.h>
+#include <vector>
+
+namespace {
+
+using namespace px4::userland;
+using namespace px4::userland::cli;
+
+volatile std::sig_atomic_t stop_flag = 0;
+
+void stop_handler(int) noexcept { stop_flag = 1; }
+
+class PosixClock final : public Px4TsClock {
+public:
+    std::uint64_t monotonic_ms() noexcept override
+    {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+    void sleep_ms(std::uint32_t milliseconds) noexcept override
+    { std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds)); }
+};
+
+class PosixSignal final : public Px4TsSignal {
+public:
+    bool stop_requested() const noexcept override { return stop_flag != 0; }
+};
+
+bool install_signals() noexcept
+{
+    struct sigaction ignore_pipe {};
+    ignore_pipe.sa_handler = SIG_IGN;
+    if (sigemptyset(&ignore_pipe.sa_mask) != 0 ||
+        ::sigaction(SIGPIPE, &ignore_pipe, nullptr) != 0) return false;
+    struct sigaction action {};
+    action.sa_handler = stop_handler;
+    if (sigemptyset(&action.sa_mask) != 0) return false;
+    return ::sigaction(SIGINT, &action, nullptr) == 0 &&
+           ::sigaction(SIGTERM, &action, nullptr) == 0;
+}
+
+void usage(FILE* file) noexcept
+{
+    std::fprintf(file,
+        "usage: pix-ts (--device serial:SELECTOR|usb:SELECTOR | --instance TOKEN) "
+        "(-c|--channel CH | -f|--freq HZ) [--system isdb-t|isdb-s] "
+        "[--slot N|--tsid N] [--time SECONDS|-] [-o PATH|-] "
+        "[--runtime-dir PATH] [--group] [--packet-count N] "
+        "[--tune-timeout-ms N]\n");
+}
+
+void print_counters(const char* label, const ipc::CountersPayload& counters) noexcept
+{
+    std::fprintf(stderr, "%s packets=%llu bytes=%llu usb-errors=%llu\n", label,
+        static_cast<unsigned long long>(counters.packets),
+        static_cast<unsigned long long>(counters.bytes),
+        static_cast<unsigned long long>(counters.usb_errors));
+}
+
+}  // namespace
+
+int main(int argc, char** argv)
+{
+    if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
+        std::puts("pix-ts " PIX_RUNTIME_VERSION);
+        return 0;
+    }
+    if (argc == 2 && (std::strcmp(argv[1], "-h") == 0 ||
+                      std::strcmp(argv[1], "--help") == 0)) {
+        usage(stdout);
+        return 0;
+    }
+
+    std::vector<const char*> normalized;
+    normalized.reserve(static_cast<std::size_t>(argc) + 2U);
+    normalized.push_back(argv[0]);
+    normalized.push_back("--receiver");
+    normalized.push_back("0");
+    for (int index = 1; index < argc; ++index) {
+        if (std::strcmp(argv[index], "--lnb-voltage") == 0) {
+            std::fprintf(stderr, "pix-ts: --lnb-voltage is not supported by PIX\n");
+            return 2;
+        }
+        normalized.push_back(argv[index]);
+    }
+    const TsClientProfile profile{"pix-ts", "pix-userland",
+        dtv::userland::identity::Product::pix, true, false, nullptr, true};
+    const Px4TsArguments arguments = parse_px4_ts_product_arguments(
+        static_cast<int>(normalized.size()), normalized.data(), profile);
+    if (!arguments.valid) {
+        std::fprintf(stderr, "argument error: %s\n", arguments.error.c_str());
+        usage(stderr);
+        return 2;
+    }
+    if (arguments.help) return 0;
+    if (arguments.version) {
+        std::puts("pix-ts " PIX_RUNTIME_VERSION);
+        return 0;
+    }
+    if (!install_signals()) return 70;
+    const bool stdout_output = arguments.output == "-";
+    const int fd = stdout_output ? STDOUT_FILENO :
+        ::open(arguments.output.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        std::fprintf(stderr, "output: %s\n", std::strerror(errno));
+        return 70;
+    }
+    Px4TsFdOutput output(fd, !stdout_output);
+    if (!output.ready()) return 70;
+    PosixClock clock;
+    PosixSignal signal;
+    Px4TsFailureKind failure_kind = Px4TsFailureKind::ipc;
+    Px4TsRunDiagnostics diagnostics;
+    const auto result = Px4TsRunner::run_wire(arguments, profile, output, clock, signal,
+                                              &failure_kind, &diagnostics);
+    if (!result) {
+        std::fprintf(stderr, "pix-ts: %s\n", error_string(result.error()));
+        std::fprintf(stderr,
+            "pix-ts: diagnostics stream-end=%s error=%u packets-written=%llu packets-final=%llu\n",
+            diagnostics.stream_end_valid ? "valid" : "missing",
+            static_cast<unsigned>(diagnostics.stream_end.error_code),
+            static_cast<unsigned long long>(diagnostics.packets_written),
+            static_cast<unsigned long long>(diagnostics.stream_end.counters.packets));
+        return px4_ts_exit_status(result.error(), failure_kind);
+    }
+    print_counters("stream", result.value().counters);
+    return 0;
+}
