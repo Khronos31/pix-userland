@@ -83,7 +83,7 @@ target_include_directories(pix_dt181_receiver_adapter_proof PRIVATE
 target_compile_definitions(pix_dt181_receiver_adapter_proof PRIVATE
     _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL)
 target_compile_options(pix_dt181_receiver_adapter_proof PRIVATE
-    -UNDEBUG -fno-exceptions -fno-rtti)
+    -UNDEBUG "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_dt181_receiver_adapter_proof PRIVATE
     pix_dt181_composition Threads::Threads)
 target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
@@ -128,7 +128,8 @@ target_compile_definitions(pix_dt295_adapter_lifecycle_proof PRIVATE
     _POSIX_C_SOURCE=200809L)
 target_compile_features(pix_dt295_adapter_lifecycle_proof PRIVATE cxx_std_17)
 target_compile_options(pix_dt295_adapter_lifecycle_proof PRIVATE
-    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_dt295_adapter_lifecycle_proof PRIVATE
     pix_dt295_composition Threads::Threads)
 target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
