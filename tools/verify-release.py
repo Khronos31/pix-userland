@@ -39,7 +39,7 @@ def _read_archive(path):
 def _expected_metadata(target, commit, with_assets, with_dt295_assets):
     expected = {
         "project": "pix-userland", "version": pack.VERSION, "target": target,
-        "commit": commit, "libusb": "1.0.30", "private": True,
+        "commit": commit, "libusb": "1.0.30", "private": False,
         "libusb_linkage": "static", "device_assets": bool(with_assets and target != "source"),
         "dtv_userland_core_commit": CORE_PIN,
     }
@@ -77,7 +77,9 @@ def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
     for required in ("third_party/dtv-userland-core/LICENSE", "third_party/dtv-userland-core/PROVENANCE.json",
                      "third_party/dtv-userland-core/CMakeLists.txt", "core-integration/CMakeLists.txt",
                      "core-integration/pixd.cpp", "core-integration/tools/pixctl.cpp",
-                     "core-integration/tools/pix_ts.cpp"):
+                     "core-integration/tools/pix_ts.cpp", "tools/build-windows.sh", "include/os.h",
+                     "src/dt181_capture_host.c", "pix-dt181-consumer.cpp",
+                     "core-integration/tests/windows_os_thread_proof.c", "tests/test_windows_runtime.py"):
         if required not in listed:
             raise ValueError(f"Source closure lacks {required}")
     if not any(name.startswith("third_party/dtv-userland-core/adapters/") and name.endswith("/COPYING") for name in listed):

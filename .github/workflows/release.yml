@@ -1,17 +1,17 @@
-name: Private release
+name: Release
 on:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: private-release
+  group: release
   cancel-in-progress: false
 env:
   GH_REPO: ${{ github.repository }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   preflight:
-    if: github.event.repository.private == true
+    if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -111,22 +111,16 @@ jobs:
           retention-days: 3
   windows:
     needs: preflight
-    runs-on: windows-2022
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc make curl p7zip python mingw-w64-x86_64-cmake mingw-w64-x86_64-pkgconf git
-      - shell: msys2 {0}
-        run: tools/build-windows.sh
-      - shell: msys2 {0}
-        run: for program in pixd pixctl pix-ts; do python tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"; done
+      - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config make curl xz-utils bzip2 binutils
+      - run: tools/build-windows.sh
+      - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"; done
       - shell: bash
-        run: python tools/package-release.py windows-x64 build/windows-x64
+        run: python3 tools/package-release.py windows-x64 build/windows-x64
       - shell: bash
         run: tools/check-private.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -135,6 +129,27 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 3
+  windows-smoke:
+    needs: windows
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-x64
+          path: windows-package
+      - shell: pwsh
+        run: |
+          $archive = (Get-ChildItem windows-package/*.tar.gz).FullName
+          tar -xzf $archive -C windows-package
+          if ($LASTEXITCODE -ne 0) { throw "Windows package extraction failed" }
+          $directory = (Get-ChildItem windows-package -Directory).FullName
+          foreach ($name in @('pixd', 'pixctl', 'pix-ts')) {
+            $program = Join-Path $directory "$name.exe"
+            & $program --version
+            if ($LASTEXITCODE -ne 0) { throw "$name version failed" }
+            & $program --help
+            if ($LASTEXITCODE -ne 0) { throw "$name help failed" }
+          }
   source:
     needs: preflight
     runs-on: ubuntu-24.04
@@ -151,7 +166,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
   release:
-    needs: [preflight, linux, macos, android, windows, source]
+    needs: [preflight, linux, macos, android, windows, windows-smoke, source]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -174,7 +189,7 @@ jobs:
           /usr/bin/python3 tools/assets-bundle.py open .private/assets.enc build/private-assets
           python3 tools/finalize-private-release.py build/private-assets
           python3 tools/verify-release.py --with-assets
-      - name: Publish private release
+      - name: Publish release
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |

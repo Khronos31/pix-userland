@@ -66,13 +66,18 @@ static inline int os_thread_create(os_thread *t, void *unused, void *(*fn)(void 
     return 0;
 }
 /* Repeated cancellation also covers the narrow interval before a blocking write starts. */
-static inline void os_thread_join(os_thread t, int cancel_io) {
+static inline int os_thread_join(os_thread t, int cancel_io) {
+    if (!t || t == INVALID_HANDLE_VALUE)
+        return -1;
     DWORD timeout = cancel_io ? 50 : 3500;
-    while (WaitForSingleObject(t, timeout) == WAIT_TIMEOUT) {
+    DWORD result;
+    while ((result = WaitForSingleObject(t, timeout)) == WAIT_TIMEOUT) {
         CancelSynchronousIo(t);
         timeout = 50;
     }
-    CloseHandle(t);
+    if (result != WAIT_OBJECT_0)
+        return -1;
+    return CloseHandle(t) ? 0 : -1;
 }
 #define open _open
 #define close _close
@@ -97,9 +102,9 @@ typedef pthread_t os_thread;
 #define os_cond_signal pthread_cond_signal
 #define os_cond_wait pthread_cond_wait
 #define os_thread_create pthread_create
-static inline void os_thread_join(os_thread t, int cancel_io) {
+static inline int os_thread_join(os_thread t, int cancel_io) {
     (void)cancel_io;
-    pthread_join(t, NULL);
+    return pthread_join(t, NULL);
 }
 #define O_BINARY 0
 #endif

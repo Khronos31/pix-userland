@@ -4,7 +4,11 @@
 #include "pix-runtime-vectors.h"
 
 #include <stdint.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
+#endif
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,6 +140,20 @@ void __wrap_libusb_close(libusb_device_handle *handle)
     __real_libusb_close(handle);
 }
 
+#ifdef _WIN32
+HANDLE WINAPI __real_CreateThread(LPSECURITY_ATTRIBUTES, SIZE_T,
+                                  LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+HANDLE WINAPI __wrap_CreateThread(LPSECURITY_ATTRIBUTES attributes, SIZE_T stack,
+    LPTHREAD_START_ROUTINE entry, LPVOID argument, DWORD flags, LPDWORD thread_id)
+{
+    if (fail_thread_create) {
+        fail_thread_create = 0;
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
+    return __real_CreateThread(attributes, stack, entry, argument, flags, thread_id);
+}
+#else
 int __real_pthread_create(pthread_t *, const pthread_attr_t *,
                           void *(*)(void *), void *);
 int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
@@ -147,6 +165,7 @@ int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
     }
     return __real_pthread_create(thread, attributes, entry, argument);
 }
+#endif
 
 #ifdef PIX_TEST_CALLBACK_GATE
 int __real_libusb_handle_events_timeout(libusb_context *, struct timeval *);

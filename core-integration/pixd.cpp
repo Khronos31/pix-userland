@@ -7,7 +7,13 @@
 #include "dtv/userland/identity.h"
 #include <dtv/userland/json.h>
 #include <libusb.h>
+#ifdef _WIN32
+#include <px4/windows_tuner_nonce.h>
+#include "px4_windows_args.h"
+#include <dtv/userland/host_facade/windows_stdin.h>
+#else
 #include <px4/posix_tuner_nonce.h>
+#endif
 #include "px4d_signals.h"
 
 #include <array>
@@ -33,6 +39,9 @@ struct Arguments final {
     std::string runtime_directory;
     std::string assets = "assets";
     bool group = false;
+#ifdef _WIN32
+    bool exit_on_stdin_eof = false;
+#endif
 };
 
 void usage(FILE* output) noexcept
@@ -42,7 +51,11 @@ void usage(FILE* output) noexcept
         "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
-        "       pixd --list-json\n");
+        "       pixd --list-json\n"
+#ifdef _WIN32
+        "       Windows: --exit-on-stdin-eof stops when parent stdin closes\n"
+#endif
+        );
 }
 
 bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
@@ -51,6 +64,13 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
+#ifdef _WIN32
+        if (option == "--exit-on-stdin-eof") {
+            if (out.exit_on_stdin_eof) return false;
+            out.exit_on_stdin_eof = true;
+            continue;
+        }
+#endif
         if (option == "--group") {
             if (out.group) return false;
             out.group = true;
@@ -243,7 +263,7 @@ const char* model_name(pix::runtime::Model model) noexcept
 
 }  // namespace
 
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     if (argc == 2 && argv != nullptr && argv[1] != nullptr) {
         const std::string_view option(argv[1]);
@@ -287,7 +307,11 @@ int main(int argc, char** argv)
         instance.assign(canonical.value().bytes.data(), canonical.value().length);
     }
     std::unique_ptr<TunerNonceSource> nonce_source(new (std::nothrow)
+#ifdef _WIN32
+        px4::userland::ipc::windows::WindowsTunerNonceSource());
+#else
         px4::userland::ipc::posix::PosixTunerNonceSource());
+#endif
     if (!nonce_source) return fail(Error::RESOURCE_LIMIT);
     const auto epoch = nonce_source->generate();
     if (!epoch) return fail(epoch.error());
@@ -328,6 +352,12 @@ int main(int argc, char** argv)
         return fail(published.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
+#ifdef _WIN32
+    px4::userland::cli::StdinEofMonitor eof_monitor;
+    if (arguments.exit_on_stdin_eof &&
+        !eof_monitor.start(::GetStdHandle(STD_INPUT_HANDLE),
+            [](void*) noexcept { px4::userland::px4d::request_stop(); }, nullptr)) return 70;
+#endif
     std::fprintf(stderr, "pixd ready: model=%s endpoint=%s\n",
                  model_name(located.value().model),
                  config.runtime_directory.empty() ? "Core-selected" : config.runtime_directory.c_str());
@@ -346,6 +376,9 @@ int main(int argc, char** argv)
 #else
     const auto closed = context->close(Timeout{15000U});
 #endif
+#ifdef _WIN32
+    eof_monitor.stop();
+#endif
 #ifdef PIX_RUNTIME_TEST_CLOSE_BUDGET_MS
     if (closed && closed.value() != CloseState::quiesced)
         std::fprintf(stderr, "PIX_CLOSE deadline_expired=1\n");
@@ -358,4 +391,20 @@ int main(int argc, char** argv)
     }
     if (loop_error != Error::OK) return fail(loop_error);
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+#ifdef _WIN32
+    std::vector<std::string> owned = px4::userland::cli::windows_argv_utf8(argc, argv);
+    if (owned.empty()) return 2;
+    std::vector<char*> views;
+    views.reserve(owned.size());
+    for (std::string& value : owned) views.push_back(value.data());
+    const int result = run(static_cast<int>(views.size()), views.data());
+    px4::userland::px4d::notify_cleanup_complete();
+    return result;
+#else
+    return run(argc, argv);
+#endif
 }

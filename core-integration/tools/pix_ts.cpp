@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include <dtv/host_ts/px4_ts_core.h>
+#ifdef _WIN32
+#include <dtv/host_ts/px4_ts_windows_output.h>
+#include "px4_windows_args.h"
+#include "px4d_signals.h"
+#else
 #include <dtv/host_ts/px4_ts_posix.h>
+#endif
 
 #include <cerrno>
 #include <chrono>
@@ -19,9 +25,11 @@ namespace {
 using namespace px4::userland;
 using namespace px4::userland::cli;
 
+#ifndef _WIN32
 volatile std::sig_atomic_t stop_flag = 0;
 
 void stop_handler(int) noexcept { stop_flag = 1; }
+#endif
 
 class PosixClock final : public Px4TsClock {
 public:
@@ -36,11 +44,21 @@ public:
 
 class PosixSignal final : public Px4TsSignal {
 public:
-    bool stop_requested() const noexcept override { return stop_flag != 0; }
+    bool stop_requested() const noexcept override
+    {
+#ifdef _WIN32
+        return px4::userland::px4d::stop_requested();
+#else
+        return stop_flag != 0;
+#endif
+    }
 };
 
 bool install_signals() noexcept
 {
+#ifdef _WIN32
+    return px4::userland::px4d::install_signal_handlers();
+#else
     struct sigaction ignore_pipe {};
     ignore_pipe.sa_handler = SIG_IGN;
     if (sigemptyset(&ignore_pipe.sa_mask) != 0 ||
@@ -50,6 +68,7 @@ bool install_signals() noexcept
     if (sigemptyset(&action.sa_mask) != 0) return false;
     return ::sigaction(SIGINT, &action, nullptr) == 0 &&
            ::sigaction(SIGTERM, &action, nullptr) == 0;
+#endif
 }
 
 void usage(FILE* file) noexcept
@@ -72,7 +91,7 @@ void print_counters(const char* label, const ipc::CountersPayload& counters) noe
 
 }  // namespace
 
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
         std::puts("pix-ts " PIX_RUNTIME_VERSION);
@@ -112,6 +131,19 @@ int main(int argc, char** argv)
     }
     if (!install_signals()) return 70;
     const bool stdout_output = arguments.output == "-";
+#ifdef _WIN32
+    HANDLE handle = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!stdout_output) {
+        const auto wide = utf8_to_wide_path(arguments.output);
+        if (wide.empty()) return 70;
+        handle = ::CreateFileW(wide.data(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) return 70;
+    auto sink = Px4TsWindowsOutput::create(handle, !stdout_output);
+    if (!sink) return 70;
+    Px4TsWindowsOutput& output = *sink.value();
+#else
     const int fd = stdout_output ? STDOUT_FILENO :
         ::open(arguments.output.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
     if (fd < 0) {
@@ -120,12 +152,17 @@ int main(int argc, char** argv)
     }
     Px4TsFdOutput output(fd, !stdout_output);
     if (!output.ready()) return 70;
+#endif
     PosixClock clock;
     PosixSignal signal;
     Px4TsFailureKind failure_kind = Px4TsFailureKind::ipc;
     Px4TsRunDiagnostics diagnostics;
     const auto result = Px4TsRunner::run_wire(arguments, profile, output, clock, signal,
                                               &failure_kind, &diagnostics);
+#ifdef _WIN32
+    const auto finished = output.finish();
+    if (!finished && result) return 70;
+#endif
     if (!result) {
         std::fprintf(stderr, "pix-ts: %s\n", error_string(result.error()));
         std::fprintf(stderr,
@@ -138,4 +175,20 @@ int main(int argc, char** argv)
     }
     print_counters("stream", result.value().counters);
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+#ifdef _WIN32
+    std::vector<std::string> owned = windows_argv_utf8(argc, argv);
+    if (owned.empty()) return 2;
+    std::vector<char*> views;
+    views.reserve(owned.size());
+    for (std::string& value : owned) views.push_back(value.data());
+    const int result = run(static_cast<int>(views.size()), views.data());
+    px4::userland::px4d::notify_cleanup_complete();
+    return result;
+#else
+    return run(argc, argv);
+#endif
 }

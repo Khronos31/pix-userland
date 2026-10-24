@@ -75,6 +75,9 @@ target_compile_options(pix_dt181_composition PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
 enable_testing()
+# These proofs inject pthread mutexes and POSIX processes; Windows uses the
+# same public runtime USB fixture with its native process harness below.
+if(NOT WIN32)
 add_executable(pix_dt181_receiver_adapter_proof
     "${PIX_SOURCE_DIR}/tests/pix_dt181_receiver_adapter_proof.cpp"
     "${PIX_SOURCE_DIR}/tests/pix_libusb_bottom.c")
@@ -94,6 +97,7 @@ target_link_options(pix_dt181_receiver_adapter_proof PRIVATE
     -Wl,--wrap=pthread_mutex_lock)
 add_test(NAME pix_dt181_receiver_adapter_proof
     COMMAND pix_dt181_receiver_adapter_proof)
+endif()
 
 add_library(pix_dt295_c_backend STATIC
     "${PIX_SOURCE_DIR}/src/dt295.c"
@@ -118,6 +122,7 @@ target_link_libraries(pix_dt295_composition PUBLIC
 target_compile_options(pix_dt295_composition PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
+if(NOT WIN32)
 add_executable(pix_dt295_adapter_lifecycle_proof
     "${PIX_SOURCE_DIR}/tests/pix_dt295_adapter_lifecycle_proof.cpp"
     "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
@@ -142,6 +147,7 @@ target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
     -Wl,--wrap=random_bytes)
 add_test(NAME pix_dt295_adapter_lifecycle_proof
     COMMAND pix_dt295_adapter_lifecycle_proof)
+endif()
 
 set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
@@ -178,7 +184,7 @@ add_executable(pix-ts tools/pix_ts.cpp)
 target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
-target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning)
+target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
 
 add_executable(pixd_fixture pixd.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
@@ -187,7 +193,10 @@ target_include_directories(pixd_fixture PRIVATE
 target_compile_definitions(pixd_fixture PRIVATE
     _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL
     PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
-    PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50 PIX_TEST_CALLBACK_GATE)
+    PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50)
+if(NOT WIN32)
+    target_compile_definitions(pixd_fixture PRIVATE PIX_TEST_CALLBACK_GATE)
+endif()
 target_compile_features(pixd_fixture PRIVATE cxx_std_17)
 target_link_libraries(pixd_fixture PRIVATE pix_product_runtime dtv::json)
 target_link_options(pixd_fixture PRIVATE
@@ -195,9 +204,18 @@ target_link_options(pixd_fixture PRIVATE
     -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
     -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
     -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
-    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
-    -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
+    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close)
+if(WIN32)
+    target_link_options(pixd_fixture PRIVATE -Wl,--wrap=CreateThread)
+    add_executable(pix_windows_os_thread_proof tests/windows_os_thread_proof.c)
+    target_include_directories(pix_windows_os_thread_proof PRIVATE "${PIX_SOURCE_DIR}/include")
+    add_test(NAME pix_windows_os_thread_proof COMMAND pix_windows_os_thread_proof)
+else()
+    target_link_options(pixd_fixture PRIVATE
+        -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
+endif()
 
+if(NOT WIN32)
 add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
 target_include_directories(pix_public_runtime_proof PRIVATE
@@ -218,3 +236,4 @@ target_link_options(pix_public_runtime_proof PRIVATE
     -Wl,--wrap=pthread_create)
 add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
+endif()

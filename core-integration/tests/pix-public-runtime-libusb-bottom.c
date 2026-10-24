@@ -69,6 +69,37 @@ int LIBUSB_CALL libusb_bulk_transfer(libusb_device_handle *handle, unsigned char
 { (void)handle; (void)endpoint; (void)data; (void)timeout; *actual = length; return 0; }
 const char * LIBUSB_CALL libusb_error_name(int error) { (void)error; return "offline-loopback"; }
 
+#ifdef _WIN32
+/* Resolve every static libusb reference without pulling real USB backends. */
+int LIBUSB_CALL libusb_set_configuration(libusb_device_handle *handle, int config)
+{ (void)handle; (void)config; return 0; }
+int LIBUSB_CALL libusb_attach_kernel_driver(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_detach_kernel_driver(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_control_transfer(libusb_device_handle *handle, uint8_t type,
+    uint8_t request, uint16_t value, uint16_t index, unsigned char *data,
+    uint16_t length, unsigned int timeout)
+{
+    (void)handle; (void)type; (void)request; (void)value; (void)index;
+    (void)data; (void)length; (void)timeout;
+    return LIBUSB_ERROR_NOT_SUPPORTED;
+}
+int LIBUSB_CALL libusb_interrupt_transfer(libusb_device_handle *handle, unsigned char endpoint,
+    unsigned char *data, int length, int *actual, unsigned int timeout)
+{
+    (void)handle; (void)endpoint; (void)data; (void)length; (void)timeout;
+    *actual = 0;
+    return LIBUSB_ERROR_NOT_SUPPORTED;
+}
+int LIBUSB_CALL libusb_handle_events_timeout_completed(libusb_context *ctx,
+    struct timeval *timeout, int *completed)
+{
+    if (completed && *completed) return 0;
+    return libusb_handle_events_timeout(ctx, timeout);
+}
+#endif
+
 struct libusb_transfer * LIBUSB_CALL libusb_alloc_transfer(int iso_packets)
 { (void)iso_packets; return calloc(1, sizeof(struct libusb_transfer)); }
 void LIBUSB_CALL libusb_free_transfer(struct libusb_transfer *transfer)

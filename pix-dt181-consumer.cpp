@@ -101,7 +101,11 @@ int Consumer::decoded_sink(void* opaque, const std::uint8_t* bytes,
     if (!session.attached || session.incarnation != run->incarnation ||
         !dtv::userland::detail::PacketStreamSession::same_identity(
             session.identity, run->identity))
+#ifdef _WIN32
+        return -ECANCELED;
+#else
         return -ESTALE;
+#endif
     for (std::size_t offset = 0U; offset < length; offset += 188U) {
         session.append_locked(dtv::userland::ByteView{bytes + offset, 188U});
         if (session.terminal != dtv::userland::detail::StreamTerminal::none)

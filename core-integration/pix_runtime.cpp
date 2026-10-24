@@ -23,6 +23,10 @@
 #include <string_view>
 #include <thread>
 #include <unistd.h>
+#ifdef _WIN32
+#include "px4_windows_args.h"
+#include <io.h>
+#endif
 
 namespace pix::runtime {
 namespace dt181 = ::pix::capture::dt181;
@@ -51,7 +55,13 @@ bool set_string(dtv::userland::wire::WString<N>& out, std::string_view value) no
 Result<void> load_exact(const std::string& path, std::uint8_t* output,
                         std::size_t expected) noexcept
 {
+#ifdef _WIN32
+    const auto wide = px4::userland::cli::utf8_to_wide_path(path);
+    if (wide.empty()) return Result<void>::failure(Error::INVALID_ARGUMENT);
+    const int fd = ::_wopen(wide.data(), _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+#else
     const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+#endif
     if (fd < 0) return Result<void>::failure(Error::NOT_FOUND);
     std::size_t offset = 0U;
     while (offset < expected) {

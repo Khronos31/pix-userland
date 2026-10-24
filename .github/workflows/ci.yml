@@ -1,4 +1,4 @@
-name: Private checks
+name: Checks
 on:
   push:
     branches: [main]

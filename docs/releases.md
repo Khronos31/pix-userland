@@ -1,4 +1,4 @@
-# Private Releases
+# Releases
 
 ## 3コマンド配布への移行（pixd / pixctl / pix-ts）
 
@@ -14,12 +14,11 @@
 | linux-x86_64 / linux-aarch64（musl） | `tools/build-portable.sh musl`、release workflow | glibc 静的リンクで3コマンドの link と `audit-binary.py` を通過（musl 自体ではない） | Alpine でのビルドは release workflow のみ。linux-aarch64 は未ビルド |
 | darwin-arm64 | `tools/build-portable.sh native` | なし | ビルド・audit |
 | android-aarch64 / armv7a / x86_64 | `tools/build-portable.sh android` | NDK r27.0（CI は r27d）で3 ABI とも3コマンドをクロスビルドし `audit-binary.py` を通過 | 実行・実機・r27d |
-| windows-x64 | `tools/build-windows.sh` | なし | **現行の製品コードは MinGW-w64 でコンパイルできません**（`src/dt181_capture_host.c` の `pthread`、`core-integration/tools/pix_ts.cpp` の `sigaction` / `SIGPIPE` / `O_CLOEXEC`、Core の Windows pthread 互換との衝突）。製品コードの Windows 対応が先に必要です |
+| windows-x64 | `tools/build-windows.sh`、`windows.yml` | 固定llvm-mingw 20250910 UCRTでCore・製品・source libusbから3PEをcross build、PE/import監査 | Windows runnerのpackage/runtime/EOF proofはCIで別実行。実機受信は未確認 |
 
 実機（DT181 / DT295）での受信は、この配布接続の検証範囲に含めません。
 
-このリポジトリとReleaseは非公開の個人用です。Releaseが非Draftでも、リポジトリの閲覧権限が必要です。
-リポジトリの可視性は変更しません。CIは開始時、成果物保存前、機器データ復元前、Releaseへの保存・発行前にPrivateを確認します。
+リポジトリは所有者が承認・実施済みのPUBLIC状態です。可視性は変更しません。CIは開始時、成果物保存前、機器データ復元前、Releaseへの保存・発行前に対象リポジトリとPUBLIC状態を確認します（`tools/check-private.sh` は履歴上の名前を維持）。素材の追加許可や新たな権利判断を意味しません。
 操作対象も `Khronos31/pix-userland` に限定します。
 
 ## v0.1.4
@@ -75,17 +74,17 @@ sourceアーカイブの `source-manifest.json` は、全ファイルのSHA-256�
 
 ## CIの実行
 
-Actions画面の **Private release** をmainから手動実行します。
+Actions画面の **Release** をmainから手動実行します。
 `include/version.h` のVERSIONからタグ名を生成します。同じタグ/Releaseの再利用は拒否します。
 全ビルド成功後、同じコミットを対象に一時Draftへファイルを揃え、検査後にDraftを解除します。
 失敗してDraftだけ残った場合は、その内容を確認してから整理・再実行してください。
-各OSは従来 standalone CLI の単体テスト（`make test`）に加え、`pixd` / `pixctl` / `pix-ts` をビルドして `tools/audit-binary.py` で3つとも検査します。AndroidはクロスビルドとELF検査を行います。
+`pixd` / `pixctl` / `pix-ts` をビルドして `tools/audit-binary.py` で3つとも検査します。WindowsはLinuxで固定chain/source libusbからcross buildし、Windows runnerでpackageを展開して基本CLIを実行します。通常の `windows.yml` は合成USB fixtureによるruntime・UTF-8 asset/output・TS byte一致・EOF停止・cleanup・同じnamespaceへの再起動も検証します。従来Make testsは通常CIのPOSIXとWindows別jobに維持し、CMake全体統合は別工程です。AndroidはクロスビルドとELF検査を行います。
 `tools/verify-release.py` は7バイナリそれぞれの3コマンド、従来CLIの混入なし、Coreのpinとlicense通知、sourceの閉包（manifest・SHA256SUMS・Core snapshot）を検査します。
 CIに実機は接続していないため、CI成功は各OSでの受信を保証しません。
 
 ## 実機データの保管
 
-2026-10-03の所有者の指定により、最終のPrivate Releaseバイナリだけにassetsを同梱します。
+所有者が許可した既存assetsだけを最終Releaseバイナリに同梱します。PUBLIC追従で追加の素材・鍵・driver表・rawを増やしません。
 `.private/assets.enc` はAES-256-GCMで認証暗号化した入力です。復元キーはGitHub Actions secretの `PIX_ASSETS_KEY` に保存し、Gitには入れません。
 キーはランダム32バイトをBase64化したものです。生成や更新時にログへ出力しないでください。
 `tools/assets-bundle.py seal ASSET_DIR .private/assets.enc` はこの環境変数を読み取ります。
@@ -112,6 +111,15 @@ sourceアーカイブを展開し、ネットワークなしで3コマンドを�
 tools/check-source-rebuild.sh pix-userland-VERSION-source.tar.gz /path/to/empty-work-dir
 ```
 
+Windows向けもLinux x86_64で同じ対応sourceから3PEを再buildできます。先に固定llvm-mingw archiveをcacheへ用意します（compilerはビルド環境の前提で、source packageには同梱しません）。Coreとlibusbはsource内の固定版を使い、この入口は追加downloadを拒否します。
+
+```sh
+LLVM_MINGW_CACHE=/path/to/verified-toolchain-cache \
+  tools/check-source-rebuild.sh pix-userland-VERSION-source.tar.gz /path/to/empty-work-dir windows-x64
+```
+
+cache内の `llvm-mingw-20250910-ucrt-ubuntu-22.04-x86_64.tar.xz` は毎回固定SHA-256を照合し、新しく展開します。3PEの再build/監査とWindows上での実行は別々に確認します。
+
 別のCore checkoutを使う場合は `DTV_USERLAND_CORE_SOURCE_DIR` を指定します。Gitリポジトリなら固定コミットとの一致を確認し、ローカルで意図的に異なる版を使うときだけ `PIX_CORE_ALLOW_UNPINNED=1` を付けます。
 
 改変したlibusbとの再リンク例（POSIX。改変版のarchiveを明示した場合だけ固定チェックサムを迂回します）:
@@ -129,4 +137,4 @@ for program in pixd pixctl pix-ts; do
 done
 ```
 
-このrecipeはlibusbを再ビルドし、3コマンドを同じarchiveから再リンクします。公式archiveとsource checkoutは既定で公式SHA-256を必須とします。Windowsでは改変MinGW64 static archiveを `LIBUSB_MINGW_ARCHIVE=/path/to/libusb.7z LIBUSB_ALLOW_MODIFIED=1 tools/build-windows.sh` で指定します（Windowsの3コマンド配布は上記の制約により現在ビルドできません）。AndroidはNDK toolchainでlibusbと3コマンドをビルドし、macOSはIOKit/CoreFoundation/Security frameworkをリンクします。署名や独自の再リンク制限は設けません。
+このrecipeはlibusbを再ビルドし、3コマンドを同じarchiveから再リンクします。公式archiveとsource checkoutは既定で公式SHA-256を必須とします。Windowsでは改変libusb source archiveを `LIBUSB_SOURCE_ARCHIVE=/path/to/libusb-modified.tar.bz2 LIBUSB_ALLOW_MODIFIED=1 tools/build-windows.sh` で指定し、同じ固定chainで再buildします。toolchainのhash照合は迂回しません。AndroidはNDK toolchainでlibusbと3コマンドをビルドし、macOSはIOKit/CoreFoundation/Security frameworkをリンクします。署名や独自の再リンク制限は設けません。

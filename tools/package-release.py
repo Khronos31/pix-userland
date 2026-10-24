@@ -63,11 +63,11 @@ def package(target, binary_dir=None, core_source_root=None, output_dir=None):
         files += [('licenses/'+f.name,f) for f in sorted((b/'licenses').glob('*')) if f.is_file()]
         if (b/'build-info.txt').exists(): files += [('build-info.txt',b/'build-info.txt')]
     commit = git_value(ROOT, 'rev-parse', 'HEAD')
-    metadata = {'project':'pix-userland','version':VERSION,'target':target,'commit':commit,'libusb':'1.0.30','private':True,'libusb_linkage':'static','device_assets':False,'dtv_userland_core_commit':CORE_LOCK}
+    metadata = {'project':'pix-userland','version':VERSION,'target':target,'commit':commit,'libusb':'1.0.30','private':False,'libusb_linkage':'static','device_assets':False,'dtv_userland_core_commit':CORE_LOCK}
     members = [(name, path.read_bytes(), 0o755 if path.stat().st_mode & 0o111 else 0o644) for name,path in files]
     required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions'}
     if target == 'source':
-        required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp'}
+        required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp','tools/build-windows.sh','include/os.h','src/dt181_capture_host.c','pix-dt181-consumer.cpp','core-integration/tests/windows_os_thread_proof.c','tests/test_windows_runtime.py'}
     assert required <= {name for name, _, _ in members}, 'Missing package documentation or licenses'
     if target == 'source':
         usb = ROOT/'build/deps/libusb-1.0.30.tar.bz2'
@@ -93,7 +93,7 @@ def package(target, binary_dir=None, core_source_root=None, output_dir=None):
     members.append(('release-info.json', json.dumps(metadata,indent=2).encode()+b'\n',0o644))
     if target == 'source':
         manifest = {'schema': 1, 'kind': 'corresponding-source', 'project': 'pix-userland', 'version': VERSION,
-                    'private': True, **source_id, 'libusb_version': '1.0.30',
+                    'private': False, **source_id, 'libusb_version': '1.0.30',
                     'files': {name: {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)} for name,data,_ in sorted(members)}}
         members.append(('source-manifest.json', json.dumps(manifest,sort_keys=True,indent=2).encode()+b'\n', 0o644))
         sums = ''.join(f'{hashlib.sha256(data).hexdigest()}  {name}\n' for name,data,_ in sorted(members))
