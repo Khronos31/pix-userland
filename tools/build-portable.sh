@@ -69,7 +69,7 @@ if [ "$mode" = native ] && [ "$(uname -s)" = Darwin ]; then
     extra_link='-lobjc -Wl,-framework,IOKit -Wl,-framework,CoreFoundation -Wl,-framework,Security'
 fi
 mkdir "$build/app"
-cp -R "$root/src" "$root/include" "$root/tests" "$root/tools" "$root/Makefile" "$build/app/"
+sh "$root/tools/copy-legacy-test-source.sh" "$root" "$build/app"
 # Remove copied object/dependency files so no host objects can leak into cross builds.
 (cd "$build/app" && make clean && make -j "${JOBS:-4}" CC="$cc" PKG_CONFIG=false USB_CFLAGS="-I$build/prefix/include/libusb-1.0" USB_LIBS="$build/prefix/lib/libusb-1.0.a $extra_link")
 if [ "$mode" != android ]; then
