@@ -11,7 +11,20 @@ set(PIX_CORE_REVISION "a50fef9b45bd497c1214cdc20e268dfda897fa9c" CACHE STRING
     "dtv-userland-core revision")
 
 set(DTV_USERLAND_BUILD_RECEIVER ON CACHE BOOL "Build receiver engine" FORCE)
+set(DTV_USERLAND_BUILD_CARD ON CACHE BOOL "Build card ownership engine" FORCE)
 set(DTV_USERLAND_BUILD_CAPTURE ON CACHE BOOL "Build packet capture session" FORCE)
+set(DTV_USERLAND_BUILD_CONTROL ON CACHE BOOL "Build control protocol gate" FORCE)
+set(DTV_USERLAND_BUILD_STATUS_PROJECTION ON CACHE BOOL "Build receiver STATUS projection" FORCE)
+set(DTV_USERLAND_BUILD_AUTHORITY ON CACHE BOOL "Build control authority" FORCE)
+set(DTV_USERLAND_BUILD_HOST_TUNER ON CACHE BOOL "Build host tuner owner" FORCE)
+set(DTV_USERLAND_BUILD_HOST_WORKERS ON CACHE BOOL "Build host control workers" FORCE)
+set(DTV_USERLAND_BUILD_HOST_AUTHORITY_OWNER ON CACHE BOOL "Build host authority owner" FORCE)
+set(DTV_USERLAND_BUILD_HOST_AUTHORITY_BRIDGE ON CACHE BOOL "Build host authority bridge" FORCE)
+set(DTV_USERLAND_BUILD_HOST_RUNTIME ON CACHE BOOL "Build host runtime" FORCE)
+set(DTV_USERLAND_BUILD_HOST_LISTENER_CONTEXT ON CACHE BOOL "Build listener Context" FORCE)
+set(DTV_USERLAND_BUILD_HOST_FACADE ON CACHE BOOL "Build host process facade" FORCE)
+set(DTV_USERLAND_BUILD_HOST_CTL ON CACHE BOOL "Build shared host control client" FORCE)
+set(DTV_USERLAND_BUILD_HOST_TS ON CACHE BOOL "Build shared host TS client" FORCE)
 
 if(PIX_CORE_SOURCE_DIR)
     add_subdirectory("${PIX_CORE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/dtv-userland-core")
@@ -125,3 +138,78 @@ target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
     -Wl,--wrap=random_bytes)
 add_test(NAME pix_dt295_adapter_lifecycle_proof
     COMMAND pix_dt295_adapter_lifecycle_proof)
+
+set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
+set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
+
+add_library(pix_product_runtime STATIC pix_runtime.cpp)
+target_include_directories(pix_product_runtime PUBLIC
+    "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}"
+    PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pix_product_runtime PRIVATE
+    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+target_compile_features(pix_product_runtime PUBLIC cxx_std_17)
+target_compile_options(pix_product_runtime PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_product_runtime PUBLIC
+    pix_dt181_composition pix_dt295_composition
+    dtv::host_listener_context dtv::host_runtime dtv::host_facade
+    dtv::core dtv::control dtv::identity dtv::tuning
+    PkgConfig::LIBUSB Threads::Threads)
+
+add_executable(pixd pixd.cpp)
+target_compile_definitions(pixd PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+target_compile_features(pixd PRIVATE cxx_std_17)
+target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pixd PRIVATE pix_product_runtime dtv::json PkgConfig::LIBUSB)
+
+add_executable(pixctl tools/pixctl.cpp)
+target_compile_definitions(pixctl PRIVATE
+    PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
+target_compile_features(pixctl PRIVATE cxx_std_17)
+target_compile_options(pixctl PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pixctl PRIVATE dtv::host_ctl dtv::json dtv::identity)
+
+add_executable(pix-ts tools/pix_ts.cpp)
+target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+target_compile_features(pix-ts PRIVATE cxx_std_17)
+target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning)
+
+add_executable(pixd_fixture pixd.cpp
+    tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
+target_include_directories(pixd_fixture PRIVATE
+    tests "${PIX_SOURCE_DIR}/tests" "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pixd_fixture PRIVATE
+    _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL
+    PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50 PIX_TEST_CALLBACK_GATE)
+target_compile_features(pixd_fixture PRIVATE cxx_std_17)
+target_link_libraries(pixd_fixture PRIVATE pix_product_runtime dtv::json)
+target_link_options(pixd_fixture PRIVATE
+    -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
+    -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
+    -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
+    -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
+    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
+    -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
+
+add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
+    tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
+target_include_directories(pix_public_runtime_proof PRIVATE
+    tests "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests"
+    "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pix_public_runtime_proof PRIVATE
+    _POSIX_C_SOURCE=200809L PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    PIXTS_PATH="$<TARGET_FILE:pix-ts>" PIXCTL_PATH="$<TARGET_FILE:pixctl>")
+target_compile_features(pix_public_runtime_proof PRIVATE cxx_std_17)
+target_link_libraries(pix_public_runtime_proof PRIVATE pix_product_runtime Threads::Threads)
+target_link_options(pix_public_runtime_proof PRIVATE
+    -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
+    -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
+    -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
+    -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
+    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
+    -Wl,--wrap=pthread_create)
+add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
+add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
