@@ -3,7 +3,7 @@ set -eu
 
 # Usage: tests/test_cli_compat.sh [HEAD-pix-ts] [working-pix-ts]
 baseline=${1:-}
-candidate=${2:-./pix-ts}
+candidate=${2:-./pix-ts-legacy}
 python=${PYTHON:-python3}
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/pix-cli-compat.XXXXXX")
 trap 'for name in output.ts synthetic.ts candidate.out candidate.err baseline.out baseline.err; do unlink "$tmp/$name" 2>/dev/null || true; done; rmdir "$tmp" 2>/dev/null || true' EXIT HUP INT TERM

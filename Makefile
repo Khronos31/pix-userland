@@ -10,8 +10,10 @@ USB_LIBS ?= $(shell $(PKG_CONFIG) --libs libusb-1.0)
 CORE = src/pid_filter.o src/control.o src/channel.o src/crypto.o src/platform.o src/protocol.o src/transport.o
 OBJ = src/usb_selector.o src/usb_listing.o $(CORE) src/diagnostic.o src/main.o src/usb_libusb.o src/usb_log.o src/dt295.o src/dt295_crypto.o src/dt295_routes.o src/dt295_stream.o src/ts_output.o src/dt295_capture.o
 .PHONY: all clean test
-all: pix-ts
-pix-ts: $(OBJ)
+# Legacy standalone C CLI, kept for internal diagnostics and tests only. It is not a release
+# program: pixd, pixctl and pix-ts are built by core-integration/CMakeLists.txt.
+all: pix-ts-legacy
+pix-ts-legacy: $(OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJ) $(USB_LIBS) $(OS_LIBS)
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) -MMD -MP -c -o $@ $<
@@ -51,7 +53,7 @@ tests/test-dt295-stream: tests/test_dt295_stream.c src/dt295_stream.c
 tests/test-ts-output: tests/test_ts_output.c src/ts_output.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -DTS_OUTPUT_TESTING $(LDFLAGS) -o $@ $^ $(OS_LIBS)
 
-test: pix-ts tests/test-dt295-protocol tests/test-dt295-satellite tests/test-dt295-capture tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
+test: pix-ts-legacy tests/test-dt295-protocol tests/test-dt295-satellite tests/test-dt295-capture tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart
 	./tests/test-dt295-protocol
 	./tests/test-dt295-satellite
 	./tests/test-dt295-capture
@@ -73,5 +75,5 @@ test: pix-ts tests/test-dt295-protocol tests/test-dt295-satellite tests/test-dt2
 	$(PYTHON) tests/test_dt295_packaging.py
 	$(PYTHON) tests/test_dt295_assets.py
 clean:
-	rm -f pix-ts pix-ts.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-dt295-capture tests/test-dt295-protocol tests/test-dt295-satellite
+	rm -f pix-ts-legacy pix-ts-legacy.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-dt295-capture tests/test-dt295-protocol tests/test-dt295-satellite
 -include $(OBJ:.o=.d) tests/test_crypto.d tests/test_transport.d tests/test_usb_log.d
