@@ -34,13 +34,13 @@
 
 | ID | OS / ABI | 依存 / driver / permission | firmware / 補助data | RF試験入力（system / channel） | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
 |---|---|---|---|---|---|---|---|
-| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
-| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
-| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | macOS PC/SC: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
-| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-aarch64`; procedure: §3–§5 |
-| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-armv7a`; procedure: §3–§5 |
-| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-x86_64`; procedure: §3–§5 |
-| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
+| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
+| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
+| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | macOS PC/SC: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
+| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-aarch64`; procedure: §3–§5 |
+| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-armv7a`; procedure: §3–§5 |
+| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-x86_64`; procedure: §3–§5 |
+| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
 
 archive対象と試験前提を記す表であり、実装状態・候補の有無・特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295は製品対象として各OS/ABIの試験に含める。assetsのarchiveへの埋込状態はここで判定しない。
 
@@ -88,7 +88,7 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 
 - **適用対象/頻度:** 毎releaseは不足波。初回/majorは全機種の代表機で全無料channel各10秒。
 - **準備:** 現地channel planとmodel能力から対象system/channel一覧を作る。
-- **実操作/利用者への依頼:** DT181-PU0はT/BS/CS、DT295はISDB-T。pix-ts --channel <CHANNEL> --system <SYSTEM> --time 10 --output <FILE> --runtime-dir "$RT" --group。
+- **実操作/利用者への依頼:** DT181-PU0は対応するT/BS/CS、DT295はISDB-T/ISDB-Sを対象にする。`pix-ts --channel <CHANNEL> --system <SYSTEM> --time 10 --output <FILE> --runtime-dir "$RT" --group`を各channelで実行する。DT295のISDB-Sも各OS/ABIで省略せず実行し、unsupported/nonzeroは当該候補の未達/失敗として記録する。
 - **期待値/終了値:** 各対象channelのTS/exit合格。未取得は未完了、非対応波だけ根拠付きN/A。
 - **停止/cleanup:** client wait/exit保存、daemon通常停止。
 - **記録:** model/system/channel/全channel list、TS解析/counter/exit、未取得理由。
@@ -114,11 +114,11 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 ### T07 USB idle/stream切断と再取得
 
 - **適用対象/頻度:** 毎release。USB対応deviceのidle/streamを別run。
-- **準備:** USB pathをlist-jsonで固定。有限captureとそれより短い観測窓を準備。
-- **実操作/利用者への依頼:** pixd --list-jsonでport固定。pix-ts --time "$CAPTURE_SECONDS"中に抜去依頼、再接続後新runtimeのpixd/status/list/短TS。
-- **期待値/終了値:** 切断側のexit 7/診断、新daemon再取得exit 0。time満了exit 0は切断合格でない。
-- **停止/cleanup:** 旧client/daemon stop/wait後に再接続、新daemonも停止。Androidはpermission/FD再取得。
-- **記録:** idle/stream、観測/capture deadline、port/diagnostic/exit、再取得TS/counter。
+- **準備:** `pixd --list-json`でUSB pathを特定し、streamなしでdaemonを起動してstatus/list、daemon/client PIDとUSB owner状態を記録する。capture clientは開始時にUSBを開くため、daemon-only idleではdevice handleを保持しない。
+- **実操作/利用者への依頼:** daemon-only idle中に利用者へ抜去を依頼し、応答後にstatus/list、daemon診断と実際の終了値を採取する。list-jsonは列挙情報でありownership確認として扱わない。再接続を依頼して再列挙後、新runtime/daemonから短い`pix-ts` captureを実行する。別runでは`pix-ts --time "$CAPTURE_SECONDS"`中に抜去を依頼し、client/daemon診断と各実終了値を採取する。
+- **期待値/終了値:** daemon-only idleではUSB ownerがいないため、抜去によるstream切断exitは発生せず、list/status差分とdaemonの実際の終了値を記録する。このidle観測をowner-held idle切断の合格にしない。stream中は切断診断とclient exit 7を確認する。time満了exit 0は切断合格でない。新daemonの短TSはexit 0とTS/counter合格。
+- **停止/cleanup:** idle/streamそれぞれでowned client/daemonを通常停止してwaitし、再接続後の新daemonも通常停止する。Androidはpermission/FD再取得。
+- **記録:** idle/stream、daemon/client USB owner状態、依頼/応答時刻、path、status/診断、各実終了値、再取得TS/counter、cleanup。
 
 ### T08 通常stop/cleanup
 
