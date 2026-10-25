@@ -123,6 +123,7 @@ ReceiverAdapter::Result ReceiverAdapter::open(ReceiverId receiver) noexcept
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (init_error_ != Error::OK) return Result::failure(init_error_);
+    if (recovery_failed_) return Result::failure(Error::USB_IO);
     if (opened_) return Result::failure(Error::BUSY);
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     dt295_card_invalidate_observation(device_);
@@ -159,6 +160,8 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         return TuneResult::failure(Error::UNSUPPORTED);
     if (!opened_ || init_error_ != Error::OK)
         return TuneResult::failure(Error::NOT_FOUND);
+    if (recovery_failed_)
+        return TuneResult::failure(Error::USB_IO);
     unsigned channel = 0U;
     if (system == ReceiverSystem::terrestrial) {
         channel = channel_for_hz(requested_hz);
@@ -220,6 +223,8 @@ dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
         return dtv::userland::Result<bool>::failure(Error::UNSUPPORTED);
     if (!opened_ || init_error_ != Error::OK)
         return dtv::userland::Result<bool>::failure(Error::NOT_FOUND);
+    if (recovery_failed_)
+        return dtv::userland::Result<bool>::failure(Error::USB_IO);
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     dt295_satellite_state state{};
     char error[256]{};
@@ -231,11 +236,17 @@ dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
 
 std::optional<bool> ReceiverAdapter::sample_card_inserted() noexcept
 {
+    const std::uint64_t started = clock_.monotonic_ms();
+    const std::uint64_t observation_deadline = started + 1000U;
+    const std::uint64_t recovery_deadline = started + 3000U;
+    std::unique_lock<std::mutex> operation_lock(operation_mutex_, std::try_to_lock);
+    if (!operation_lock.owns_lock())
+        return std::nullopt;
     std::unique_lock<std::mutex> protocol_lock(protocol_mutex_, std::try_to_lock);
     if (!protocol_lock.owns_lock() || !opened_ || init_error_ != Error::OK)
         return std::nullopt;
     dt295_card_snapshot snapshot{};
-    if (dt295_card_observe(device_, &snapshot) != 0) {
+    if (dt295_card_observe_until(device_, &snapshot, observation_deadline) != 0) {
         dt295_card_invalidate_observation(device_);
         return std::nullopt;
     }
@@ -244,6 +255,22 @@ std::optional<bool> ReceiverAdapter::sample_card_inserted() noexcept
     if (snapshot.raw_state == 0U && snapshot.activation_valid &&
         snapshot.notification_generation > snapshot.activation_generation)
         return false;
+    if (snapshot.raw_state == 1U && snapshot.fresh_notification && snapshot.activation_valid &&
+        snapshot.notification_generation > snapshot.activation_generation) {
+        if (stream_attached_ || streaming_ || stream_ != nullptr)
+            return std::nullopt;
+        dt295_card_snapshot recovered{};
+        char error[256]{};
+        const dt295_card_recovery_result result = dt295_card_recover(
+            device_, &snapshot, recovery_deadline, &recovered, error, sizeof(error));
+        if (result == DT295_CARD_RECOVERY_ACTIVATED)
+            return true;
+        if (result == DT295_CARD_RECOVERY_FATAL) {
+            recovery_failed_ = true;
+            std::fprintf(stderr, "DT295 card recovery fatal: %s\n", error);
+            dt295_card_invalidate_observation(device_);
+        }
+    }
     return std::nullopt;
 }
 
@@ -253,6 +280,7 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiv
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
+    if (recovery_failed_) return Result::failure(Error::USB_IO);
     if (!satellite_tuned_) return Result::failure(Error::NOT_READY);
     if (slot > 7U) return Result::failure(Error::INVALID_ARGUMENT);
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -286,6 +314,7 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiv
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
+    if (recovery_failed_) return Result::failure(Error::USB_IO);
     satellite_tsid_ = tsid;
     satellite_tsid_valid_ = true;
     if (!satellite_tuned_) return Result::success();
@@ -459,6 +488,7 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
 
 ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
 {
+    if (recovery_failed_) return Result::failure(Error::USB_IO);
     if (streaming_) return Result::success();
     if (device_ == nullptr || routes_ == nullptr)
         return Result::failure(Error::DISCONNECTED);

@@ -36,6 +36,7 @@ using namespace dtv::userland::host_runtime;
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
 extern "C" int dt295_actual_fixture_open(const char*);
 extern "C" void dt295_actual_fixture_configure_presence(unsigned, int);
+extern "C" void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
 #endif
 
 struct Arguments final {
@@ -318,6 +319,12 @@ int run(int argc, char** argv)
             std::fprintf(stderr, "PIX_TEST_DT295 open failed=%u\n",
                          static_cast<unsigned>(opened.error()));
             return 70;
+        }
+        const char* reinsert_value = std::getenv("PIX_TEST_DT295_REINSERT_RAW");
+        if (reinsert_value != nullptr) {
+            const unsigned raw_state = static_cast<unsigned>(
+                std::strtoul(reinsert_value, nullptr, 10));
+            dt295_actual_fixture_set_card_sample(raw_state, 1U, 0U);
         }
     }
 #endif

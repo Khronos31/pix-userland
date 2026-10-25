@@ -15,12 +15,14 @@ typedef struct {
     uint8_t iv[16];
     uint8_t ts_iv[16];
     uint8_t session[16];
-    unsigned key_requests, i2c_commands, key_words, acquire_commands;
+    unsigned key_requests, i2c_commands, key_words, acquire_commands, control_calls;
+    unsigned card_activation_commands;
     unsigned auth_requests, init_commands, shutdown_commands, start_commands;
     unsigned renewal_challenges, renewal_applies;
     unsigned status_notifications, status_acks, status_reads, control_delay_ms;
     uint32_t fail_secure_id;
     int pause_pending, fail_state_read_once, inject_post_auth_fault;
+    int hold_card_activation_state, fail_card_activation_command;
 } fake;
 int random_bytes(void *p, size_t n) {
     memset(p, 0, n);
@@ -155,6 +157,7 @@ static void respond(fake *f, uint32_t id) {
 static int control(void *u, uint8_t rt, uint8_t req, uint16_t value, uint16_t index, uint8_t *data,
                    size_t n, unsigned timeout, size_t *actual) {
     fake *f = u;
+    ++f->control_calls;
     if (f->control_delay_ms != 0U) {
         const unsigned elapsed = f->control_delay_ms < timeout ? f->control_delay_ms : timeout;
         f->now += elapsed;
@@ -200,6 +203,15 @@ static int control(void *u, uint8_t rt, uint8_t req, uint16_t value, uint16_t in
         } else if (cmd == 8)
             respond(f, rd32(f->mem + 0x83000));
         else if (req == 0xb9) {
+            if (cmd == 0x0a && sub == 1U) {
+                if (f->fail_card_activation_command) {
+                    f->fail_card_activation_command = 0;
+                    return -1;
+                }
+                ++f->card_activation_commands;
+                if (!f->hold_card_activation_state)
+                    wr16(f->mem + 0x822ac, 0x3000U);
+            }
             f->i2c_commands++;
             wr16(f->mem + 0x80016, (uint16_t)(cmd << 8));
             wr16(f->mem + 0x823be, 0);
@@ -243,6 +255,49 @@ static int control(void *u, uint8_t rt, uint8_t req, uint16_t value, uint16_t in
         return 0;
     }
     return -1;
+}
+static int bulk(void *, uint8_t, uint8_t *, size_t, unsigned, size_t *);
+static int interrupt(void *, uint8_t, uint8_t *, size_t, unsigned, size_t *);
+static uint64_t now(void *);
+static void sleep_fake(void *, unsigned);
+static void test_card_recovery_fatal(const dt295_assets *assets, const fake *source) {
+    fake f = {0};
+    f.mem = calloc(1, MEMSIZE);
+    assert(f.mem);
+    f.now = 1000;
+    memcpy(f.material, source->material, sizeof(f.material));
+    wr16(f.mem + 0x82008, 0x10);
+    wr16(f.mem + 0x822ac, 0x3000U);
+    dt295_io io = {&f, control, bulk, interrupt, now, sleep_fake};
+    dt295 *d = NULL;
+    char error[256];
+    assert(dt295_create(&d, &io, assets, error, sizeof(error)) == 0);
+    assert(dt295_boot(d, error, sizeof(error)) == 0);
+    assert(dt295_open_session(d, error, sizeof(error)) == 0);
+    assert(dt295_card_initialize(d, error, sizeof(error)) == 0);
+    assert(dt295_card_activate(d, 2000U, error, sizeof(error)) == 0);
+    wr16(f.mem + 0x822ac, 0x1000U);
+    f.status_notifications = 1U;
+    dt295_card_snapshot observed = {0}, recovered = {0};
+    assert(dt295_card_observe(d, &observed) == 0);
+    assert(observed.raw_state == 1U && observed.activation_valid &&
+           observed.notification_generation > observed.activation_generation);
+    f.fail_card_activation_command = 1;
+    const dt295_card_recovery_result outcome = dt295_card_recover(
+        d, &observed, f.now + 3000U, &recovered, error, sizeof(error));
+    assert(outcome == DT295_CARD_RECOVERY_FATAL);
+    assert(dt295_card_observe(d, &recovered) != 0);
+    const unsigned calls_after_fatal = f.control_calls;
+    assert(dt295_tune_terrestrial(d, 13U, error, sizeof(error)) != 0);
+    assert(f.control_calls == calls_after_fatal);
+    assert(dt295_tune_satellite(d, 1049480000U, -1, error, sizeof(error)) != 0);
+    assert(f.control_calls == calls_after_fatal);
+    size_t drained = 0U;
+    assert(dt295_stop(d, &drained, error, sizeof(error)) == 0);
+    assert(dt295_shutdown(d, error, sizeof(error)) == 0);
+    assert(f.control_calls > calls_after_fatal);
+    dt295_destroy(d);
+    free(f.mem);
 }
 static int bulk(void *u, uint8_t ep, uint8_t *p, size_t n, unsigned timeout, size_t *actual) {
     (void)p;
@@ -448,6 +503,48 @@ int main(void) {
     assert(dt295_card_observe(d, &card_snapshot) != 0);
     assert(rd16(f.mem + 0x90074) == 0x400 && f.status_acks == acks_before_response);
     wr16(f.mem + 0x90074, 0);
+    wr16(f.mem + 0x822ac, 0x1000U);
+    f.status_notifications = 1U;
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    assert(card_snapshot.raw_state == 1U && card_snapshot.activation_valid &&
+           card_snapshot.notification_generation > card_snapshot.activation_generation);
+    const unsigned activations_before_recovery = f.card_activation_commands;
+    dt295_card_snapshot recovered_snapshot = {0};
+    assert(dt295_card_recover(d, &card_snapshot, f.now + 3000U, &recovered_snapshot,
+                              error, sizeof(error)) == DT295_CARD_RECOVERY_ACTIVATED);
+    assert(recovered_snapshot.raw_state == 3U && recovered_snapshot.activation_valid &&
+           recovered_snapshot.notification_generation ==
+               recovered_snapshot.activation_generation);
+    assert(f.card_activation_commands == activations_before_recovery + 1U);
+    assert(dt295_card_recover(d, &card_snapshot, f.now + 3000U, &recovered_snapshot,
+                              error, sizeof(error)) == DT295_CARD_RECOVERY_PENDING);
+    assert(f.card_activation_commands == activations_before_recovery + 1U);
+
+    wr16(f.mem + 0x822ac, 0x1000U);
+    f.status_notifications = 1U;
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    f.hold_card_activation_state = 1;
+    const unsigned activations_before_pending = f.card_activation_commands;
+    const uint64_t recovery_deadline = f.now + 100U;
+    assert(dt295_card_recover(d, &card_snapshot, recovery_deadline, &recovered_snapshot,
+                              error, sizeof(error)) == DT295_CARD_RECOVERY_PENDING);
+    assert(f.now <= recovery_deadline && f.card_activation_commands ==
+           activations_before_pending + 1U);
+    assert(dt295_card_observe(d, &recovered_snapshot) == 0);
+    assert(recovered_snapshot.raw_state == 1U && recovered_snapshot.activation_valid);
+    assert(dt295_card_recover(d, &card_snapshot, f.now + 3000U, &recovered_snapshot,
+                              error, sizeof(error)) == DT295_CARD_RECOVERY_PENDING);
+    assert(f.card_activation_commands == activations_before_pending + 1U);
+
+    f.hold_card_activation_state = 0;
+    f.status_notifications = 1U;
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    const unsigned activations_before_new_generation = f.card_activation_commands;
+    assert(dt295_card_recover(d, &card_snapshot, f.now + 3000U, &recovered_snapshot,
+                              error, sizeof(error)) == DT295_CARD_RECOVERY_ACTIVATED);
+    assert(f.card_activation_commands == activations_before_new_generation + 1U);
+    test_card_recovery_fatal(assets, &f);
+
     wr16(f.mem + 0x822ac, 0x3000);
     f.status_notifications = 32U;
     f.control_delay_ms = 100U;

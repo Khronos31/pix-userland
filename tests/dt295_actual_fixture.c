@@ -16,7 +16,10 @@ static fake pipeline_fake;
 static pthread_mutex_t pipeline_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned pipeline_route_writes;
 static unsigned pipeline_pid273_route_writes;
+static unsigned pipeline_control_calls;
 static int pipeline_fail_route_once;
+static int pipeline_fail_activation_once;
+static unsigned pipeline_activation_failures;
 static unsigned pipeline_route_failures;
 static uint8_t pipeline_sat_regs[256];
 static uint8_t pipeline_sat_pending;
@@ -30,6 +33,7 @@ static unsigned pipeline_control_delay_ms;
 static unsigned pipeline_post_activation_state = 3U;
 static int pipeline_post_activation_notification;
 static int pipeline_activation_command_seen;
+static unsigned pipeline_activation_commands;
 static int pipeline_activation_state_seen;
 static int pipeline_post_activation_delivered;
 
@@ -55,6 +59,37 @@ void dt295_actual_fixture_set_card_sample(unsigned raw_state, unsigned notificat
     wr16(pipeline_fake.mem + 0x822ac, (uint16_t)(raw_state << 12));
     wr16(pipeline_fake.mem + 0x90074, (uint16_t)(pending & 0x400));
     pthread_mutex_unlock(&pipeline_mutex);
+}
+
+void dt295_actual_fixture_fail_activation_once(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_fail_activation_once = 1;
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+unsigned dt295_actual_fixture_control_calls(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_control_calls;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
+unsigned dt295_actual_fixture_activation_failures(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_activation_failures;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
+unsigned dt295_actual_fixture_activation_commands(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_activation_commands;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
 }
 
 unsigned dt295_actual_fixture_card_acks(void)
@@ -199,7 +234,17 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
         (void)nanosleep(&wait, NULL);
     }
     pthread_mutex_lock(&pipeline_mutex);
+    ++pipeline_control_calls;
     const uint32_t address = (uint32_t)(value >> 8) << 16 | index;
+    if (pipeline_fail_activation_once && request == 0xb9 && length == 4U &&
+        data[0] == 0x0aU && data[1] == 1U) {
+        pipeline_fail_activation_once = 0;
+        ++pipeline_activation_failures;
+        pthread_mutex_unlock(&pipeline_mutex);
+        atomic_fetch_sub_explicit(&pipeline_control_active, 1U, memory_order_acq_rel);
+        fprintf(stderr, "DT295 injection=activation_command_failure reached=1\n");
+        return LIBUSB_ERROR_IO;
+    }
     if (request == 0xbc && (request_type & 0x80U) != 0U && address == 0x90074U &&
         length == 2U && pipeline_activation_state_seen && !pipeline_post_activation_delivered) {
         pipeline_post_activation_delivered = 1;
@@ -229,6 +274,7 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
     if (!rc && request == 0xb9 && length == 4U && data[0] == 0x0aU &&
         data[1] == 1U && rd16(data + 2) == 1U) {
         pipeline_activation_command_seen = 1;
+        ++pipeline_activation_commands;
         wr16(pipeline_fake.mem + 0x822ac, 0x3000U);
     }
     if (!rc && request == 0xbc && (request_type & 0x80U) != 0U &&

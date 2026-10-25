@@ -12,6 +12,7 @@
 #define ASSET_SECTIONS 6
 #define MAX_BUNDLE (32u * 1024u * 1024u)
 #define USB_TIMEOUT (-7)
+#define DT295_DEADLINE 1
 
 struct dt295_assets {
     uint8_t *idle, *trc, *material;
@@ -28,9 +29,11 @@ struct dt295 {
     uint64_t renewal_due;
     uint16_t state;
     uint8_t has_session, has_ts_key, prepared, started, card_notified;
-    uint8_t card_notified_state, pause_state, tuned, poisoned, cleanup_only;
+    uint8_t card_notified_state, pause_state, tuned, poisoned, card_recovery_failed, cleanup_only;
     uint64_t card_notification_generation, card_activation_generation;
+    uint64_t card_recovery_generation;
     uint8_t card_activation_valid;
+    uint8_t card_recovery_generation_valid;
 };
 
 static void seterr(char *e, size_t n, const char *s) {
@@ -221,7 +224,7 @@ static int ctl_until(dt295 *d, uint8_t rt, uint8_t req, uint16_t val, uint16_t i
                      uint8_t *buf, size_t len, uint64_t deadline) {
     const uint64_t now = now_ms(d);
     if (now >= deadline)
-        return -1;
+        return DT295_DEADLINE;
     uint64_t remaining = deadline - now;
     if (remaining > 1000U)
         remaining = 1000U;
@@ -236,9 +239,10 @@ static int rd_until(dt295 *d, uint32_t addr, uint8_t *out, size_t n, uint64_t de
         if (k > 64)
             k = 64;
         uint32_t a = addr + (uint32_t)pos;
-        if (ctl_until(d, 0xc0, 0xbc, (uint16_t)((a >> 16) << 8), (uint16_t)a,
-                      out + pos, k, deadline))
-            return -1;
+        const int result = ctl_until(d, 0xc0, 0xbc, (uint16_t)((a >> 16) << 8),
+                                     (uint16_t)a, out + pos, k, deadline);
+        if (result)
+            return result;
         pos += k;
     }
     return 0;
@@ -252,9 +256,10 @@ static int wr_until(dt295 *d, uint32_t addr, const uint8_t *p, size_t n, uint64_
         if (k > 64)
             k = 64;
         uint32_t a = addr + (uint32_t)pos;
-        if (ctl_until(d, 0x40, 0xbc, (uint16_t)((a >> 16) << 8), (uint16_t)a,
-                      (uint8_t *)p + pos, k, deadline))
-            return -1;
+        const int result = ctl_until(d, 0x40, 0xbc, (uint16_t)((a >> 16) << 8),
+                                     (uint16_t)a, (uint8_t *)p + pos, k, deadline);
+        if (result)
+            return result;
         pos += k;
     }
     return 0;
@@ -286,8 +291,9 @@ static int word(dt295 *d, uint32_t a, uint16_t *v) {
 }
 static int word_until(dt295 *d, uint32_t a, uint16_t *v, uint64_t deadline) {
     uint8_t b[2];
-    if (rd_until(d, a, b, 2, deadline))
-        return -1;
+    const int result = rd_until(d, a, b, 2, deadline);
+    if (result)
+        return result;
     *v = (uint16_t)b[0] << 8 | b[1];
     if (a == 0x82008)
         d->state = *v;
@@ -351,6 +357,73 @@ static int wait_event(dt295 *d, uint16_t mask, unsigned timeout) {
         if (notify(d, left))
             return -1;
     }
+}
+static int drain_state_until(dt295 *d, uint64_t deadline) {
+    for (unsigned i = 0; i < 64; i++) {
+        uint16_t p, s;
+        int result = word_until(d, 0x90074, &p, deadline);
+        if (result)
+            return result;
+        result = word_until(d, 0x82008, &s, deadline);
+        if (result)
+            return result;
+        if (p & 4) {
+            result = putword_until(d, 0x90074, 4, deadline);
+            if (result)
+                return result;
+        }
+        if (s == 0xffff)
+            return -1;
+        if (!(p & 4)) {
+            d->state = s;
+            return 0;
+        }
+    }
+    return -1;
+}
+static int wait_event_until(dt295 *d, uint16_t mask, uint64_t deadline) {
+    for (;;) {
+        uint16_t pending;
+        const int result = word_until(d, 0x90074, &pending, deadline);
+        if (result)
+            return result;
+        if (pending & mask)
+            return 0;
+        const uint64_t now = now_ms(d);
+        if (now >= deadline)
+            return DT295_DEADLINE;
+        uint64_t remaining = deadline - now;
+        if (remaining > 10U)
+            remaining = 10U;
+        sleep_ms(d, (unsigned)remaining);
+    }
+}
+static int command_until(dt295 *d, uint8_t cmd, uint8_t sub, uint16_t val, int i2c,
+                         uint64_t deadline, int *attempted) {
+    uint16_t mask = i2c ? 2 : 8, pending, completion;
+    uint8_t b[4] = {cmd, sub, (uint8_t)(val >> 8), (uint8_t)val};
+    int result = word_until(d, 0x90074, &pending, deadline);
+    if (result)
+        return result;
+    if (pending & mask)
+        return -1;
+    result = ctl_until(d, 0x40, i2c ? 0xb9 : 0xb8, 0, 0, b, sizeof(b), deadline);
+    if (result == DT295_DEADLINE)
+        return result;
+    *attempted = 1;
+    if (result)
+        return -1;
+    result = wait_event_until(d, mask, deadline);
+    if (result)
+        return -1;
+    if (word_until(d, i2c ? 0x80016 : 0x80014, &completion, deadline))
+        return -1;
+    if (putword_until(d, 0x90074, mask, deadline))
+        return -1;
+    if ((completion >> 8) != cmd || (completion & 255) == 0x80 ||
+        (completion & 255) == 0x81)
+        return -1;
+    return 0;
 }
 static int command(dt295 *d, uint8_t cmd, uint8_t sub, uint16_t val, int i2c, uint8_t *response) {
     uint16_t mask = i2c ? 2 : 8, pending, completion;
@@ -704,16 +777,21 @@ static int card_status_until(dt295 *d, unsigned *state, uint64_t deadline,
     const uint64_t generation = d->card_notification_generation;
     for (unsigned i = 0; i < 32; ++i) {
         uint16_t pending;
-        if (word_until(d, 0x90074, &pending, deadline) || (pending & 0x400))
+        const int pending_result = word_until(d, 0x90074, &pending, deadline);
+        if (pending_result)
+            return pending_result;
+        if (pending & 0x400)
             return -1;
         uint8_t b[0x112];
         const size_t n = (pending & 0x200) ? sizeof(b) : 2;
-        if (rd_until(d, 0x822ac, b, n, deadline))
-            return -1;
+        const int read_result = rd_until(d, 0x822ac, b, n, deadline);
+        if (read_result)
+            return read_result;
         unsigned s = ((unsigned)b[0] << 8 | b[1]) >> 12;
         if (pending & 0x200) {
-            if (putword_until(d, 0x90074, 0x200, deadline))
-                return -1;
+            const int ack_result = putword_until(d, 0x90074, 0x200, deadline);
+            if (ack_result)
+                return ack_result;
             d->card_notified = 1;
             d->card_notified_state = (uint8_t)s;
             ++d->card_notification_generation;
@@ -724,6 +802,16 @@ static int card_status_until(dt295 *d, unsigned *state, uint64_t deadline,
         }
     }
     return -1;
+}
+static void card_snapshot_set(dt295 *d, unsigned state, uint8_t fresh_notification,
+                              dt295_card_snapshot *snapshot) {
+    *snapshot = (dt295_card_snapshot){
+        state,
+        d->card_notification_generation,
+        d->card_activation_generation,
+        d->card_activation_valid,
+        fresh_notification,
+    };
 }
 int dt295_card_initialize(dt295 *d, char *e, size_t en) {
     unsigned s;
@@ -774,22 +862,104 @@ int dt295_card_activate(dt295 *d, unsigned timeout, char *e, size_t en) {
     return fail(d, e, en, "card activation timed out");
 }
 
-int dt295_card_observe(dt295 *d, dt295_card_snapshot *snapshot) {
+static dt295_card_recovery_result card_recovery_fail(dt295 *d, char *e, size_t en,
+                                                      const char *message) {
+    if (d)
+        d->card_recovery_failed = 1;
+    return (dt295_card_recovery_result)fail(d, e, en, message);
+}
+
+int dt295_card_observe_until(dt295 *d, dt295_card_snapshot *snapshot,
+                             uint64_t deadline_ms) {
     if (!d || !snapshot || d->cleanup_only || !d->has_session || d->poisoned)
         return -1;
-    const uint64_t deadline = now_ms(d) + 1000U;
     unsigned state = 0;
     uint8_t fresh_notification = 0;
-    if (card_status_until(d, &state, deadline, &fresh_notification))
+    if (card_status_until(d, &state, deadline_ms, &fresh_notification))
         return -1;
-    *snapshot = (dt295_card_snapshot){
-        state,
-        d->card_notification_generation,
-        d->card_activation_generation,
-        d->card_activation_valid,
-        fresh_notification,
-    };
+    card_snapshot_set(d, state, fresh_notification, snapshot);
     return 0;
+}
+int dt295_card_observe(dt295 *d, dt295_card_snapshot *snapshot) {
+    if (!d)
+        return -1;
+    return dt295_card_observe_until(d, snapshot, now_ms(d) + 1000U);
+}
+dt295_card_recovery_result dt295_card_recover(dt295 *d,
+                                              const dt295_card_snapshot *observed,
+                                              uint64_t deadline_ms,
+                                              dt295_card_snapshot *result,
+                                              char *e, size_t en) {
+    if (!d || !observed || !result || d->cleanup_only || !d->has_session || d->poisoned)
+        return DT295_CARD_RECOVERY_FATAL;
+    if (d->state != 0x11 || !observed->activation_valid || observed->raw_state != 1U ||
+        !observed->fresh_notification ||
+        observed->notification_generation <= observed->activation_generation ||
+        observed->notification_generation != d->card_notification_generation)
+        return DT295_CARD_RECOVERY_NOT_NEEDED;
+    if (d->card_recovery_generation_valid &&
+        d->card_recovery_generation == observed->notification_generation) {
+        *result = *observed;
+        return DT295_CARD_RECOVERY_PENDING;
+    }
+    const int state_result = drain_state_until(d, deadline_ms);
+    if (state_result == DT295_DEADLINE) {
+        *result = *observed;
+        return DT295_CARD_RECOVERY_PENDING;
+    }
+    if (state_result || d->state != 0x11)
+        return card_recovery_fail(d, e, en, "device state unavailable during card recovery");
+    int attempted = 0;
+    const int command_result = command_until(d, 0x0a, 1, 1, 1, deadline_ms, &attempted);
+    if (attempted) {
+        d->card_recovery_generation = observed->notification_generation;
+        d->card_recovery_generation_valid = 1;
+    }
+    if (command_result == DT295_DEADLINE) {
+        *result = *observed;
+        return DT295_CARD_RECOVERY_PENDING;
+    }
+    if (command_result)
+        return card_recovery_fail(d, e, en,
+                                  "card recovery command failed or completion is uncertain");
+    for (;;) {
+        const int state_result = drain_state_until(d, deadline_ms);
+        if (state_result == DT295_DEADLINE) {
+            *result = *observed;
+            return DT295_CARD_RECOVERY_PENDING;
+        }
+        if (state_result || d->state != 0x11)
+            return card_recovery_fail(d, e, en,
+                                      "device state unavailable during card recovery");
+        unsigned state = 0;
+        uint8_t fresh_notification = 0;
+        const int status_result = card_status_until(d, &state, deadline_ms,
+                                                    &fresh_notification);
+        if (status_result == DT295_DEADLINE) {
+            *result = *observed;
+            return DT295_CARD_RECOVERY_PENDING;
+        }
+        if (status_result)
+            return card_recovery_fail(d, e, en, "card status failed during recovery");
+        if (state == 3U) {
+            d->card_activation_generation = d->card_notification_generation;
+            d->card_activation_valid = 1;
+            card_snapshot_set(d, state, fresh_notification, result);
+            seterr(e, en, "");
+            return DT295_CARD_RECOVERY_ACTIVATED;
+        }
+        if (state != 1U && state != 2U && state != 0U && state != 4U && state != 5U)
+            return card_recovery_fail(d, e, en, "unexpected card state during recovery");
+        const uint64_t now = now_ms(d);
+        if (now >= deadline_ms) {
+            card_snapshot_set(d, state, fresh_notification, result);
+            return DT295_CARD_RECOVERY_PENDING;
+        }
+        uint64_t remaining = deadline_ms - now;
+        if (remaining > 10U)
+            remaining = 10U;
+        sleep_ms(d, (unsigned)remaining);
+    }
 }
 void dt295_card_invalidate_observation(dt295 *d) {
     if (!d)
@@ -904,6 +1074,8 @@ static int tuner_initialize(dt295 *d) {
 int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
         return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
+    if (d->card_recovery_failed)
+        return fail(d, e, en, "terrestrial tune refused after DT295 card recovery failure");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "terrestrial tuning requires authenticated idle state");
     if (tuner_initialize(d))
@@ -1094,6 +1266,8 @@ int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en)
     if (!d || d->cleanup_only || !d->has_session || if_hz < 950000000u ||
         if_hz > 2150000000u || tsid < -1 || tsid > 65535)
         return fail(d, e, en, "satellite tuning requires IF 950..2150 MHz and TSID 0..65535");
+    if (d->card_recovery_failed)
+        return fail(d, e, en, "satellite tune refused after DT295 card recovery failure");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "satellite tuning requires authenticated idle state");
     const uint8_t *table = mat(d, 0x845a0, 18 * 8);

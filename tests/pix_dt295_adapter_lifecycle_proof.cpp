@@ -25,6 +25,10 @@ uint16_t dt295_actual_fixture_satellite_tsid(void);
 void dt295_actual_fixture_set_omit_cat(int);
 void dt295_actual_fixture_set_tsid_delay(unsigned);
 void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
+void dt295_actual_fixture_fail_activation_once(void);
+unsigned dt295_actual_fixture_control_calls(void);
+unsigned dt295_actual_fixture_activation_failures(void);
+unsigned dt295_actual_fixture_activation_commands(void);
 unsigned dt295_actual_fixture_card_acks(void);
 void dt295_actual_fixture_set_control_delay(unsigned);
 unsigned dt295_actual_fixture_control_active(void);
@@ -45,6 +49,7 @@ struct FakeStream final {
 };
 
 FakeStream g_stream;
+unsigned g_usb_close_calls = 0U;
 constexpr unsigned kContinuityPerRead = 16U;
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
@@ -130,7 +135,7 @@ extern "C" int __wrap_usb_open_model(usb_backend** output, const usb_selector*, 
     return 0;
 }
 
-extern "C" void __wrap_usb_close(usb_backend*) {}
+extern "C" void __wrap_usb_close(usb_backend*) { ++g_usb_close_calls; }
 extern "C" void* __wrap_usb_native_context(usb_backend*)
 {
     return reinterpret_cast<void*>(static_cast<std::uintptr_t>(0x29501));
@@ -285,6 +290,11 @@ int main()
     dt295_actual_fixture_set_card_sample(3U, 0U, 0U);
     card = adapter.sample_card_inserted();
     CHECK(card.has_value() && *card);
+    dt295_actual_fixture_set_card_sample(1U, 1U, 0U);
+    const unsigned activation_commands = dt295_actual_fixture_activation_commands();
+    card = adapter.sample_card_inserted();
+    CHECK(card.has_value() && *card);
+    CHECK(dt295_actual_fixture_activation_commands() == activation_commands + 1U);
     const unsigned card_acks = dt295_actual_fixture_card_acks();
     dt295_actual_fixture_set_card_sample(0U, 0U, 0x400U);
     CHECK(!adapter.sample_card_inserted().has_value());
@@ -297,6 +307,11 @@ int main()
     CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial), "start_capture");
     CHECK_RESULT(adapter.attach(first), "attach");
     CHECK(read_ts(adapter, first, 188U * 8U));
+    dt295_actual_fixture_set_card_sample(1U, 1U, 0U);
+    const unsigned stream_activation_commands = dt295_actual_fixture_activation_commands();
+    CHECK(!adapter.sample_card_inserted().has_value());
+    CHECK(dt295_actual_fixture_activation_commands() == stream_activation_commands);
+    dt295_actual_fixture_set_card_sample(3U, 0U, 0U);
     CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "stop_capture");
     CHECK_RESULT(adapter.detach(first), "detach");
     drain_attachment(adapter, first);
@@ -362,9 +377,23 @@ int main()
     CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
     dt295_actual_fixture_set_tsid_delay(0U);
 
+    CHECK_RESULT(adapter.close(0U), "close before fatal recovery proof");
+    CHECK_RESULT(adapter.open(0U), "reopen before fatal recovery proof");
+    dt295_actual_fixture_set_card_sample(1U, 1U, 0U);
+    dt295_actual_fixture_fail_activation_once();
+    CHECK(!adapter.sample_card_inserted().has_value());
+    CHECK(dt295_actual_fixture_activation_failures() == 1U);
+    const unsigned control_calls_after_fatal = dt295_actual_fixture_control_calls();
+    CHECK(!adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U));
+    CHECK(!adapter.start_capture(0U, ReceiverSystem::terrestrial));
+    CHECK(dt295_actual_fixture_control_calls() == control_calls_after_fatal);
     CHECK_RESULT(adapter.close(0U), "close");
+    CHECK(!adapter.open(0U));
+    CHECK(dt295_actual_fixture_control_calls() == control_calls_after_fatal);
     CHECK(!adapter.sample_card_inserted().has_value());
     CHECK_RESULT(adapter.shutdown(), "shutdown");
+    CHECK(dt295_actual_fixture_control_calls() > control_calls_after_fatal);
+    CHECK(g_usb_close_calls == 1U);
 
     CHECK(g_stream.generations >= 4U);
     dt295_actual_fixture_close();

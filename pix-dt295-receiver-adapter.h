@@ -114,6 +114,7 @@ private:
     dt295_route_plan live_{};
     dtv::userland::Error init_error_ = dtv::userland::Error::INTERNAL;
     bool opened_ = false;
+    bool recovery_failed_ = false;
     bool streaming_ = false;
     bool plan_complete_ = false;
     bool key_retained_ = false;
