@@ -164,11 +164,16 @@ if(PIX_EMBEDDED_ASSETS)
     set(PIX_EMBEDDED_ASSET_HEADER "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.h")
     set(PIX_EMBEDDED_ASSET_SOURCE "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.c")
     set(PIX_EMBEDDED_ASSET_MANIFEST "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.json")
-    execute_process(
-        COMMAND git -C "${PIX_SOURCE_DIR}" rev-parse HEAD
-        OUTPUT_VARIABLE PIX_SOURCE_REVISION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET)
+    set(PIX_SOURCE_REVISION_OVERRIDE "" CACHE STRING "Source revision recorded for embedded assets")
+    if(PIX_SOURCE_REVISION_OVERRIDE)
+        set(PIX_SOURCE_REVISION "${PIX_SOURCE_REVISION_OVERRIDE}")
+    else()
+        execute_process(
+            COMMAND git -C "${PIX_SOURCE_DIR}" rev-parse HEAD
+            OUTPUT_VARIABLE PIX_SOURCE_REVISION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
     if(NOT PIX_SOURCE_REVISION)
         set(PIX_SOURCE_REVISION "unknown")
     else()
