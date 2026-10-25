@@ -5,11 +5,9 @@
 
 ## 概要
 
-pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御し、188 バイトの MPEG-TS パケットを出力する C11 実装のユーザー空間 CLI ツール（`pix-ts`）です。
+pix-userland は、ピクセラ製 USB チューナー向けのユーザー空間ソフトウェアです。公開コマンドは、USB 機器を所有する `pixd`、daemon の状態や機器・内部カード状態を調べる `pixctl`、TS を受信する `pix-ts` の3つです。
 
-単一チューナーを制御して TS パケットを出力します。DT181は選択した伝送ストリーム全体、開発中のDT295は番組表から計画した有限の広告PIDとSIが対象です。
-
-なお、常駐デーモン、予約録画、GUI、内蔵 IC カードリーダー／PC/SC API の制御、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。また、特定サービスの分離、ブラウザからの WebUSB 制御も未実装です。
+`pix-ts` は選択した伝送ストリームを 188 バイトの MPEG-TS パケットとして出力します。PIX CARD 機能は内部カードの挿入状態照会に限られ、内蔵 IC カードリーダー／PC/SC API の制御や、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。特定サービスの分離、予約録画、GUI、ブラウザからの WebUSB 制御も未実装です。
 
 ## 配布コマンド（pixd / pixctl / pix-ts）
 
@@ -18,7 +16,7 @@ pix-userland は、ピクセラ製 USB チューナーを libusb で直接制御
 | コマンド | 役割 |
 |---|---|
 | `pixd` | USB 機器を所有する常駐 daemon です。`--models` で対応機種、`--list-json` で接続中の機器を表示します。 |
-| `pixctl` | daemon の状態を調べる制御 CLI です（`list` / `status`）。 |
+| `pixctl` | daemon の状態・機器構成・内部カード挿入状態を調べる制御 CLI です（`list` / `status` / `card-status`）。 |
 | `pix-ts` | daemon から TS を受け取り、標準出力またはファイルへ出力するクライアントです。 |
 
 引数は各コマンドの `--help`、版は `--version` で確認できます。3コマンドは `core-integration/` の CMake でビルドし、固定した [dtv-userland-core](https://github.com/Khronos31/dtv-userland-core) のソース（`core-integration/dtv-userland-core.revision`）から静的リンクします。
