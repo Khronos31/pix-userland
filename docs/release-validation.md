@@ -24,76 +24,166 @@
 | ID | OS/ABIと必要なruntime/access境界を持つ実行環境シナリオの識別子 | candidate状態、過去実績 | `E` + 番号。4製品で共通するシナリオは同じID、別runtime/access scenarioは別ID |
 | OS / ABI | OS系統、CPU ABI、libcまたはOS runtime | host名、依存、実施状態 | `OS / CPU ABI / libc・runtime` の順。根拠文書にlibc記載がない場合は `未特定` |
 | 依存 / driver / permission | 実行時USB library、OS側USB access手段と権限条件 | firmware、CARD API、検証結果 | `libusb:`、`USB access:`、`FD handoff:` の属性名を使う |
-| firmware / input | 実行時に必要なfirmwareまたは製品入力と放送方式 | archiveへの同梱・埋込完了、candidate実績 | `firmware:` と `input:` を分け、該当しない属性は `なし` |
+| firmware / 補助data | 機器へ渡す実行時firmwareと、RF channelとは別の機種固有データ | RF試験channel、archiveへの同梱・埋込完了、candidate実績 | `firmware:` と `補助data:` を分け、ない属性は `なし` |
+| RF試験入力（system / channel） | 実際に受信させる放送systemと現地channel | firmware、機種data、candidate実績 | `system:` と `channel:`。対応波がない場合は `なし（理由）` |
 | 製品CLIからの内蔵CARD操作 | 製品固有CLI/APIの操作範囲 | PC/SC/WinSCard adapter、実機合否 | 操作名とmodel依存条件。機能なしは `なし` |
 | native PC/SC/WinSCard adapter | その行のOS標準APIへ接続する製品adapterの種類・配布形態 | 製品CLI CARD、adapter実機試験結果、他OSのadapter | OS/ABI行に該当する`Linux PC/SC:`、`macOS PC/SC:`、`Android:`または`Windows WinSCard:`だけを記載 |
-| 配布artifact / 手順 | 対象archive識別子とこの正本内の該当手順 | artifact hash、host、試験結果 | `artifact: <target>; procedure: §...` の順 |
+| 配布artifact / 手順 | 対象archive識別子とこの正本内の該当手順 | artifact hash、host、試験結果 | `artifact: <target>; procedure: §番号` の順 |
 
 共通IDは E02=Linux/x86_64/musl、E03=Linux/x86_64/glibc、E04=macOS/arm64、E05=Android/aarch64、E06=Android/armv7a、E07=Android/x86_64、E15-G=Linux/aarch64/glibc、E15-M=Linux/aarch64/musl、E17=Windows 11/x86_64を表す。IDはhost名や試験済み状態を表さない。PIXはLinux配布archiveがglibc/musl両環境で動作する静的musl binaryであり、別個のx86_64 musl配布targetを持たない。
 
-| ID | OS / ABI | 依存 / driver / permission | firmware / input | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
-|---|---|---|---|---|---|---|
-| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
-| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
-| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | macOS PC/SC: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
-| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-aarch64`; procedure: §3–§5 |
-| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-armv7a`; procedure: §3–§5 |
-| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-x86_64`; procedure: §3–§5 |
-| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
+| ID | OS / ABI | 依存 / driver / permission | firmware / 補助data | RF試験入力（system / channel） | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
+|---|---|---|---|---|---|---|---|
+| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
+| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
+| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | macOS PC/SC: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
+| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-aarch64`; procedure: §3–§5 |
+| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-armv7a`; procedure: §3–§5 |
+| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-x86_64`; procedure: §3–§5 |
+| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T; channel: 現地channel plan（DT295例 T27） | 内部CARD statusのみ; model依存 | Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
 
 archive対象と試験前提を記す表であり、実装状態・候補の有無・特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295は製品対象として各OS/ABIの試験に含める。assetsのarchiveへの埋込状態はここで判定しない。
 
-## 共通試験シナリオ
+## 共通試験シナリオ T00–T14
 
-シナリオ本文は全製品で「適用頻度/対象能力、準備/起動、操作/利用者への依頼、期待値、停止/cleanup、記録」の順に記す。HAOS/SCS上で物理操作を依頼する場合、各依頼前にCodexは`beep`、Claude Codeは`vibe`を実行し、依頼から最大5分待つ。期限内に操作がなければ、その工程を未完了として停止する。
+各IDを同じ順序・同じ6項目で実施する。$RT/$LOG/$BUS-PORT/$CHANNEL_PLANはrunごとの実値に置換し、空のcandidate専用runtime/logを使う。物理操作を依頼する各回は既定通知を行い、最大5分で応答がなければ未完了として停止する。OS/API固有の長い操作は同じT-IDから後続recipeを参照する。
 
-### A. 列挙と最大同時受信
+### T00 候補/配布物固定
 
-| 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
-|---|---|---|---|---|---|
-| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295は全OS/ABIで試験 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、同じruntime/instance/groupの`pixctl ... status`と`pixctl ... list`をそれぞれ確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。unsupported/nonzeroでcaptureできない候補は未達/失敗として記録する | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、OS/ABI、channel、USB selector、CLI/exit、TS/counters、cleanup |
+- **適用対象/頻度:** 毎releaseのcandidate作成時。
+- **準備:** source SHA、CI run/attempt、archive targetとhashを固定。POSIX git rev-parse HEAD/sha256sum、Windows Get-FileHashを保存。
+- **実操作/利用者への依頼:** pixd --models/--list-jsonとartifact hashを確認。candidateが無ければ停止し正式公開workflowを代用しない。
+- **期待値/終了値:** provenance/hash一致の候補だけ次へ進む。候補不在は未完了。
+- **停止/cleanup:** deviceを開かず、archive/logを保持。
+- **記録:** source SHA、CI run/attempt、artifact ID/target/hash、取得日時、未取得理由。
 
-受信中status/listの反復確認は次のCLIを使い、実行時刻をstream開始/終了とともに記録する。
+### T01 環境/permission/input
 
-```sh
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
-```
+- **適用対象/頻度:** 全native archive。初回は全modelごと。
+- **準備:** E-ID/OS/ABI、USB access、firmware/model data、channel planを環境表と照合。
+- **実操作/利用者への依頼:** OS/ABI native commandsを記録しpixd --modelsでmodelを確認する。model dataとRF試験channelを分け、archiveでのmodel dataの実現方法は版別記録に記す。外部assets pathを正本の恒久的な実行前提にしない。
+- **期待値/終了値:** OS/ABIがarchiveに一致し、アクセス許可/入力が揃う。不一致はdevice操作前に止める。
+- **停止/cleanup:** 権限不足やdriver変更が必要なら操作せず未実施記録。
+- **記録:** E-ID/host/OS/ABI/model、USB topology/permission、firmware/data、channel plan。
 
-### B. 内部CARD status抜去・再挿入
+### T02 列挙/selector/ready
 
-適用: 内部reader statusを公開するmodel。外部ATR/reset/APDU/PC/SC/WinSCard操作は製品機能外。受信を正常停止してdaemonを維持した状態で行う。
+- **適用対象/頻度:** 毎release、対象model/device。
+- **準備:** 候補archiveのlist-json/models入口とdevice selectorを準備しdaemon専用runtimeを作る。
+- **実操作/利用者への依頼:** pixd --modelsとpixd --list-jsonを保存しmodel/USB portを記録する。pixd --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --groupを起動し、pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group statusとlistを実行する。
+- **期待値/終了値:** JSON/portが一意、status ready、receiver数が公開能力と一致。不正selectorは成功でない。
+- **停止/cleanup:** daemon通常停止しprocess/FD/IPC/socket残留を確認。
+- **記録:** JSON、selector、status/list、各exit、residual。
 
-```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
-```
+### T03 最大同時受信
 
-1. `card-status`で挿入時の内部状態を記録する。
-2. 親は「対象機のカードを抜いてください」と利用者へ依頼し、依頼から最大5分待つ。応答がなければ工程を未完了として中断する。抜去後に同じ`card-status`を実行し、不在状態を期待する。
+- **適用対象/頻度:** 毎release、各modelの公開最大能力。
+- **準備:** 各公開receiver/deviceを一意に割り当て、各clientに別TS出力/ログを用意。
+- **実操作/利用者への依頼:** 公開receiver数分のpix-ts --device usb:<BUS-PORT> --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --groupを同時起動。DT181/DT295別run。
+- **期待値/終了値:** 各clientの稼働時間が重なり、各exit 0とTS/counter合格。順次取得を同時試験の代用にしない。
+- **停止/cleanup:** 全client通常終了後daemon通常停止、残留なし。
+- **記録:** model/receiver/system/channel、各start/end/exit、TS/counter、cleanup。
 
-```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
-```
+### T04 不足波/全無料channel
 
-3. 親は「同じカードを再挿入してください」と依頼し、最大5分待つ。再挿入後に`card-status`を実行し、挿入状態への復帰を期待する。
+- **適用対象/頻度:** 毎releaseは不足波。初回/majorは全機種の代表機で全無料channel各10秒。
+- **準備:** 現地channel planとmodel能力から対象system/channel一覧を作る。
+- **実操作/利用者への依頼:** DT181-PU0はT/BS/CS、DT295はISDB-T。pix-ts --channel <CHANNEL> --system <SYSTEM> --time 10 --output <FILE> --runtime-dir "$RT" --group。
+- **期待値/終了値:** 各対象channelのTS/exit合格。未取得は未完了、非対応波だけ根拠付きN/A。
+- **停止/cleanup:** client wait/exit保存、daemon通常停止。
+- **記録:** model/system/channel/全channel list、TS解析/counter/exit、未取得理由。
 
-```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
-```
+### T05 stream中monitor/control
 
-4. daemonを通常停止し、process/FD/runtime socketを確認する。status出力以外のATR/APDUデータを作らない。
+- **適用対象/頻度:** 毎release。CARD/controlは製品能力に従う。
+- **準備:** capture clientを起動し、別terminalでstatus/list/controlを行えるようにする。
+- **実操作/利用者への依頼:** stream中に別terminalからpixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group statusとlistを実行する。capture停止後、同じruntime/selectorでpixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group card-statusを実行する。
+- **期待値/終了値:** 照会/control時刻がstreamと対応し各response/exitを保存。機能外操作はN/A。
+- **停止/cleanup:** client/daemonを通常停止し残留確認。
+- **記録:** 照会/control時刻、response class、各exit、streamとの重なり。
 
-各物理操作の依頼時刻、出力、終了値、状態遷移、cleanupを記録する。CARD statusとstream同時動作を主張する結果は、候補archiveを使った別試験記録へ記す。
+### T06 CARD物理挿抜/復帰
 
-### C. USB抜去・再接続
+- **適用対象/頻度:** CARD reader/status対応model。毎release。
+- **準備:** capture停止・daemon維持。初期CARD状態とreader有無を確認。
+- **実操作/利用者への依頼:** pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group card-statusで初期状態を記録する。通知後に利用者へ抜去を依頼し、完了後に同コマンドを実行する。再度通知して同じカードの再挿入を依頼し、同コマンドで復帰状態を記録する。各依頼は最大5分待つ。ATR/reset/APDUは機能外。
+- **期待値/終了値:** card-statusは初期状態でpresent、抜去後absent、再挿入後presentを返し各照会はexit 0。PIXはATR/reset/APDU操作を提供しない。応答なしは未完了。
+- **停止/cleanup:** daemon通常停止、FD/IPC/runtimeを確認。
+- **記録:** 依頼時刻、状態/response/exit、復帰、cleanup。
 
-| 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
-|---|---|---|---|---|---|
-| 毎release。対応modelのidle時とstreaming時 | `pixd --list-json`でportを固定し、idle runとstream runを分ける。stream時は`--time <CAPTURE_SECONDS>`を設定し、有限観測窓`<OBSERVATION_LIMIT_SECONDS>`を事前に決めて記録する | 各runで親が対象USBを抜くよう依頼し、依頼時刻を記録する。stream時は観測窓が残りcapture時間より短い状態で抜去し、自然終了と終了値を観測する。時間値は各試験で選ぶ観測条件で、製品の固定秒数要件ではない | stream中の切断はclient exit 7と`USB_IO`/`DISCONNECTED` stream-end診断を期待する。`--time`満了によるexit 0は切断合格ではない。観測窓を越えてclientが残る場合はtimeout/failとして記録し、SIGINTで通常cleanupする。再接続後は新daemonのstatus/listと短TSを確認し、client exit 0とTS品質合格を必要とする | client/旧daemonを通常終了し、終了値・process/FD/socketを確認。再接続後の新daemonも通常終了してcleanup。Termuxはpermission/FDを再取得 | 物理操作と観測窓、capture deadline、port、stream-end診断、client/daemon exit、TS/counter/解析、再列挙、cleanup |
+### T07 USB idle/stream切断と再取得
 
-### D. teardown・結果
+- **適用対象/頻度:** 毎release。USB対応deviceのidle/streamを別run。
+- **準備:** USB pathをlist-jsonで固定。有限captureとそれより短い観測窓を準備。
+- **実操作/利用者への依頼:** pixd --list-jsonでport固定。pix-ts --time "$CAPTURE_SECONDS"中に抜去依頼、再接続後新runtimeのpixd/status/list/短TS。
+- **期待値/終了値:** 切断側のexit 7/診断、新daemon再取得exit 0。time満了exit 0は切断合格でない。
+- **停止/cleanup:** 旧client/daemon stop/wait後に再接続、新daemonも停止。Androidはpermission/FD再取得。
+- **記録:** idle/stream、観測/capture deadline、port/diagnostic/exit、再取得TS/counter。
 
-受信clientを通常終了し、`kill -TERM "$P"`、`wait "$P"`でdaemon終了を待ち、status/process/runtime socketのcleanupを確認する。頻度ごとの実績、未実施、失敗、対象外は版別文書へ記録する。
+### T08 通常stop/cleanup
+
+- **適用対象/頻度:** 全test終了時。
+- **準備:** 各owned client/daemon PIDとruntimeを記録してから起動する。
+- **実操作/利用者への依頼:** pix-ts clientを通常停止しwait "$C"、pixdを通常SIGINT/console stopしてwait。
+- **期待値/終了値:** 全owned process終了、TS close、FD/IPC/socket/runtime残留なし。timeoutはfail。
+- **停止/cleanup:** 無関係processへsignalしない。test専用runtimeだけ片付け失敗log保持。
+- **記録:** PID/role/exit、process/FD/IPC/socket/runtime、復旧状態。
+
+### T09 TS/counter/exit判定
+
+- **適用対象/頻度:** 全capture/soak。
+- **準備:** TS parser/SPEC条件とdaemon counterを確認できるようにする。
+- **実操作/利用者への依頼:** 独立TS parserとpixd packet/byte/USB counterを対応付け、通常取得exit 0と既定TS基準を確認。
+- **期待値/終了値:** 全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
+- **停止/cleanup:** 元TS/hash/logを残してT08 cleanup。
+- **記録:** parser/version、TS hash、sync/TEI/continuity/drop/counter、exit。
+
+### T10 native PC/SC/WinSCard
+
+- **適用対象/頻度:** 対応OS/APIのみ。非対応製品は理由付きN/A。
+- **準備:** native OS adapter/consumerとcandidate IFD/DLL pathを用意。
+- **実操作/利用者への依頼:** PIXは製品CARD status操作を持つがnative PC/SC/WinSCard adapter/APIを持たないため、このnative transaction試験は理由付きN/A。adapter/consumerを捏造して起動しない。
+- **期待値/終了値:** native adapter/APIがないため理由付きN/A。PIXのcard-statusやCI smokeをnative transaction合格に読み替えない。
+- **停止/cleanup:** consumerは起動しない。別の試験で起動したdaemonだけを通常停止し、system PCSC serviceを変更しない。
+- **記録:** OS/ABI、module/DLL absolute path、consumer、reader/card、operation/exit。
+
+### T11 LNB/非対応拒否
+
+- **適用対象/頻度:** 必要時。給電対応profileだけ実測。
+- **準備:** PIXはLNB給電非対応のためmeter/給電設備を接続しない。
+- **実操作/利用者への依頼:** LNB controlなし。--lnaをLNBと解釈せず操作しない。
+- **期待値/終了値:** PIXにLNB給電機能はないため、LNB電圧実測と拒否試験は理由付きN/A。--lnaをLNBと解釈しない。
+- **停止/cleanup:** LNB操作なし。試験用daemonは通常停止する。
+- **記録:** model/profile、command/exit、meter値/条件、cleanupまたはN/A根拠。
+
+### T12 複数device/daemon/access
+
+- **適用対象/頻度:** 必要時、複数device/selector/access変更時。
+- **準備:** USB port/selectorとinstance/runtimeをdeviceごとに割り当てる。
+- **実操作/利用者への依頼:** pixd --models/--list-jsonでmodel/device/portを区別。複数接続時のみ別runtimeで公開CLI capture。
+- **期待値/終了値:** device/selector対応一意。別deviceの結果を混同せず、要求時は各sideを独立判定。
+- **停止/cleanup:** 各client/daemon個別wait/stopしFD/IPC/socket確認。
+- **記録:** device/port/PID/runtime、各exit/継続/再取得/access/cleanup。
+
+### T13 soak/頻度
+
+- **適用対象/頻度:** 毎releaseおよび全model初回/major。
+- **準備:** 確定頻度表の対象archive/model/timeをmatrixへ展開する。
+- **実操作/利用者への依頼:** 毎release代表Linux x86_64 glibc 2h/全archive native short; 初回全modelごと全無料channel 10s、macOS/Windows 30m、他ABI 10m。
+- **期待値/終了値:** 指定連続時間完了かつTS条件合格。追加soakは明示ユーザー決定分のみ。
+- **停止/cleanup:** T08通常stopと全resource cleanup。
+- **記録:** model/OS/ABI/archive、時間、TS/counter、FD/RSS、未実施理由。
+
+### T14 failure/release disposition
+
+- **適用対象/頻度:** 全candidate gate完了後。
+- **準備:** source/archive SHAと全T-IDの結果を版別記録へ用意。
+- **実操作/利用者への依頼:** version recordへcandidate欠落/unsupported/nonzeroを未達として記録。formal release dispatchを候補試験に使わない。
+- **期待値/終了値:** failure/unsupported/未実施/環境不能/candidate欠落をpassにしない。
+- **停止/cleanup:** candidateと失敗証拠を保持。tag/releaseは別依頼。
+- **記録:** T-ID、candidate/host/model、state、log、blocker、判定根拠。
+
+N/Aは製品機能上該当しない項目だけに使う。OS/ABI候補のunsupported、candidate欠落、未実施、失敗、環境不能は版別結果で未達とし、passに読み替えない。手順に記した期待値は実測結果ではない。
 
 ## 1. 候補・配布物
 
@@ -109,13 +199,13 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 
 毎release、代表Linux x86_64機で2時間連続受信し、全配布archiveをnative OS/ABIで短時間回帰します。初回/major追加確認ではmacOS/Windowsは各30分、残るOS/ABIは各10分連続受信し、全無料channel各10秒は代表機だけで行います。CIのみで実機認定とはしません。
 
-候補archive rootで作業し、配布assetsを読み込ませます。USB位置とchannel値は現地の実値へ置き換えます。
+候補archive rootで作業します。USB位置とchannel値は現地の実値へ置き換えます。model dataの実現方法はその版の候補内容を記録し、外部assets pathを共通手順の必須入力にしません。
 
 ```sh
 ./pixd --models
 ./pixd --list-json
 RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
-./pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group & P=$!
+./pixd --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group & P=$!
 ./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
 ./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
 ./pix-ts --instance rc --channel T27 --system isdb-t --time <SECONDS> --output t27.ts --runtime-dir "$RT" --group
@@ -160,7 +250,7 @@ OBSERVATION_LIMIT_SECONDS=<finite-cut-observation-window>
 
 ```sh
 RT2=$(mktemp -d "${TMPDIR:-/tmp}/pix-reconnect.XXXXXX")
-./pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT2" --instance rc --group & P2=$!
+./pixd --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group & P2=$!
 ./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group status
 ./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group list
 ./pix-ts --device usb:<BUS-PORT> --instance rc --channel T27 --system isdb-t \
