@@ -114,11 +114,11 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 ### T07 USB idle/stream切断と再取得
 
 - **適用対象/頻度:** 毎release。USB対応deviceのidle/streamを別run。
-- **準備:** `pixd --list-json`でUSB pathを特定し、streamなしでdaemonを起動してstatus/list、daemon/client PIDとUSB owner状態を記録する。capture clientは開始時にUSBを開くため、daemon-only idleではdevice handleを保持しない。
-- **実操作/利用者への依頼:** daemon-only idle中に利用者へ抜去を依頼し、応答後にstatus/list、daemon診断と実際の終了値を採取する。list-jsonは列挙情報でありownership確認として扱わない。再接続を依頼して再列挙後、新runtime/daemonから短い`pix-ts` captureを実行する。別runでは`pix-ts --time "$CAPTURE_SECONDS"`中に抜去を依頼し、client/daemon診断と各実終了値を採取する。
-- **期待値/終了値:** daemon-only idleではUSB ownerがいないため、抜去によるstream切断exitは発生せず、list/status差分とdaemonの実際の終了値を記録する。このidle観測をowner-held idle切断の合格にしない。stream中は切断診断とclient exit 7を確認する。time満了exit 0は切断合格でない。新daemonの短TSはexit 0とTS/counter合格。
-- **停止/cleanup:** idle/streamそれぞれでowned client/daemonを通常停止してwaitし、再接続後の新daemonも通常停止する。Androidはpermission/FD再取得。
-- **記録:** idle/stream、daemon/client USB owner状態、依頼/応答時刻、path、status/診断、各実終了値、再取得TS/counter、cleanup。
+- **準備:** `pixd --list-json`でUSB pathを特定し、候補archiveとmodel固有dataでdaemonを起動する。`pixd`は`Family::create`成功後にIPC serviceを開始する。DT295はassets読込後に`ReceiverAdapter::initialize`から`usb_open_model`でdeviceをopen/claimし、DT181はassets読込後に`dt181_session_open`からdeviceをopen/claimしてfirmware/session初期化する。正常起動してstreamなしのstatusが取得できるidle daemonは、両modelともUSB保持中である。object生成だけをopen/claimの根拠にせず、この成功経路でidleへ入る。
+- **実操作/利用者への依頼:** USB保持中・stream clientなしのidleで利用者へ抜去を依頼し、応答後に`pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status`と`list`、daemon診断、daemon processの実状態/終了値を採取する。通常停止・wait後、再接続を依頼し、`pixd --list-json`で再列挙してから新runtime/daemonを起動しstatus/listと短い`pix-ts` captureを実行する。別runでは`pix-ts --time "$CAPTURE_SECONDS"`中に抜去を依頼し、client/daemon診断と各実終了値を採取する。
+- **期待値/終了値:** idleでは抜去時にstream clientがないためstream client exit 7は期待値にしない。固定sourceはidle抜去時のdaemon自動終了値や`pixctl status`の特定応答を定義していないため、その実際のresponse/exit/daemon状態を記録し、list-jsonやdaemon生存だけを切断検知の合格証拠にしない。stream runは切断診断とclient exit 7を確認し、time満了exit 0は切断合格でない。新daemonの短TSはexit 0とTS/counter合格。
+- **停止/cleanup:** idle/streamそれぞれでowned client/daemonを通常停止してwaitし、終了値、process/FD/socketを確認する。再接続後の新daemonも通常停止する。Androidはpermission/FD再取得。
+- **記録:** model/idle/stream、USB open/claimを含む起動条件、依頼/応答時刻、path、status response/exit、daemon診断/process実状態と終了値、stream client exit、再取得TS/counter、cleanup。
 
 ### T08 通常stop/cleanup
 
