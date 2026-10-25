@@ -37,13 +37,13 @@ archive対象と実行環境の一般対応を記す表であり、候補の有�
 
 | 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
 |---|---|---|---|---|---|
-| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295は確認済みmacOS arm64地上波範囲 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、`pixctl ... status/list`を確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。channel/TSID/slotは現地値を記録 | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、channel、USB selector、CLI/exit、TS/counters、cleanup |
+| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295は確認済みmacOS arm64地上波範囲 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、同じruntime/instance/groupの`pixctl ... status`と`pixctl ... list`をそれぞれ確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。channel/TSID/slotは現地値を記録 | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、channel、USB selector、CLI/exit、TS/counters、cleanup |
 
 受信中status/listの反復確認は次のCLIを使い、実行時刻をstream開始/終了とともに記録する。
 
 ```sh
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group list
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
 ```
 
 ### B. 内部CARD status抜去・再挿入
@@ -51,20 +51,20 @@ archive対象と実行環境の一般対応を記す表であり、候補の有�
 適用: 内部reader statusを公開するmodel。外部ATR/reset/APDU/PC/SC/WinSCard操作は製品機能外。受信を正常停止してdaemonを維持した状態で行う。
 
 ```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
 ```
 
 1. `card-status`で挿入時の内部状態を記録する。
 2. 親は「対象機のカードを抜いてください」と利用者へ依頼し、依頼から最大5分待つ。応答がなければ工程を未完了として中断する。抜去後に同じ`card-status`を実行し、不在状態を期待する。
 
 ```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
 ```
 
 3. 親は「同じカードを再挿入してください」と依頼し、最大5分待つ。再挿入後に`card-status`を実行し、挿入状態への復帰を期待する。
 
 ```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
 ```
 
 4. daemonを通常停止し、process/FD/runtime socketを確認する。status出力以外のATR/APDUデータを作らない。
@@ -75,7 +75,7 @@ archive対象と実行環境の一般対応を記す表であり、候補の有�
 
 | 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
 |---|---|---|---|---|---|
-| 毎release。対応modelのidle時とstreaming時 | `pixd --list-json`でportを固定し、idle runとstream runを分ける | 各runで親が対象USBを抜くよう依頼し、依頼から最大5分待つ。次に同じportへ戻すよう依頼し、再列挙後に新daemonを起動 | 実際のclient/daemon表示と終了値を保存。ハング/残留を確認し、自動hotplug取得を期待せず、新daemonのstatus/listと短い再取得を行う | client/旧daemonを通常停止し、終了を待つ。再接続後の新daemonを通常停止しcleanup確認。Termuxはpermission/FDを再取得 | 物理操作時刻、port、client/daemon exit、再列挙、再取得、cleanup |
+| 毎release。対応modelのidle時とstreaming時 | `pixd --list-json`でportを固定し、idle runとstream runを分ける。stream時は`--time <CAPTURE_SECONDS>`を設定し、有限観測窓`<OBSERVATION_LIMIT_SECONDS>`を事前に決めて記録する | 各runで親が対象USBを抜くよう依頼し、依頼時刻を記録する。stream時は観測窓が残りcapture時間より短い状態で抜去し、自然終了と終了値を観測する。時間値は各試験で選ぶ観測条件で、製品の固定秒数要件ではない | stream中の切断はclient exit 7と`USB_IO`/`DISCONNECTED` stream-end診断を期待する。`--time`満了によるexit 0は切断合格ではない。観測窓を越えてclientが残る場合はtimeout/failとして記録し、SIGINTで通常cleanupする。再接続後は新daemonのstatus/listと短TSを確認し、client exit 0とTS品質合格を必要とする | client/旧daemonを通常終了し、終了値・process/FD/socketを確認。再接続後の新daemonも通常終了してcleanup。Termuxはpermission/FDを再取得 | 物理操作と観測窓、capture deadline、port、stream-end診断、client/daemon exit、TS/counter/解析、再列挙、cleanup |
 
 ### D. teardown・結果
 
@@ -102,8 +102,8 @@ archive対象と実行環境の一般対応を記す表であり、候補の有�
 ./pixd --list-json
 RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
 ./pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group & P=$!
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group list
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
 ./pix-ts --instance rc --channel T27 --system isdb-t --time <SECONDS> --output t27.ts --runtime-dir "$RT" --group
 ```
 
@@ -112,8 +112,8 @@ RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
 受信中は別端末で状態を反復観測し、clientを通常終了して同じdaemon/runtimeから再取得します。
 
 ```sh
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group list
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
 ```
 
 USB抜去/再挿入はidle時と受信中で別々に行い、実際のclient/daemon表示と終了値を記録します。抜去後はdaemonを通常終了し、挿し直した後に`pixd --list-json`で再列挙し、新daemon/runtimeからstatus/listと短時間TSを取り直します。期待されるexit値はREADMEとcandidate実測に照合し、自動hotplug再取得は仮定しません。
@@ -121,12 +121,39 @@ USB抜去/再挿入はidle時と受信中で別々に行い、実際のclient/da
 PIX内部カードは以下の `card-status` による挿入状態だけを確認します。外部ATR/reset/APDUやPC/SC/WinSCardは製品機能外です。captureを通常停止しdaemonを起動したまま行います。各物理操作の直前にHAOS/SCS上でCodexは`beep`、Claude Codeは`vibe`を実行し、「カードを抜いてください」または「同じカードを再挿入してください」と依頼します。各依頼から最大5分待ち、応答がない場合は工程を未完了として中断します。抜去後にstatus不在、再挿入後にpresent復帰を確認します。
 
 ```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
 ```
 
 ## 4. USB切断とLNB
 
-USB idleとstream中にユーザーがdeviceを抜き、client/daemonの実際の切断表示・終了値を保存します。自動hotplug再取得を期待しません。通常cleanup後、同じ物理portを戻して再列挙し、新しい `pixd` を起動してstatus/list/T27を確認します。AndroidはTermux USB許可/再取得、WindowsはREADMEのWinUSB構成を使います。BUSYなら別processを奪わず理由を記録します。
+USB idleとstream中にユーザーがdeviceを抜き、client/daemonの実際の切断表示・終了値を保存します。stream切断は通常time満了と区別するため、試験ごとに`CAPTURE_SECONDS`とそれより短い`OBSERVATION_LIMIT_SECONDS`を選び、抜去時刻と残りcapture時間を記録します。これらは観測用parameterで、製品の時間受入要件ではありません。clientが指定時間の満了前に自然終了した場合、pinned Coreのexit mapに従う切断終了はexit 7（`USB_IO`または`DISCONNECTED`）で、`pix-ts` stderrの`stream-end`診断と`packets-written`も記録します。exit 0は通常の`--time`満了なので切断合格にしません。有限観測窓内に終了しない場合はtimeout/failを記録し、`SIGINT`でclientを通常停止して終了値を保存します。自動hotplug再取得は期待しません。
+
+stream runでは、物理抜去依頼の前にstatusでstreamingを確認し、candidateに対する有限captureを開始します。観測窓の値は各実施記録へ明記します。
+
+```sh
+CAPTURE_SECONDS=<finite-capture-duration>
+OBSERVATION_LIMIT_SECONDS=<finite-cut-observation-window>
+./pix-ts --device usb:<BUS-PORT> --instance rc --channel T27 --system isdb-t \
+  --time "$CAPTURE_SECONDS" --output cut.ts --runtime-dir "$RT" --group \
+  >"$LOG/cut.stdout" 2>"$LOG/cut.stderr" & C=$!
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
+# streaming確認後、残りcapture時間が観測窓より長い間に利用者へ抜去を依頼
+```
+
+依頼後は事前に選んだ観測窓内でclientが自然終了するかを見て、`wait "$C"`の実終了値とstderrを保存します。指定時間の満了後にexit 0したrunは通常time満了として切断試験を無効扱いにします。
+
+旧daemonを通常停止し、process/FD/runtime socketを確認してから、ユーザーへ同じ物理portへの再接続を依頼します。`pixd --list-json`で再列挙した後、新しいruntimeでdaemonを起動してstatus/listを確認し、既知の無料T27の短TSを取得します。
+
+```sh
+RT2=$(mktemp -d "${TMPDIR:-/tmp}/pix-reconnect.XXXXXX")
+./pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT2" --instance rc --group & P2=$!
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group status
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group list
+./pix-ts --device usb:<BUS-PORT> --instance rc --channel T27 --system isdb-t \
+  --time <SECONDS> --output t27.ts --runtime-dir "$RT2" --group
+```
+
+再接続後は`pix-ts` exit 0に加えてTS sync/parser品質合格、daemon counters、通常daemon exit 0とprocess/FD/socket cleanupを記録します。AndroidはTermux USB許可/再取得、WindowsはREADMEのWinUSB構成を使います。BUSYなら別processを奪わず理由を記録します。
 
 本製品はLNB制御を提供しません。`--lna` 等の機能をLNB給電と誤認せず、software/実電圧を試験しません。DT295 assets/model経路は対応するnative macOS archiveと [`dt295.md`](dt295.md) の条件に従い、他OSのDT181実績から認定を広げません。
 
@@ -134,14 +161,18 @@ USB idleとstream中にユーザーがdeviceを抜き、client/daemonの実際�
 
 代表Linux x86_64機で2時間連続受信し、開始・定期・終了時にTS/parser品質、packet/counter、process/FD/RSS、channel、終了値を保存します。未完了やエラーは失敗/未確認で残します。
 
-`pix-ts`を正常終了し、`pixd`へSIGTERMを送り、status/process/runtime socket cleanupを確認します。
+`pix-ts`を通常終了し、`pixd`へSIGTERMを送り、status/process/runtime socket cleanupを確認します。`pixd`終了後もruntime rootを残したまま同じ`--group` accessでstatus照会し、IPC endpointの消失と接続失敗を対応付けます。
 
 ```sh
 kill -TERM "$P"
 wait "$P"
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> status
+find "$RT" -type s -print > "$LOG/socket-after-stop.txt"
+if ./pixctl --runtime-dir "$RT" --instance rc --device usb:<BUS-PORT> --group status > "$LOG/status-after-stop.txt" 2>&1; then rc=0; else rc=$?; fi
+echo "$rc" > "$LOG/status-after-stop.rc"
 rmdir "$RT"
 ```
+
+正常停止後は`pixd` exit 0、socket一覧が空、同じgroup modeの`pixctl`がendpoint不在を示す`connect failed (3)`でexit 3となることを確認します。別access modeの接続失敗をcleanupの証拠に使いません。
 
 記録にはcandidate/Core SHA、workflow run/attempt、archive SHA、host/OS/arch/model、assets識別（秘密値を含めない）、USB selector、channel、コマンド、人的操作、期待/実測、ログ、cleanup、対象外/未確認を含めます。全gate後の結果記録commit前にsource/build inputが候補から変わっていないことを確認します。CIの手動Release workflow、tag、公開操作は実行しません。
 
