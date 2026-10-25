@@ -29,7 +29,7 @@ struct dt295 {
     uint64_t renewal_due;
     uint16_t state;
     uint8_t has_session, has_ts_key, prepared, started, card_notified;
-    uint8_t card_notified_state, pause_state, tuned, poisoned, cleanup_only;
+    uint8_t card_notified_state, pause_state, tuned, poisoned, card_recovery_failed, cleanup_only;
     uint64_t card_notification_generation, card_activation_generation;
     uint64_t card_recovery_generation;
     uint8_t card_activation_valid;
@@ -862,6 +862,13 @@ int dt295_card_activate(dt295 *d, unsigned timeout, char *e, size_t en) {
     return fail(d, e, en, "card activation timed out");
 }
 
+static dt295_card_recovery_result card_recovery_fail(dt295 *d, char *e, size_t en,
+                                                      const char *message) {
+    if (d)
+        d->card_recovery_failed = 1;
+    return (dt295_card_recovery_result)fail(d, e, en, message);
+}
+
 int dt295_card_observe_until(dt295 *d, dt295_card_snapshot *snapshot,
                              uint64_t deadline_ms) {
     if (!d || !snapshot || d->cleanup_only || !d->has_session || d->poisoned)
@@ -901,8 +908,7 @@ dt295_card_recovery_result dt295_card_recover(dt295 *d,
         return DT295_CARD_RECOVERY_PENDING;
     }
     if (state_result || d->state != 0x11)
-        return (dt295_card_recovery_result)fail(
-            d, e, en, "device state unavailable during card recovery");
+        return card_recovery_fail(d, e, en, "device state unavailable during card recovery");
     int attempted = 0;
     const int command_result = command_until(d, 0x0a, 1, 1, 1, deadline_ms, &attempted);
     if (attempted) {
@@ -914,8 +920,8 @@ dt295_card_recovery_result dt295_card_recover(dt295 *d,
         return DT295_CARD_RECOVERY_PENDING;
     }
     if (command_result)
-        return (dt295_card_recovery_result)fail(
-            d, e, en, "card recovery command failed or completion is uncertain");
+        return card_recovery_fail(d, e, en,
+                                  "card recovery command failed or completion is uncertain");
     for (;;) {
         const int state_result = drain_state_until(d, deadline_ms);
         if (state_result == DT295_DEADLINE) {
@@ -923,8 +929,8 @@ dt295_card_recovery_result dt295_card_recover(dt295 *d,
             return DT295_CARD_RECOVERY_PENDING;
         }
         if (state_result || d->state != 0x11)
-            return (dt295_card_recovery_result)fail(
-                d, e, en, "device state unavailable during card recovery");
+            return card_recovery_fail(d, e, en,
+                                      "device state unavailable during card recovery");
         unsigned state = 0;
         uint8_t fresh_notification = 0;
         const int status_result = card_status_until(d, &state, deadline_ms,
@@ -934,8 +940,7 @@ dt295_card_recovery_result dt295_card_recover(dt295 *d,
             return DT295_CARD_RECOVERY_PENDING;
         }
         if (status_result)
-            return (dt295_card_recovery_result)fail(
-                d, e, en, "card status failed during recovery");
+            return card_recovery_fail(d, e, en, "card status failed during recovery");
         if (state == 3U) {
             d->card_activation_generation = d->card_notification_generation;
             d->card_activation_valid = 1;
@@ -944,8 +949,7 @@ dt295_card_recovery_result dt295_card_recover(dt295 *d,
             return DT295_CARD_RECOVERY_ACTIVATED;
         }
         if (state != 1U && state != 2U && state != 0U && state != 4U && state != 5U)
-            return (dt295_card_recovery_result)fail(
-                d, e, en, "unexpected card state during recovery");
+            return card_recovery_fail(d, e, en, "unexpected card state during recovery");
         const uint64_t now = now_ms(d);
         if (now >= deadline_ms) {
             card_snapshot_set(d, state, fresh_notification, result);
@@ -1070,8 +1074,8 @@ static int tuner_initialize(dt295 *d) {
 int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
         return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
-    if (d->poisoned)
-        return fail(d, e, en, "terrestrial tune refused for poisoned DT295 session");
+    if (d->card_recovery_failed)
+        return fail(d, e, en, "terrestrial tune refused after DT295 card recovery failure");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "terrestrial tuning requires authenticated idle state");
     if (tuner_initialize(d))
@@ -1262,8 +1266,8 @@ int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en)
     if (!d || d->cleanup_only || !d->has_session || if_hz < 950000000u ||
         if_hz > 2150000000u || tsid < -1 || tsid > 65535)
         return fail(d, e, en, "satellite tuning requires IF 950..2150 MHz and TSID 0..65535");
-    if (d->poisoned)
-        return fail(d, e, en, "satellite tune refused for poisoned DT295 session");
+    if (d->card_recovery_failed)
+        return fail(d, e, en, "satellite tune refused after DT295 card recovery failure");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "satellite tuning requires authenticated idle state");
     const uint8_t *table = mat(d, 0x845a0, 18 * 8);
