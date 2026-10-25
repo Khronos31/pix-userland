@@ -59,7 +59,7 @@ jobs:
         with:
           persist-credentials: false
       - run: |
-          docker run --rm -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
+          docker run --rm -e PIX_SOURCE_REVISION_OVERRIDE="$GITHUB_SHA" -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
             apk add --no-cache build-base linux-headers curl bzip2 pkgconf cmake git python3 ca-certificates
             sh tests/test_mdev.sh
             PIX_EMBEDDED_ASSETS=ON CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
