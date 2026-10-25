@@ -4,11 +4,11 @@
 
 ## 共通の検証項目と頻度
 
-用語は4製品で共通とする。代表機はLinux x86_64 glibc、機種はチューナー、製品はドライバ、ソークは30分以上の連続TS取得を指す。PIXの標準機種はPIX-DT295とPIX-DT181-PU0の両方で、結果は[`release-validation/initial-model-checks.md`](release-validation/initial-model-checks.md)に機種別に記録する。
+用語は4製品で共通とする。代表機はLinux x86_64 glibc、機種はチューナー、製品はドライバ、ソークは30分以上の連続TS取得を指す。PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機種初回の対象を限定しない。PIXが対象とする全機種で初回手順を個別に実施し、結果は[`release-validation/initial-model-checks.md`](release-validation/initial-model-checks.md)へ機種別に記録する。
 
 | 区分 | 適用頻度 | PIXでの確認 |
 |---|---|---|
-| 機種初回 | DT295とDT181-PU0それぞれを代表機で2時間連続受信し、毎release項目を代表機だけで実施する。必要時項目も通す。 | 機種ごとに異なるCLI/assets/OS対応を確認。 |
+| 機種初回 | PIXの各機種を個別に代表機で2時間連続受信し、その機種で毎release項目を代表機だけで実施する。必要時項目も通す。 | 機種ごとに異なるCLI/assets/OS対応を確認し、結果を機種別に記録する。 |
 | 回帰（毎release） | 代表機2時間連続受信。全配布archiveの各OS/ABIで短時間実機回帰、`--list-json`、最大能力の同時受信とTS/counter/終了値を確認する。最大試験で地上/衛星3波が不足する場合は不足分を個別に短時間取得する。受信中status、正常停止とprocess/FD/IPC残留なし、CARD挿抜、USB抜去/再挿入を確認する。 | 1チューナー/1 receiverで同時stream上限は1。DT181-PU0はT/BS/CSの短時間取得、DT295はREADMEの確認済みmacOS地上波範囲を適用する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。両機種を別々に記録する。 |
 | 必要に応じて | LNB実測と非対応機種の拒否、複数チューナー列挙/daemon並列、変更機能に応じた機種×OS/ABIの追加確認。 | PIXはLNB給電なし。model enumerationやmulti-device変更時は該当機種で確認。 |
 | 初回/major | 必要時項目を通し、代表機で全無料channelを各10秒TS取得。macOS/Windows各30分連続、残るOS/ABI各10分連続で取得する。全channel取得は代表機だけ。別途指示されたソークは別記する。 | DT295は対応OS/asset条件に従い、DT181-PU0結果と分離する。 |
