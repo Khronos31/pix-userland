@@ -17,17 +17,31 @@
 
 ## 共通実行環境表
 
+### 環境表データ辞書
+
+| 列 | 意味・含める属性 | 含めない属性 | 表記・許容値 |
+|---|---|---|---|
+| ID | OS/ABIと必要なruntime/access境界を持つ実行環境シナリオの識別子 | candidate状態、過去実績 | `E` + 番号。4製品で共通するシナリオは同じID、別runtime/access scenarioは別ID |
+| OS / ABI | OS系統、CPU ABI、libcまたはOS runtime | host名、依存、実施状態 | `OS / CPU ABI / libc・runtime` の順。根拠文書にlibc記載がない場合は `未特定` |
+| 依存 / driver / permission | 実行時USB library、OS側USB access手段と権限条件 | firmware、CARD API、検証結果 | `libusb:`、`USB access:`、`FD handoff:` の属性名を使う |
+| firmware / input | 実行時に必要なfirmwareまたは製品入力と放送方式 | archiveへの同梱・埋込完了、candidate実績 | `firmware:` と `input:` を分け、該当しない属性は `なし` |
+| 製品CLIからの内蔵CARD操作 | 製品固有CLI/APIの操作範囲 | PC/SC/WinSCard adapter、実機合否 | 操作名とmodel依存条件。機能なしは `なし` |
+| native PC/SC/WinSCard adapter | OS標準APIへ接続する製品adapterの種類・配布形態 | 製品CLI CARD、adapter実機試験結果 | `Linux PC/SC:`、`macOS PC/SC:`、`Android:`、`Windows WinSCard:` を列挙 |
+| 配布artifact / 手順 | 対象archive識別子とこの正本内の該当手順 | artifact hash、host、試験結果 | `artifact: <target>; procedure: §...` の順 |
+
+共通IDは E02=Linux/x86_64/musl、E03=Linux/x86_64/glibc、E04=macOS/arm64、E05=Android/aarch64、E06=Android/armv7a、E07=Android/x86_64、E15-G=Linux/aarch64/glibc、E15-M=Linux/aarch64/musl、E17=Windows 11/x86_64を表す。IDはhost名や試験済み状態を表さない。PIXはLinux配布archiveがglibc/musl両環境で動作する静的musl binaryであり、別個のx86_64 musl配布targetを持たない。
+
 | ID | OS / ABI | 依存 / driver / permission | firmware / input | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
 |---|---|---|---|---|---|---|
-| E03 | Linux x86_64 glibc系 | libusb runtime/USB permissionを記録 | DT181 assets。DT295対象外 | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `linux-x86_64` / §3–§5 |
-| E08 | Linux aarch64 / musl | native aarch64、USB permissionを記録 | DT181 assets。DT295対象外 | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `linux-aarch64` / §3–§5 |
-| E04 | macOS arm64 | libusbとUSB permissionを記録 | DT181 assetsまたはDT295固有assets | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `darwin-arm64` / §3–§5 |
-| E05 | Android Termux aarch64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-aarch64` / §3–§5 |
-| E06 | Android Termux armv7a | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-armv7a` / §3–§5 |
-| E07 | Android Termux x86_64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-x86_64` / §3–§5 |
-| W1 | Windows 11 x86_64 | README記載のWinUSB access path | 対応archiveのassets | 対応modelの内部status CLI/APIを確認 | WinSCard adapterなし | `windows-x64` / §3–§5 |
+| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
+| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
+| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets; DT295はmacOS arm64の対応scope | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
+| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-aarch64`; procedure: §3–§5 |
+| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-armv7a`; procedure: §3–§5 |
+| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-x86_64`; procedure: §3–§5 |
+| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
 
-archive対象と実行環境の一般対応を記す表であり、候補の有無や特定版の実施結果は版別文書へ記録する。DT295はREADME/`dt295.md`にあるmacOS arm64の範囲だけを適用する。
+archive対象と実行前提を記す表であり、候補の有無や特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295の入力対象はREADME/`dt295.md`にあるmacOS arm64の範囲だけを適用する。assetsのarchiveへの埋込状態はここで判定しない。
 
 ## 共通試験シナリオ
 
