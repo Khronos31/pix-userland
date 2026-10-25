@@ -1070,6 +1070,8 @@ static int tuner_initialize(dt295 *d) {
 int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
         return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
+    if (d->poisoned)
+        return fail(d, e, en, "terrestrial tune refused for poisoned DT295 session");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "terrestrial tuning requires authenticated idle state");
     if (tuner_initialize(d))
@@ -1260,6 +1262,8 @@ int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en)
     if (!d || d->cleanup_only || !d->has_session || if_hz < 950000000u ||
         if_hz > 2150000000u || tsid < -1 || tsid > 65535)
         return fail(d, e, en, "satellite tuning requires IF 950..2150 MHz and TSID 0..65535");
+    if (d->poisoned)
+        return fail(d, e, en, "satellite tune refused for poisoned DT295 session");
     if (drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "satellite tuning requires authenticated idle state");
     const uint8_t *table = mat(d, 0x845a0, 18 * 8);

@@ -15,7 +15,7 @@ typedef struct {
     uint8_t iv[16];
     uint8_t ts_iv[16];
     uint8_t session[16];
-    unsigned key_requests, i2c_commands, key_words, acquire_commands;
+    unsigned key_requests, i2c_commands, key_words, acquire_commands, control_calls;
     unsigned card_activation_commands;
     unsigned auth_requests, init_commands, shutdown_commands, start_commands;
     unsigned renewal_challenges, renewal_applies;
@@ -157,6 +157,7 @@ static void respond(fake *f, uint32_t id) {
 static int control(void *u, uint8_t rt, uint8_t req, uint16_t value, uint16_t index, uint8_t *data,
                    size_t n, unsigned timeout, size_t *actual) {
     fake *f = u;
+    ++f->control_calls;
     if (f->control_delay_ms != 0U) {
         const unsigned elapsed = f->control_delay_ms < timeout ? f->control_delay_ms : timeout;
         f->now += elapsed;
@@ -286,9 +287,15 @@ static void test_card_recovery_fatal(const dt295_assets *assets, const fake *sou
         d, &observed, f.now + 3000U, &recovered, error, sizeof(error));
     assert(outcome == DT295_CARD_RECOVERY_FATAL);
     assert(dt295_card_observe(d, &recovered) != 0);
+    const unsigned calls_after_fatal = f.control_calls;
+    assert(dt295_tune_terrestrial(d, 13U, error, sizeof(error)) != 0);
+    assert(f.control_calls == calls_after_fatal);
+    assert(dt295_tune_satellite(d, 1049480000U, -1, error, sizeof(error)) != 0);
+    assert(f.control_calls == calls_after_fatal);
     size_t drained = 0U;
     assert(dt295_stop(d, &drained, error, sizeof(error)) == 0);
     assert(dt295_shutdown(d, error, sizeof(error)) == 0);
+    assert(f.control_calls > calls_after_fatal);
     dt295_destroy(d);
     free(f.mem);
 }
