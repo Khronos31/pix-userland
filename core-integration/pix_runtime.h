@@ -47,6 +47,11 @@ struct Assets final {
 };
 
 dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory) noexcept;
+/* Copy exact-size borrowed bytes into the existing owned, secure-clearable Assets object. */
+dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
+    const std::uint8_t* firmware, std::size_t firmware_size,
+    const std::uint8_t* bootstrap, std::size_t bootstrap_size,
+    const std::uint8_t* validation, std::size_t validation_size) noexcept;
 
 class Family final : public dtv::userland::host_runtime::EnclosureFamily {
 public:

@@ -173,6 +173,13 @@ target_compile_features(pixd PRIVATE cxx_std_17)
 target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pixd PRIVATE pix_product_runtime dtv::json PkgConfig::LIBUSB)
 
+add_executable(pix_asset_memory_proof tests/pix_asset_memory_proof.cpp)
+target_compile_features(pix_asset_memory_proof PRIVATE cxx_std_17)
+target_compile_options(pix_asset_memory_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_asset_memory_proof PRIVATE pix_product_runtime)
+add_test(NAME pix_asset_memory_proof COMMAND pix_asset_memory_proof)
+
 add_executable(pixctl tools/pixctl.cpp)
 target_compile_definitions(pixctl PRIVATE
     PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
