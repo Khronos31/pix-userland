@@ -1,6 +1,6 @@
-# 現行 Stable 候補のリリース前回帰手順
+# Stable リリース前検証手順
 
-この手順は現行の配布3コマンド `pixd` / `pixctl` / `pix-ts` に適用します。`pix-ts-legacy` の履歴/テスト結果は配布構成の確認ではありません。CLIは [`README.md`](../README.md)、DT295固有制限は [`dt295.md`](dt295.md)、過去結果は [`validation.md`](validation.md) を参照します。
+この文書は `pixd` / `pixctl` / `pix-ts` のStable releaseで再利用する準備・操作・判定・cleanupの正本です。版固有matrixと検証記録は [`release-validation/1.0.0.md`](release-validation/1.0.0.md) のように分離します。`pix-ts-legacy` の履歴/テスト結果は配布構成の確認ではありません。CLIは [`README.md`](../README.md)、DT295固有制限は [`dt295.md`](dt295.md)、過去結果は [`validation.md`](validation.md) を参照します。
 
 ## 1. 候補・配布物
 
@@ -55,8 +55,4 @@ rmdir "$RT"
 
 記録にはcandidate/Core SHA、workflow run/attempt、archive SHA、host/OS/arch/model、assets識別（秘密値を含めない）、USB selector、channel、コマンド、人的操作、期待/実測、ログ、cleanup、対象外/未確認を含めます。全gate後の結果記録commit前にsource/build inputが候補から変わっていないことを確認します。CIの手動Release workflow、tag、公開操作は実行しません。
 
-## 6. 1.0.0 初回matrix（この版だけ）
-
-以下の初回版matrixの時間/targetは後続releaseへ自動継承しません。1.0.0では代表Linux x86_64を2時間、macOS arm64とWindows x86_64を各30分、その他全配布binaryを各10分試験します。全7 binaryをnative OS/architectureで短時間回帰し、全実地域地上波channelおよび全無料BS/CS targetを各10秒raw TS取得します。無料CSを省略せず、CS22複数ECMの既知Issueだけを1.0.0対象外として別記します。
-
-channel、TSID、slot、周波数を現地計画と機種設定から試験前に固定し、上の `--time <SECONDS>` をこのmatrixでは `10` に置き換えます。Linux x86_64代表機2時間に加え、各機種自体の一度以上2時間qualification、major versionごとの全OS/architecture短TSを別記します。
+版ごとの適用頻度・対象・追加確認は版別文書へ記録します。candidate archiveごとの安定した手順と合否判定は本書の各節に従います。
