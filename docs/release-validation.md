@@ -4,14 +4,14 @@
 
 ## 共通の検証項目と頻度
 
-用語は4製品で共通とする。代表機はLinux x86_64 glibc、機種はチューナー、製品はドライバ、ソークは30分以上の連続TS取得を指す。PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機種初回の対象を限定しない。PIXが対象とする全機種で初回手順を個別に実施し、結果は[`release-validation/initial-model-checks.md`](release-validation/initial-model-checks.md)へ機種別に記録する。
+用語は4製品で共通とする。代表機はLinux x86_64 glibc、機種はチューナー、製品はドライバ、ソークは一定時間以上の連続したTS取得を指す。時間条件は適用頻度と版別matrixに従う。PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機種初回の対象を限定しない。PIXが対象とする全機種で初回手順を個別に実施し、結果は[`release-validation/initial-model-checks.md`](release-validation/initial-model-checks.md)へ機種別に記録する。
 
 | 区分 | 適用頻度 | PIXでの確認 |
 |---|---|---|
 | 機種初回 | PIXの各機種を個別に代表機で2時間連続受信し、その機種で毎release項目を代表機だけで実施する。必要時項目も通す。 | 機種ごとに異なるCLI/assets/OS対応を確認し、結果を機種別に記録する。 |
-| 回帰（毎release） | 代表機2時間連続受信。全配布archiveの各OS/ABIで短時間実機回帰、`--list-json`、機種の公開同時受信能力とTS/counter/終了値を確認する。最大試験で地上/衛星3波が不足する場合は不足分を個別に短時間取得する。受信中status、正常停止とprocess/FD/IPC残留なし、CARD挿抜、USB抜去/再挿入を確認する。 | DT181-PU0はT/BS/CSの短時間取得、DT295はREADMEの確認済みmacOS地上波範囲を適用する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。両機種を別々に記録する。 |
+| 回帰（毎release） | 代表機2時間連続受信。全配布archiveの各OS/ABIで短時間実機回帰、`--list-json`、機種の公開同時受信能力とTS/counter/終了値を確認する。最大試験で地上/衛星3波が不足する場合は不足分を個別に短時間取得する。受信中status、正常停止とprocess/FD/IPC残留なし、CARD挿抜、USB抜去/再挿入を確認する。 | DT181-PU0はT/BS/CS、DT295は地上波の試験対象として、両機種を全配布archive/OS/ABIごとに分けて記録する。DT295の現source platform gateとprivate package経路は結果に記録し、他OSを対象外として扱わない。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。 |
 | 必要に応じて | LNB実測と非対応機種の拒否、複数チューナー列挙/daemon並列、変更機能に応じた機種×OS/ABIの追加確認。 | PIXはLNB給電なし。model enumerationやmulti-device変更時は該当機種で確認。 |
-| 初回/major | 必要時項目を通し、代表機で全無料channelを各10秒TS取得。macOS/Windows各30分連続、残るOS/ABI各10分連続で取得する。全channel取得は代表機だけ。別途指示されたソークは別記する。 | DT295は対応OS/asset条件に従い、DT181-PU0結果と分離する。 |
+| 初回/major | 必要時項目を通し、代表機で全無料channelを各10秒TS取得。macOS/Windows各30分連続、残るOS/ABI各10分連続で取得する。全channel取得は代表機だけ。別途指示されたソークは別記する。 | DT295は機種としてOS/ABIごとに試験し、source gateとpackage経路を結果に記録する。DT181-PU0結果と分離する。 |
 
 全配布archiveはnative OS/ABIで回帰し、代表機の全channel10秒取得を全archiveへ広げない。具体的な候補・操作・判定は以下の手順、各版の実績は[`release-validation/1.0.0.md`](release-validation/1.0.0.md)へ記録する。
 
@@ -33,15 +33,15 @@
 
 | ID | OS / ABI | 依存 / driver / permission | firmware / input | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
 |---|---|---|---|---|---|---|
-| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
-| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
-| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets; DT295はmacOS arm64の対応scope | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
-| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-aarch64`; procedure: §3–§5 |
-| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-armv7a`; procedure: §3–§5 |
-| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-x86_64`; procedure: §3–§5 |
-| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; input: DT181 assets; DT295対象外 | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
+| E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-x86_64`; procedure: §3–§5 |
+| E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `linux-aarch64`; procedure: §3–§5 |
+| E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `darwin-arm64`; procedure: §3–§5 |
+| E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-aarch64`; procedure: §3–§5 |
+| E06 | Android (Termux) / armv7a / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-armv7a`; procedure: §3–§5 |
+| E07 | Android (Termux) / x86_64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `android-x86_64`; procedure: §3–§5 |
+| E17 | Windows 11 / x86_64 / Win32 | libusb: 静的1.0.30; USB access: WinUSB driver | firmware: なし; input: DT181/DT295 model assets | 内部CARD statusのみ; model依存 | Linux PC/SC: なし; macOS PC/SC: なし; Android: なし; Windows WinSCard: なし | artifact: `windows-x64`; procedure: §3–§5 |
 
-archive対象と実行前提を記す表であり、候補の有無や特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295の入力対象はREADME/`dt295.md`にあるmacOS arm64の範囲だけを適用する。assetsのarchiveへの埋込状態はここで判定しない。
+archive対象と試験前提を記す表であり、実装状態・候補の有無・特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295は製品対象として各OS/ABIの試験に含め、未実装やpackage未接続を対象外へ読み替えない。assetsのarchiveへの埋込状態はここで判定しない。
 
 ## 共通試験シナリオ
 
@@ -51,7 +51,7 @@ archive対象と実行前提を記す表であり、候補の有無や特定版�
 
 | 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
 |---|---|---|---|---|---|
-| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295は確認済みmacOS arm64地上波範囲 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、同じruntime/instance/groupの`pixctl ... status`と`pixctl ... list`をそれぞれ確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。channel/TSID/slotは現地値を記録 | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、channel、USB selector、CLI/exit、TS/counters、cleanup |
+| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295はOS/ABIごとに試験し現在のsource gate/package経路を記録 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、同じruntime/instance/groupの`pixctl ... status`と`pixctl ... list`をそれぞれ確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。source gateでunsupportedとなった条件もarchive/model/OSごとに記録し、対象外扱いしない | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、OS/ABI、channel、USB selector、CLI/exit、TS/counters、cleanup |
 
 受信中status/listの反復確認は次のCLIを使い、実行時刻をstream開始/終了とともに記録する。
 
@@ -121,7 +121,7 @@ RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
 ./pix-ts --instance rc --channel T27 --system isdb-t --time <SECONDS> --output t27.ts --runtime-dir "$RT" --group
 ```
 
-`--models`と`--list-json`でcandidateのmodelとUSB位置を記録し、statusがfree/readyでreceiverが1基あることを確認します。最大同時受信数の1 streamを正常終了させ、client終了値、daemon packet/byte/USB counters、TS品質を確認します。DT181-PU0は利用可能な地上波・BS・CSから3波を選び、最大受信試験で未確認の波を短時間取得します。DT295は現行READMEと[`dt295.md`](dt295.md)で確認済みのmacOS arm64・T27・target 0に範囲を限定し、それ以外を成功扱いしません。channel/TSID/slot/周波数は実値を記録します。出力非空だけで合格にせず、TS parser/独立検査と記録済みcounterで評価します。
+`--models`と`--list-json`でcandidateのmodelとUSB位置を記録し、statusがfree/readyでreceiverが1基あることを確認します。最大同時受信数の1 streamを正常終了させ、client終了値、daemon packet/byte/USB counters、TS品質を確認します。DT181-PU0は利用可能な地上波・BS・CSから3波を選び、最大受信試験で未確認の波を短時間取得します。DT295は各archive/OS/ABIで試験し、現在のsource gateがunsupportedを返す条件とcapture可能なmacOS arm64・T27・target 0の実測を分けて記録します。channel/TSID/slot/周波数は実値を記録します。出力非空だけで合格にせず、TS parser/独立検査と記録済みcounterで評価します。
 
 受信中は別端末で状態を反復観測し、clientを通常終了して同じdaemon/runtimeから再取得します。
 
@@ -169,7 +169,7 @@ RT2=$(mktemp -d "${TMPDIR:-/tmp}/pix-reconnect.XXXXXX")
 
 再接続後は`pix-ts` exit 0に加えてTS sync/parser品質合格、daemon counters、通常daemon exit 0とprocess/FD/socket cleanupを記録します。AndroidはTermux USB許可/再取得、WindowsはREADMEのWinUSB構成を使います。BUSYなら別processを奪わず理由を記録します。
 
-本製品はLNB制御を提供しません。`--lna` 等の機能をLNB給電と誤認せず、software/実電圧を試験しません。DT295 assets/model経路は対応するnative macOS archiveと [`dt295.md`](dt295.md) の条件に従い、他OSのDT181実績から認定を広げません。
+本製品はLNB制御を提供しません。`--lna` 等の機能をLNB給電と誤認せず、software/実電圧を試験しません。DT295のcapture gateとprivate assets finalize対象は現状macOS arm64に限られるため、全OS/ABIでのDT295結果は各行に分けて記録し、DT181の実績から認定を広げません。
 
 ## 5. soak・cleanup・記録
 
