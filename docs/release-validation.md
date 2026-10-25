@@ -9,15 +9,81 @@
 | 区分 | 適用頻度 | PIXでの確認 |
 |---|---|---|
 | 機種初回 | PIXの各機種を個別に代表機で2時間連続受信し、その機種で毎release項目を代表機だけで実施する。必要時項目も通す。 | 機種ごとに異なるCLI/assets/OS対応を確認し、結果を機種別に記録する。 |
-| 回帰（毎release） | 代表機2時間連続受信。全配布archiveの各OS/ABIで短時間実機回帰、`--list-json`、最大能力の同時受信とTS/counter/終了値を確認する。最大試験で地上/衛星3波が不足する場合は不足分を個別に短時間取得する。受信中status、正常停止とprocess/FD/IPC残留なし、CARD挿抜、USB抜去/再挿入を確認する。 | 1チューナー/1 receiverで同時stream上限は1。DT181-PU0はT/BS/CSの短時間取得、DT295はREADMEの確認済みmacOS地上波範囲を適用する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。両機種を別々に記録する。 |
+| 回帰（毎release） | 代表機2時間連続受信。全配布archiveの各OS/ABIで短時間実機回帰、`--list-json`、機種の公開同時受信能力とTS/counter/終了値を確認する。最大試験で地上/衛星3波が不足する場合は不足分を個別に短時間取得する。受信中status、正常停止とprocess/FD/IPC残留なし、CARD挿抜、USB抜去/再挿入を確認する。 | DT181-PU0はT/BS/CSの短時間取得、DT295はREADMEの確認済みmacOS地上波範囲を適用する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。両機種を別々に記録する。 |
 | 必要に応じて | LNB実測と非対応機種の拒否、複数チューナー列挙/daemon並列、変更機能に応じた機種×OS/ABIの追加確認。 | PIXはLNB給電なし。model enumerationやmulti-device変更時は該当機種で確認。 |
 | 初回/major | 必要時項目を通し、代表機で全無料channelを各10秒TS取得。macOS/Windows各30分連続、残るOS/ABI各10分連続で取得する。全channel取得は代表機だけ。別途指示されたソークは別記する。 | DT295は対応OS/asset条件に従い、DT181-PU0結果と分離する。 |
 
 全配布archiveはnative OS/ABIで回帰し、代表機の全channel10秒取得を全archiveへ広げない。具体的な候補・操作・判定は以下の手順、各版の実績は[`release-validation/1.0.0.md`](release-validation/1.0.0.md)へ記録する。
 
+## 共通実行環境表
+
+| ID | OS / ABI | 依存 / driver / permission | firmware / input | CARD backend | 配布artifact / 手順 |
+|---|---|---|---|---|---|
+| E03 | Linux x86_64 glibc系 | libusb runtime/USB permissionを記録 | DT181 assets。DT295対象外 | 内部statusのみ。外部PC/SCなし | `linux-x86_64` / §3–§5 |
+| E08 | Linux aarch64 / musl | native aarch64、USB permissionを記録 | DT181 assets。DT295対象外 | 内部statusのみ。外部PC/SCなし | `linux-aarch64` / §3–§5 |
+| E04 | macOS arm64 | libusbとUSB permissionを記録 | DT181 assetsまたはDT295固有assets | 内部statusのみ。外部PC/SCなし | `darwin-arm64` / §3–§5 |
+| E05 | Android Termux aarch64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-aarch64` / §3–§5 |
+| E06 | Android Termux armv7a | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-armv7a` / §3–§5 |
+| E07 | Android Termux x86_64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-x86_64` / §3–§5 |
+| W1 | Windows 11 x86_64 | README記載のWinUSB access path | 対応archiveのassets | 内部statusのみ。WinSCardなし | `windows-x64` / §3–§5 |
+
+archive対象と実行環境の一般対応を記す表であり、候補の有無や特定版の実施結果は版別文書へ記録する。DT295はREADME/`dt295.md`にあるmacOS arm64の範囲だけを適用する。
+
+## 共通試験シナリオ
+
+シナリオ本文は全製品で「適用頻度/対象能力、準備/起動、操作/利用者への依頼、期待値、停止/cleanup、記録」の順に記す。HAOS/SCS上で物理操作を依頼する場合、各依頼前にCodexは`beep`、Claude Codeは`vibe`を実行し、依頼から最大5分待つ。期限内に操作がなければ、その工程を未完了として停止する。
+
+### A. 列挙と最大同時受信
+
+| 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
+|---|---|---|---|---|---|
+| 毎release。各modelの公開receiver数。DT181-PU0はT/BS/CS、DT295は確認済みmacOS arm64地上波範囲 | candidate assets、現地`BUS-PORT`、空の`$RT`を用意し、`pixd --list-json`と`pixd --models`で照合 | `pixd --device usb:<BUS-PORT> --assets ./assets --runtime-dir "$RT" --instance rc --group`起動後、`pixctl ... status/list`を確認し、公開receiverごとの`pix-ts --instance rc --channel <CHANNEL> --system <SYSTEM> --time <SECONDS> --output <FILE> --runtime-dir "$RT" --group`を同時実行 | 各要求streamのclient終了値、TS同期/parser結果、daemon packet/byte/USB countersを確認。channel/TSID/slotは現地値を記録 | clientを通常終了後、`pixd`を通常停止しprocess/FD/runtime socket残留を確認 | archive SHA、model、channel、USB selector、CLI/exit、TS/counters、cleanup |
+
+受信中status/listの反復確認は次のCLIを使い、実行時刻をstream開始/終了とともに記録する。
+
+```sh
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group status
+./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --group list
+```
+
+### B. 内部CARD status抜去・再挿入
+
+適用: 内部reader statusを公開するmodel。外部ATR/reset/APDU/PC/SC/WinSCard操作は製品機能外。受信を正常停止してdaemonを維持した状態で行う。
+
+```sh
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+```
+
+1. `card-status`で挿入時の内部状態を記録する。
+2. 親は「対象機のカードを抜いてください」と利用者へ依頼し、依頼から最大5分待つ。応答がなければ工程を未完了として中断する。抜去後に同じ`card-status`を実行し、不在状態を期待する。
+
+```sh
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+```
+
+3. 親は「同じカードを再挿入してください」と依頼し、最大5分待つ。再挿入後に`card-status`を実行し、挿入状態への復帰を期待する。
+
+```sh
+./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
+```
+
+4. daemonを通常停止し、process/FD/runtime socketを確認する。status出力以外のATR/APDUデータを作らない。
+
+各物理操作の依頼時刻、出力、終了値、状態遷移、cleanupを記録する。CARD statusとstream同時動作を主張する結果は、候補archiveを使った別試験記録へ記す。
+
+### C. USB抜去・再接続
+
+| 適用頻度 / 対象能力 | 準備 / 起動 | 操作 / 利用者への依頼 | 期待値 | 停止 / cleanup | 記録 |
+|---|---|---|---|---|---|
+| 毎release。対応modelのidle時とstreaming時 | `pixd --list-json`でportを固定し、idle runとstream runを分ける | 各runで親が対象USBを抜くよう依頼し、依頼から最大5分待つ。次に同じportへ戻すよう依頼し、再列挙後に新daemonを起動 | 実際のclient/daemon表示と終了値を保存。ハング/残留を確認し、自動hotplug取得を期待せず、新daemonのstatus/listと短い再取得を行う | client/旧daemonを通常停止し、終了を待つ。再接続後の新daemonを通常停止しcleanup確認。Termuxはpermission/FDを再取得 | 物理操作時刻、port、client/daemon exit、再列挙、再取得、cleanup |
+
+### D. teardown・結果
+
+受信clientを通常終了し、`kill -TERM "$P"`、`wait "$P"`でdaemon終了を待ち、status/process/runtime socketのcleanupを確認する。頻度ごとの実績、未実施、失敗、対象外は版別文書へ記録する。
+
 ## 1. 候補・配布物
 
-現行CIには7 binaryすべてを含むpre-release candidate artifactがありません。通常CIはLinux x86_64 packageとsourceを、Windows workflowはWindows packageを個別に生成します。release.ymlはmain限定の `workflow_dispatch` で全targetをpackageし、Release作成・asset upload・公開まで行います。これをpre-release候補としてdispatchすると正式Releaseを公開するため、回帰工程では実行しません。候補artifact一式がないので、実機回帰の実行可能性は現CIのままでは未達です。candidate artifact追加とtag自動公開への変更はCI/source変更になるため、このdocs-only PRでは行わず、親の判断事項とします。
+対象versionの候補sourceから作成されたbinary archiveとsource archiveを取得し、hash・manifest・license/provenanceを照合します。pre-release候補が用意できない場合は実機gateを完了扱いにせず、その版別文書に未実施理由を記録します。正式Releaseを作成・公開するworkflowを候補作成の代用にしません。
 
 公開後の監査を行う際は、GitHub Releaseから新規directoryへbinary/source archiveと`SHA256SUMS`を取得し、`sha256sum -c SHA256SUMS`、各archive内の`build-info.txt`が記録する固定Core SHA、source manifest/license/provenanceを照合します。これはpre-release candidate試験の代替にはなりません。
 
@@ -52,7 +118,7 @@ RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
 
 USB抜去/再挿入はidle時と受信中で別々に行い、実際のclient/daemon表示と終了値を記録します。抜去後はdaemonを通常終了し、挿し直した後に`pixd --list-json`で再列挙し、新daemon/runtimeからstatus/listと短時間TSを取り直します。期待されるexit値はREADMEとcandidate実測に照合し、自動hotplug再取得は仮定しません。
 
-PIX内部カードは以下の `card-status` による挿入状態だけを確認します。外部ATR/reset/APDUやPC/SC/WinSCardは非対応で実施しません。カードを抜いてstatus不在、再挿入後presentへ戻ることはcaptureを止めdaemon idleにした状態で行います。streamとカード再挿入の共存は未確認のため未達として明記します。
+PIX内部カードは以下の `card-status` による挿入状態だけを確認します。外部ATR/reset/APDUやPC/SC/WinSCardは製品機能外です。captureを通常停止しdaemonを起動したまま行います。各物理操作の直前にHAOS/SCS上でCodexは`beep`、Claude Codeは`vibe`を実行し、「カードを抜いてください」または「同じカードを再挿入してください」と依頼します。各依頼から最大5分待ち、応答がない場合は工程を未完了として中断します。抜去後にstatus不在、再挿入後にpresent復帰を確認します。
 
 ```sh
 ./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --group card-status
