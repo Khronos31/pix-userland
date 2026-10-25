@@ -34,6 +34,13 @@ typedef struct {
     uint8_t fresh_notification;
 } dt295_card_snapshot;
 
+typedef enum {
+    DT295_CARD_RECOVERY_FATAL = -1,
+    DT295_CARD_RECOVERY_NOT_NEEDED = 0,
+    DT295_CARD_RECOVERY_ACTIVATED = 1,
+    DT295_CARD_RECOVERY_PENDING = 2
+} dt295_card_recovery_result;
+
 /* USB operations return 0 on success. actual must equal the requested length
  * for control transfers and OUT transfers; a timed-out IN may return bytes. */
 typedef struct {
@@ -63,6 +70,13 @@ int dt295_open_session(dt295 *device, char *error, size_t error_size);
 int dt295_card_initialize(dt295 *device, char *error, size_t error_size);
 int dt295_card_activate(dt295 *device, unsigned timeout_ms, char *error, size_t error_size);
 int dt295_card_observe(dt295 *device, dt295_card_snapshot *snapshot);
+int dt295_card_observe_until(dt295 *device, dt295_card_snapshot *snapshot,
+                             uint64_t deadline_ms);
+dt295_card_recovery_result dt295_card_recover(dt295 *device,
+                                              const dt295_card_snapshot *observed,
+                                              uint64_t deadline_ms,
+                                              dt295_card_snapshot *result,
+                                              char *error, size_t error_size);
 void dt295_card_invalidate_observation(dt295 *device);
 int dt295_tune_terrestrial(dt295 *device, unsigned channel, char *error, size_t error_size);
 int dt295_terrestrial_rf_divider(unsigned channel, uint16_t *divider);

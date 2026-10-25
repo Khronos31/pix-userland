@@ -231,11 +231,17 @@ dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
 
 std::optional<bool> ReceiverAdapter::sample_card_inserted() noexcept
 {
+    const std::uint64_t started = clock_.monotonic_ms();
+    const std::uint64_t observation_deadline = started + 1000U;
+    const std::uint64_t recovery_deadline = started + 3000U;
+    std::unique_lock<std::mutex> operation_lock(operation_mutex_, std::try_to_lock);
+    if (!operation_lock.owns_lock())
+        return std::nullopt;
     std::unique_lock<std::mutex> protocol_lock(protocol_mutex_, std::try_to_lock);
     if (!protocol_lock.owns_lock() || !opened_ || init_error_ != Error::OK)
         return std::nullopt;
     dt295_card_snapshot snapshot{};
-    if (dt295_card_observe(device_, &snapshot) != 0) {
+    if (dt295_card_observe_until(device_, &snapshot, observation_deadline) != 0) {
         dt295_card_invalidate_observation(device_);
         return std::nullopt;
     }
@@ -244,6 +250,19 @@ std::optional<bool> ReceiverAdapter::sample_card_inserted() noexcept
     if (snapshot.raw_state == 0U && snapshot.activation_valid &&
         snapshot.notification_generation > snapshot.activation_generation)
         return false;
+    if (snapshot.raw_state == 1U && snapshot.fresh_notification && snapshot.activation_valid &&
+        snapshot.notification_generation > snapshot.activation_generation) {
+        if (stream_attached_ || streaming_ || stream_ != nullptr)
+            return std::nullopt;
+        dt295_card_snapshot recovered{};
+        char error[256]{};
+        const dt295_card_recovery_result result = dt295_card_recover(
+            device_, &snapshot, recovery_deadline, &recovered, error, sizeof(error));
+        if (result == DT295_CARD_RECOVERY_ACTIVATED)
+            return true;
+        if (result == DT295_CARD_RECOVERY_FATAL)
+            dt295_card_invalidate_observation(device_);
+    }
     return std::nullopt;
 }
 

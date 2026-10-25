@@ -30,6 +30,7 @@ static unsigned pipeline_control_delay_ms;
 static unsigned pipeline_post_activation_state = 3U;
 static int pipeline_post_activation_notification;
 static int pipeline_activation_command_seen;
+static unsigned pipeline_activation_commands;
 static int pipeline_activation_state_seen;
 static int pipeline_post_activation_delivered;
 
@@ -55,6 +56,14 @@ void dt295_actual_fixture_set_card_sample(unsigned raw_state, unsigned notificat
     wr16(pipeline_fake.mem + 0x822ac, (uint16_t)(raw_state << 12));
     wr16(pipeline_fake.mem + 0x90074, (uint16_t)(pending & 0x400));
     pthread_mutex_unlock(&pipeline_mutex);
+}
+
+unsigned dt295_actual_fixture_activation_commands(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_activation_commands;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
 }
 
 unsigned dt295_actual_fixture_card_acks(void)
@@ -229,6 +238,7 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
     if (!rc && request == 0xb9 && length == 4U && data[0] == 0x0aU &&
         data[1] == 1U && rd16(data + 2) == 1U) {
         pipeline_activation_command_seen = 1;
+        ++pipeline_activation_commands;
         wr16(pipeline_fake.mem + 0x822ac, 0x3000U);
     }
     if (!rc && request == 0xbc && (request_type & 0x80U) != 0U &&

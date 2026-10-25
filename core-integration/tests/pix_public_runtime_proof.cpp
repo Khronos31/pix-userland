@@ -480,9 +480,32 @@ int main()
         std::fprintf(stderr, "PROOF DT295 card-status %s via existing pixctl path\n",
                      card_cases[index].second);
     }
+    (void)::setenv("PIX_TEST_DT295_RAW", "3", 1);
+    (void)::unsetenv("PIX_TEST_DT295_NOTIFICATION");
+    (void)::setenv("PIX_TEST_DT295_REINSERT_RAW", "1", 1);
+    const std::string reinsert_log = root + "/dt295-card-reinsert.log";
+    const pid_t reinsert_daemon = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT29501", "--assets", assets,
+         "--runtime-dir", root, "--group"}, reinsert_log);
+    if (reinsert_daemon <= 0 || !wait_ready(reinsert_log, reinsert_daemon)) return 39;
+    std::string reinsert_output;
+    if (run_card_status(root, reinsert_output) != 0 ||
+        reinsert_output.find("present=yes") == std::string::npos) {
+        std::fprintf(stderr, "PROOF DT295 reinsert card-status expected=present=yes got=%s",
+                     reinsert_output.c_str());
+        (void)::kill(reinsert_daemon, SIGTERM);
+        (void)::waitpid(reinsert_daemon, nullptr, 0);
+        return 40;
+    }
+    (void)::kill(reinsert_daemon, SIGTERM);
+    int reinsert_daemon_status = 0;
+    if (::waitpid(reinsert_daemon, &reinsert_daemon_status, 0) != reinsert_daemon ||
+        !WIFEXITED(reinsert_daemon_status) || WEXITSTATUS(reinsert_daemon_status) != 0) return 41;
+    std::fprintf(stderr, "PROOF DT295 reinsert card-status present=yes via one pixctl request\n");
     (void)::unsetenv("PIX_TEST_DT295_FAKE");
     (void)::unsetenv("PIX_TEST_DT295_RAW");
     (void)::unsetenv("PIX_TEST_DT295_NOTIFICATION");
+    (void)::unsetenv("PIX_TEST_DT295_REINSERT_RAW");
 
     const auto expected = read_file(expected_path);
     const auto actual = read_file(output_path);
