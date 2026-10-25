@@ -39,35 +39,58 @@ int dt295_actual_fixture_control(uint8_t, uint8_t, uint16_t, uint16_t,
                                  uint8_t *, uint16_t);
 int dt295_actual_fixture_bulk(uint8_t, unsigned char *, int, int *);
 int dt295_actual_fixture_interrupt(uint8_t, unsigned char *, int, int *);
+int __real_usb_open_model(usb_backend **, const usb_selector *, int, int, int);
 
 int __wrap_usb_open_model(usb_backend **output, const usb_selector *selector, int fd,
                           int detach, int model)
 {
-    (void)selector; (void)fd; (void)detach;
-    if (output == NULL || model != USB_MODEL_DT295) return -1;
+    if (output == NULL) return -1;
+    if (model != USB_MODEL_DT295)
+        return __real_usb_open_model(output, selector, fd, detach, model);
     *output = (usb_backend *)(uintptr_t)0x295U;
     return 0;
 }
 void __real_usb_close(usb_backend *backend);
 void __wrap_usb_close(usb_backend *backend)
 { if (backend != (usb_backend *)(uintptr_t)0x295U) __real_usb_close(backend); }
+void *__real_usb_native_context(usb_backend *backend);
 void *__wrap_usb_native_context(usb_backend *backend)
-{ (void)backend; return (void *)(uintptr_t)0x29501U; }
+{ return backend == (usb_backend *)(uintptr_t)0x295U
+      ? (void *)(uintptr_t)0x29501U : __real_usb_native_context(backend); }
+void *__real_usb_native_handle(usb_backend *backend);
 void *__wrap_usb_native_handle(usb_backend *backend)
-{ (void)backend; return (void *)(uintptr_t)0x29502U; }
+{ return backend == (usb_backend *)(uintptr_t)0x295U
+      ? (void *)(uintptr_t)0x29502U : __real_usb_native_handle(backend); }
+int LIBUSB_CALL __real_libusb_control_transfer(libusb_device_handle *, uint8_t,
+    uint8_t, uint16_t, uint16_t, unsigned char *, uint16_t, unsigned int);
 int __wrap_libusb_control_transfer(libusb_device_handle *handle, uint8_t type,
     uint8_t request, uint16_t value, uint16_t index, unsigned char *data,
     uint16_t length, unsigned int timeout)
 {
-    (void)handle; (void)timeout;
+    if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+        return __real_libusb_control_transfer(handle, type, request, value, index,
+                                              data, length, timeout);
     return dt295_actual_fixture_control(type, request, value, index, data, length);
 }
+int LIBUSB_CALL __real_libusb_bulk_transfer(libusb_device_handle *, unsigned char,
+    unsigned char *, int, int *, unsigned int);
 int __wrap_libusb_bulk_transfer(libusb_device_handle *handle, unsigned char endpoint,
     unsigned char *data, int length, int *actual, unsigned int timeout)
-{ (void)handle; (void)timeout; return dt295_actual_fixture_bulk(endpoint, data, length, actual); }
+{
+    if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+        return __real_libusb_bulk_transfer(handle, endpoint, data, length, actual, timeout);
+    return dt295_actual_fixture_bulk(endpoint, data, length, actual);
+}
+int LIBUSB_CALL __real_libusb_interrupt_transfer(libusb_device_handle *, unsigned char,
+    unsigned char *, int, int *, unsigned int);
 int __wrap_libusb_interrupt_transfer(libusb_device_handle *handle, unsigned char endpoint,
     unsigned char *data, int length, int *actual, unsigned int timeout)
-{ (void)handle; (void)timeout; return dt295_actual_fixture_interrupt(endpoint, data, length, actual); }
+{
+    if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+        return __real_libusb_interrupt_transfer(handle, endpoint, data, length, actual,
+                                               timeout);
+    return dt295_actual_fixture_interrupt(endpoint, data, length, actual);
+}
 int __wrap_random_bytes(void *output, size_t length)
 { if (output != NULL) memset(output, 0, length); return 0; }
 #endif
