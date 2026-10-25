@@ -17,15 +17,15 @@
 
 ## 共通実行環境表
 
-| ID | OS / ABI | 依存 / driver / permission | firmware / input | CARD backend | 配布artifact / 手順 |
-|---|---|---|---|---|---|
-| E03 | Linux x86_64 glibc系 | libusb runtime/USB permissionを記録 | DT181 assets。DT295対象外 | 内部statusのみ。外部PC/SCなし | `linux-x86_64` / §3–§5 |
-| E08 | Linux aarch64 / musl | native aarch64、USB permissionを記録 | DT181 assets。DT295対象外 | 内部statusのみ。外部PC/SCなし | `linux-aarch64` / §3–§5 |
-| E04 | macOS arm64 | libusbとUSB permissionを記録 | DT181 assetsまたはDT295固有assets | 内部statusのみ。外部PC/SCなし | `darwin-arm64` / §3–§5 |
-| E05 | Android Termux aarch64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-aarch64` / §3–§5 |
-| E06 | Android Termux armv7a | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-armv7a` / §3–§5 |
-| E07 | Android Termux x86_64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部statusのみ。外部PC/SCなし | `android-x86_64` / §3–§5 |
-| W1 | Windows 11 x86_64 | README記載のWinUSB access path | 対応archiveのassets | 内部statusのみ。WinSCardなし | `windows-x64` / §3–§5 |
+| ID | OS / ABI | 依存 / driver / permission | firmware / input | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
+|---|---|---|---|---|---|---|
+| E03 | Linux x86_64 glibc系 | libusb runtime/USB permissionを記録 | DT181 assets。DT295対象外 | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `linux-x86_64` / §3–§5 |
+| E08 | Linux aarch64 / musl | native aarch64、USB permissionを記録 | DT181 assets。DT295対象外 | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `linux-aarch64` / §3–§5 |
+| E04 | macOS arm64 | libusbとUSB permissionを記録 | DT181 assetsまたはDT295固有assets | 対応modelの内部status CLI/APIを確認 | native PC/SC/WinSCard adapterなし | `darwin-arm64` / §3–§5 |
+| E05 | Android Termux aarch64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-aarch64` / §3–§5 |
+| E06 | Android Termux armv7a | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-armv7a` / §3–§5 |
+| E07 | Android Termux x86_64 | Termux USB permission/FDを記録 | 対応archiveのassets | 内部status CLI/APIあり。candidate実機結果は版別に確認 | Android native adapter未提供 | `android-x86_64` / §3–§5 |
+| W1 | Windows 11 x86_64 | README記載のWinUSB access path | 対応archiveのassets | 対応modelの内部status CLI/APIを確認 | WinSCard adapterなし | `windows-x64` / §3–§5 |
 
 archive対象と実行環境の一般対応を記す表であり、候補の有無や特定版の実施結果は版別文書へ記録する。DT295はREADME/`dt295.md`にあるmacOS arm64の範囲だけを適用する。
 
@@ -165,14 +165,15 @@ RT2=$(mktemp -d "${TMPDIR:-/tmp}/pix-reconnect.XXXXXX")
 
 ```sh
 kill -TERM "$P"
-wait "$P"
+if wait "$P"; then daemon_rc=0; else daemon_rc=$?; fi
+printf '%s\n' "$daemon_rc" > "$LOG/daemon.rc"
 find "$RT" -type s -print > "$LOG/socket-after-stop.txt"
 if ./pixctl --runtime-dir "$RT" --instance rc --device usb:<BUS-PORT> --group status > "$LOG/status-after-stop.txt" 2>&1; then rc=0; else rc=$?; fi
-echo "$rc" > "$LOG/status-after-stop.rc"
+printf '%s\n' "$rc" > "$LOG/status-after-stop.rc"
 rmdir "$RT"
 ```
 
-正常停止後は`pixd` exit 0、socket一覧が空、同じgroup modeの`pixctl`がendpoint不在を示す`connect failed (3)`でexit 3となることを確認します。別access modeの接続失敗をcleanupの証拠に使いません。
+`wait`は条件式内で捕捉するため、daemonが非zero終了しても`set -e`相当のshellでも後続を打ち切らず、他のcommandが終了値を上書きする前に`$LOG/daemon.rc`へ保存します。正常停止の期待値はdaemon exit 0、空のsocket一覧、同じgroup modeの`pixctl`がendpoint不在を示す`connect failed (3)`でexit 3です。実測`daemon.rc`が`0`であることをsocket/status記録と並べて確認します。別access modeの接続失敗をcleanupの証拠に使いません。
 
 記録にはcandidate/Core SHA、workflow run/attempt、archive SHA、host/OS/arch/model、assets識別（秘密値を含めない）、USB selector、channel、コマンド、人的操作、期待/実測、ログ、cleanup、対象外/未確認を含めます。全gate後の結果記録commit前にsource/build inputが候補から変わっていないことを確認します。CIの手動Release workflow、tag、公開操作は実行しません。
 
