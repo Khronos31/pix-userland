@@ -89,7 +89,7 @@ test -n "$D"; LOG="$WORK/log"; RT="$WORK/runtime"; mkdir -m 700 "$LOG" "$RT"; cd
 python3 -c 'import json,sys; m=json.load(open("release-info.json")); print(json.dumps(m,sort_keys=True)); assert m.get("commit") == sys.argv[1]' "$SOURCE_SHA"
 ```
 
-Windows uses a new empty `$D`, `Expand-Archive`, and `Get-FileHash -Algorithm SHA256`. The target artifact digest from GitHub is checked before extraction; record the inner archive SHA-256 and `release-info.json.commit` as separate provenance evidence. This workflow artifact does not provide an inner `SHA256SUMS`. Termux uses `$PREFIX/tmp` or `$HOME`, not OS `/tmp`; install/check `gh`, Python 3.11+, `tar`, `unzip`, `coreutils` using `pkg install gh python tar unzip coreutils` only after host approval. `termux-usb -l` output is recorded, and `termux-usb -r <path>` is limited to a path identified as the target tuner. Linux access is observed with `id`, `stat`, and `lsusb -t`; permissions/udev changes require separate approval, saved original state, and restoration. Do not change HAOS/Supervisor settings.
+Windows uses a new empty `$D`, `Expand-Archive`, and `Get-FileHash -Algorithm SHA256`. The target artifact digest from GitHub is checked before extraction; record the inner archive SHA-256 and `release-info.json.commit` as separate provenance evidence. This workflow artifact does not provide an inner `SHA256SUMS`. Windows helper commands use Python 3.11+ (`python --version`). Termux uses `$PREFIX/tmp` or `$HOME`, not OS `/tmp`; install/check `gh`, Python 3.11+, `tar`, `unzip`, `coreutils` using `pkg install gh python tar unzip coreutils` only after host approval. `termux-usb -l` output is recorded, and `termux-usb -r <path>` is limited to a path identified as the target tuner. Linux access is observed with `id`, `stat`, and `lsusb -t`; permissions/udev changes require separate approval, saved original state, and restoration. Do not change HAOS/Supervisor settings.
 
 Windows PowerShellの実行例:
 
@@ -216,7 +216,7 @@ $LOG = Join-Path $Work 'log'; $RT = Join-Path $Work 'runtime'; Set-Location $D
 
 - **適用対象/頻度:** 全capture/soak。
 - **準備:** Python 3.11以上を`python3 --version`で確認し、手順書checkoutの[`ts-check.py`](release-validation/ts-check.py)を使う。候補ごとに新規作成した`$LOG`を使う。
-- **実操作/利用者への依頼:** POSIXでは各TSに`python3 <runbook-checkout>/docs/release-validation/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`py -3 <runbook-checkout>\docs\release-validation\ts-check.py "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
+- **実操作/利用者への依頼:** POSIXでは各TSに`python3 <runbook-checkout>/docs/release-validation/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`python <runbook-checkout>\docs\release-validation\ts-check.py "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
 - **期待値/終了値:** 全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
 - **停止/cleanup:** 元TS/hash/logを残してT08 cleanup。
 - **記録:** Python version、helperのGit SHA、TS hash、helperのJSON/終了値、sync/TEI/continuity/drop/counter、client exit。
@@ -226,7 +226,7 @@ Windows PowerShellでの固定helper呼出し:
 ```powershell
 $helper = '<runbook-checkout>\docs\release-validation\ts-check.py'; $ts = Join-Path $LOG '<capture>.ts'
 $json = Join-Path $LOG '<capture>.ts-check.json'; $err = Join-Path $LOG '<capture>.ts-check.err'
-& py -3 $helper $ts 1> $json 2> $err; $parserRc = $LASTEXITCODE
+& python $helper $ts 1> $json 2> $err; $parserRc = $LASTEXITCODE
 $parserRc | Set-Content (Join-Path $LOG '<capture>.ts-check.rc')
 if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
 ```
