@@ -29,6 +29,8 @@ struct dt295 {
     uint16_t state;
     uint8_t has_session, has_ts_key, prepared, started, card_notified;
     uint8_t card_notified_state, pause_state, tuned, poisoned, cleanup_only;
+    uint64_t card_notification_generation, card_activation_generation;
+    uint8_t card_activation_valid;
 };
 
 static void seterr(char *e, size_t n, const char *s) {
@@ -215,6 +217,48 @@ static int rd(dt295 *d, uint32_t addr, uint8_t *out, size_t n) {
     }
     return 0;
 }
+static int ctl_until(dt295 *d, uint8_t rt, uint8_t req, uint16_t val, uint16_t idx,
+                     uint8_t *buf, size_t len, uint64_t deadline) {
+    const uint64_t now = now_ms(d);
+    if (now >= deadline)
+        return -1;
+    uint64_t remaining = deadline - now;
+    if (remaining > 1000U)
+        remaining = 1000U;
+    return ctl(d, rt, req, val, idx, buf, len, (unsigned)remaining);
+}
+static int rd_until(dt295 *d, uint32_t addr, uint8_t *out, size_t n, uint64_t deadline) {
+    if (addr > 0xffffff || n > 65536 || addr + n > 0x1000000)
+        return -1;
+    size_t pos = 0;
+    while (pos < n) {
+        size_t k = n - pos;
+        if (k > 64)
+            k = 64;
+        uint32_t a = addr + (uint32_t)pos;
+        if (ctl_until(d, 0xc0, 0xbc, (uint16_t)((a >> 16) << 8), (uint16_t)a,
+                      out + pos, k, deadline))
+            return -1;
+        pos += k;
+    }
+    return 0;
+}
+static int wr_until(dt295 *d, uint32_t addr, const uint8_t *p, size_t n, uint64_t deadline) {
+    if (addr > 0xffffff || n > 65536 || addr + n > 0x1000000)
+        return -1;
+    size_t pos = 0;
+    while (pos < n) {
+        size_t k = n - pos;
+        if (k > 64)
+            k = 64;
+        uint32_t a = addr + (uint32_t)pos;
+        if (ctl_until(d, 0x40, 0xbc, (uint16_t)((a >> 16) << 8), (uint16_t)a,
+                      (uint8_t *)p + pos, k, deadline))
+            return -1;
+        pos += k;
+    }
+    return 0;
+}
 static int wr(dt295 *d, uint32_t addr, const uint8_t *p, size_t n) {
     if (addr > 0xffffff || n > 65536 || addr + n > 0x1000000)
         return -1;
@@ -240,9 +284,22 @@ static int word(dt295 *d, uint32_t a, uint16_t *v) {
         d->state = *v;
     return 0;
 }
+static int word_until(dt295 *d, uint32_t a, uint16_t *v, uint64_t deadline) {
+    uint8_t b[2];
+    if (rd_until(d, a, b, 2, deadline))
+        return -1;
+    *v = (uint16_t)b[0] << 8 | b[1];
+    if (a == 0x82008)
+        d->state = *v;
+    return 0;
+}
 static int putword(dt295 *d, uint32_t a, uint16_t v) {
     uint8_t b[2] = {(uint8_t)(v >> 8), (uint8_t)v};
     return wr(d, a, b, 2);
+}
+static int putword_until(dt295 *d, uint32_t a, uint16_t v, uint64_t deadline) {
+    uint8_t b[2] = {(uint8_t)(v >> 8), (uint8_t)v};
+    return wr_until(d, a, b, 2, deadline);
 }
 static int field(dt295 *d, uint32_t a, unsigned sh, unsigned width, unsigned value) {
     if (sh > 15 || !width || width > 16 - sh || value >= (1u << width))
@@ -634,8 +691,35 @@ static int card_status(dt295 *d, unsigned *state) {
             d->card_notified_state = (uint8_t)s;
             if (putword(d, 0x90074, 0x200))
                 return -1;
+            ++d->card_notification_generation;
         } else {
             *state = s;
+            return 0;
+        }
+    }
+    return -1;
+}
+static int card_status_until(dt295 *d, unsigned *state, uint64_t deadline,
+                             uint8_t *fresh_notification) {
+    const uint64_t generation = d->card_notification_generation;
+    for (unsigned i = 0; i < 32; ++i) {
+        uint16_t pending;
+        if (word_until(d, 0x90074, &pending, deadline) || (pending & 0x400))
+            return -1;
+        uint8_t b[0x112];
+        const size_t n = (pending & 0x200) ? sizeof(b) : 2;
+        if (rd_until(d, 0x822ac, b, n, deadline))
+            return -1;
+        unsigned s = ((unsigned)b[0] << 8 | b[1]) >> 12;
+        if (pending & 0x200) {
+            if (putword_until(d, 0x90074, 0x200, deadline))
+                return -1;
+            d->card_notified = 1;
+            d->card_notified_state = (uint8_t)s;
+            ++d->card_notification_generation;
+        } else {
+            *state = s;
+            *fresh_notification = d->card_notification_generation > generation;
             return 0;
         }
     }
@@ -645,6 +729,7 @@ int dt295_card_initialize(dt295 *d, char *e, size_t en) {
     unsigned s;
     if (!d || d->cleanup_only || !d->has_session || drain_state(d) || d->state != 0x11)
         return fail(d, e, en, "card initialization requires authenticated idle state");
+    d->card_activation_valid = 0;
     if (command(d, 0x0a, 0, 1, 1, NULL) || card_status(d, &s))
         return fail(d, e, en, "card interface initialization failed");
     seterr(e, en, "");
@@ -654,11 +739,15 @@ int dt295_card_activate(dt295 *d, unsigned timeout, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->has_session || timeout < 1 || timeout > 5000 || drain_state(d) ||
         d->state != 0x11)
         return fail(d, e, en, "card activation requires authenticated idle state");
+    d->card_activation_valid = 0;
     unsigned s;
     if (card_status(d, &s))
         return fail(d, e, en, "card status unavailable");
-    if (s == 3)
+    if (s == 3) {
+        d->card_activation_generation = d->card_notification_generation;
+        d->card_activation_valid = 1;
         return 0;
+    }
     int initial_zero = (s == 0 && !d->card_notified);
     if (s != 1 && !initial_zero)
         return fail(d, e, en, "card is not ready for activation");
@@ -671,6 +760,8 @@ int dt295_card_activate(dt295 *d, unsigned timeout, char *e, size_t en) {
         if (card_status(d, &s))
             return fail(d, e, en, "card status unavailable");
         if (s == 3) {
+            d->card_activation_generation = d->card_notification_generation;
+            d->card_activation_valid = 1;
             seterr(e, en, "");
             return 0;
         }
@@ -681,6 +772,30 @@ int dt295_card_activate(dt295 *d, unsigned timeout, char *e, size_t en) {
         sleep_ms(d, 10);
     } while (1);
     return fail(d, e, en, "card activation timed out");
+}
+
+int dt295_card_observe(dt295 *d, dt295_card_snapshot *snapshot) {
+    if (!d || !snapshot || d->cleanup_only || !d->has_session || d->poisoned)
+        return -1;
+    const uint64_t deadline = now_ms(d) + 1000U;
+    unsigned state = 0;
+    uint8_t fresh_notification = 0;
+    if (card_status_until(d, &state, deadline, &fresh_notification))
+        return -1;
+    *snapshot = (dt295_card_snapshot){
+        state,
+        d->card_notification_generation,
+        d->card_activation_generation,
+        d->card_activation_valid,
+        fresh_notification,
+    };
+    return 0;
+}
+void dt295_card_invalidate_observation(dt295 *d) {
+    if (!d)
+        return;
+    d->card_activation_valid = 0;
+    d->card_activation_generation = 0;
 }
 
 static int demod_write(dt295 *d, uint8_t r, uint8_t v) {

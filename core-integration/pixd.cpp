@@ -33,6 +33,11 @@ using namespace px4::userland;
 using namespace dtv::userland::host_listener_context;
 using namespace dtv::userland::host_runtime;
 
+#if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
+extern "C" int dt295_actual_fixture_open(const char*);
+extern "C" void dt295_actual_fixture_configure_presence(unsigned, int);
+#endif
+
 struct Arguments final {
     std::string device;
     std::string instance;
@@ -279,6 +284,22 @@ int run(int argc, char** argv)
     if (!parse(argc, argv, arguments, help)) { usage(stderr); return 2; }
     if (help) { usage(stdout); return 0; }
 
+#if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
+    const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
+                            arguments.device == "serial:PIXDT29501";
+    if (fake_dt295) {
+        std::string bundle = arguments.assets;
+        if (!bundle.empty() && bundle.back() != '/') bundle.push_back('/');
+        bundle += "dt295.assets";
+        if (dt295_actual_fixture_open(bundle.c_str()) != 0) return 70;
+        const char* raw_value = std::getenv("PIX_TEST_DT295_RAW");
+        const unsigned raw_state = raw_value == nullptr ? 3U :
+            static_cast<unsigned>(std::strtoul(raw_value, nullptr, 10));
+        const int notification = std::getenv("PIX_TEST_DT295_NOTIFICATION") != nullptr;
+        dt295_actual_fixture_configure_presence(raw_state, notification);
+    }
+#endif
+
     const auto located = pix::runtime::locate(arguments.device);
     if (!located) {
         std::fprintf(stderr, "PIX_STAGE locate error=%u\n", static_cast<unsigned>(located.error()));
@@ -290,6 +311,16 @@ int run(int argc, char** argv)
         return fail(family_result.error());
     }
     std::unique_ptr<EnclosureFamily> family(std::move(family_result.value()));
+#if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
+    if (fake_dt295) {
+        const auto opened = family->tuner_backend().open_receiver(0U);
+        if (!opened) {
+            std::fprintf(stderr, "PIX_TEST_DT295 open failed=%u\n",
+                         static_cast<unsigned>(opened.error()));
+            return 70;
+        }
+    }
+#endif
 
     const auto parsed_selector = dtv::userland::identity::parse_device_selector(arguments.device);
     if (!parsed_selector) return fail(parsed_selector.error());

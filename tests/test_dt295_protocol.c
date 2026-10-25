@@ -18,6 +18,7 @@ typedef struct {
     unsigned key_requests, i2c_commands, key_words, acquire_commands;
     unsigned auth_requests, init_commands, shutdown_commands, start_commands;
     unsigned renewal_challenges, renewal_applies;
+    unsigned status_notifications, status_acks, status_reads, control_delay_ms;
     uint32_t fail_secure_id;
     int pause_pending, fail_state_read_once, inject_post_auth_fault;
 } fake;
@@ -153,22 +154,38 @@ static void respond(fake *f, uint32_t id) {
 
 static int control(void *u, uint8_t rt, uint8_t req, uint16_t value, uint16_t index, uint8_t *data,
                    size_t n, unsigned timeout, size_t *actual) {
-    (void)timeout;
     fake *f = u;
+    if (f->control_delay_ms != 0U) {
+        const unsigned elapsed = f->control_delay_ms < timeout ? f->control_delay_ms : timeout;
+        f->now += elapsed;
+        if (elapsed < f->control_delay_ms) {
+            *actual = 0U;
+            return -1;
+        }
+    }
     *actual = n;
     if (req == 0xbc) {
         uint32_t addr = (uint32_t)(value >> 8) << 16 | index;
         if (addr + n > MEMSIZE)
             return -1;
+        if ((rt & 0x80) && addr == 0x90074 && n == 2)
+            ++f->status_reads;
         if ((rt & 0x80) && addr == 0x82008 && f->fail_state_read_once) {
             f->fail_state_read_once = 0;
             return -1;
         }
-        if (rt & 0x80)
+        if ((rt & 0x80) && addr == 0x90074 && n == 2 && f->status_notifications != 0U)
+            wr16(data, 0x200);
+        else if (rt & 0x80)
             memcpy(data, f->mem + addr, n);
-        else if (addr == 0x90074 && n == 2)
+        else if (addr == 0x90074 && n == 2) {
+            if (rd16(data) == 0x200) {
+                ++f->status_acks;
+                if (f->status_notifications != 0U)
+                    --f->status_notifications;
+            }
             wr16(f->mem + addr, (uint16_t)(rd16(f->mem + addr) & ~rd16(data)));
-        else
+        } else
             memcpy(f->mem + addr, data, n);
         return 0;
     }
@@ -413,6 +430,35 @@ int main(void) {
     assert(dt295_has_session(d));
     assert(dt295_card_initialize(d, error, sizeof(error)) == 0);
     assert(dt295_card_activate(d, 2000, error, sizeof(error)) == 0);
+    dt295_card_snapshot card_snapshot = {0};
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    assert(card_snapshot.raw_state == 3 && card_snapshot.activation_valid);
+    assert(card_snapshot.notification_generation == card_snapshot.activation_generation);
+    wr16(f.mem + 0x822ac, 0);
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    assert(card_snapshot.raw_state == 0 && !card_snapshot.fresh_notification);
+    assert(card_snapshot.notification_generation == card_snapshot.activation_generation);
+    f.status_notifications = 1;
+    assert(dt295_card_observe(d, &card_snapshot) == 0);
+    assert(card_snapshot.raw_state == 0 && card_snapshot.fresh_notification);
+    assert(card_snapshot.notification_generation > card_snapshot.activation_generation);
+    assert(f.status_acks == 1U && f.status_notifications == 0U);
+    wr16(f.mem + 0x90074, 0x400);
+    const unsigned acks_before_response = f.status_acks;
+    assert(dt295_card_observe(d, &card_snapshot) != 0);
+    assert(rd16(f.mem + 0x90074) == 0x400 && f.status_acks == acks_before_response);
+    wr16(f.mem + 0x90074, 0);
+    wr16(f.mem + 0x822ac, 0x3000);
+    f.status_notifications = 32U;
+    f.control_delay_ms = 100U;
+    const uint64_t observation_started = f.now;
+    assert(dt295_card_observe(d, &card_snapshot) != 0);
+    assert(f.now - observation_started <= 1000U);
+    assert(f.status_notifications != 0U);
+    f.control_delay_ms = 0U;
+    f.status_notifications = 0U;
+    wr16(f.mem + 0x90074, 0);
+    wr16(f.mem + 0x822ac, 0x3000);
     if (dt295_tune_terrestrial(d, 27, error, sizeof(error)) != 0) {
         fprintf(stderr, "tune: %s (%u I2C commands pending=%04x)\n", error, f.i2c_commands,
                 rd16(f.mem + 0x90074));

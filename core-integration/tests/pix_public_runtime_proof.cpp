@@ -145,6 +145,33 @@ int run_status(const std::string& runtime_dir, std::string& output,
     return WEXITSTATUS(status);
 }
 
+int run_card_status(const std::string& runtime_dir, std::string& output)
+{
+    int output_pipe[2];
+    if (::pipe(output_pipe) != 0) return -1;
+    const pid_t pid = ::fork();
+    if (pid == 0) {
+        (void)::close(output_pipe[0]);
+        if (::dup2(output_pipe[1], STDOUT_FILENO) < 0) _exit(127);
+        if (::dup2(output_pipe[1], STDERR_FILENO) < 0) _exit(127);
+        (void)::close(output_pipe[1]);
+        const char* argv[] = {PIXCTL_PATH, "--runtime-dir", runtime_dir.c_str(),
+                              "--device", "serial:PIXDT29501", "--group",
+                              "card-status", nullptr};
+        ::execv(PIXCTL_PATH, const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    (void)::close(output_pipe[1]);
+    std::array<char, 4096U> buffer{};
+    ssize_t count = 0;
+    while ((count = ::read(output_pipe[0], buffer.data(), buffer.size())) > 0)
+        output.append(buffer.data(), static_cast<std::size_t>(count));
+    (void)::close(output_pipe[0]);
+    int status = 0;
+    if (pid < 0 || ::waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status);
+}
+
 bool check_status(std::string_view json, const char* receiver_state, bool leased,
                   const char* tune_revision)
 {
@@ -424,6 +451,38 @@ int main()
     if (daemon_log.find("PIX_CLEANUP shutdown=1") == std::string::npos ||
         daemon_log.find("PIX_CLEANUP release-interface=1") == std::string::npos ||
         daemon_log.find("PIX_CLEANUP close-handle=1") == std::string::npos) return 12;
+
+    (void)::setenv("PIX_TEST_DT295_FAKE", "1", 1);
+    const std::array<std::pair<const char*, const char*>, 3U> card_cases{{
+        {"3", "present=yes"}, {"0", "present=no"}, {"1", "present=unknown"}}};
+    for (std::size_t index = 0U; index < card_cases.size(); ++index) {
+        (void)::setenv("PIX_TEST_DT295_RAW", card_cases[index].first, 1);
+        if (index == 1U) (void)::setenv("PIX_TEST_DT295_NOTIFICATION", "1", 1);
+        else (void)::unsetenv("PIX_TEST_DT295_NOTIFICATION");
+        const std::string log = root + "/dt295-card-" + std::to_string(index) + ".log";
+        const pid_t card_daemon = launch(PIXD_PATH,
+            {"--device", "serial:PIXDT29501", "--assets", assets,
+             "--runtime-dir", root, "--group"}, log);
+        if (card_daemon <= 0 || !wait_ready(log, card_daemon)) return 36;
+        std::string card_output;
+        if (run_card_status(root, card_output) != 0 ||
+            card_output.find(card_cases[index].second) == std::string::npos) {
+            std::fprintf(stderr, "PROOF DT295 card-status expected=%s got=%s",
+                         card_cases[index].second, card_output.c_str());
+            (void)::kill(card_daemon, SIGTERM);
+            (void)::waitpid(card_daemon, nullptr, 0);
+            return 37;
+        }
+        (void)::kill(card_daemon, SIGTERM);
+        int card_daemon_status = 0;
+        if (::waitpid(card_daemon, &card_daemon_status, 0) != card_daemon ||
+            !WIFEXITED(card_daemon_status) || WEXITSTATUS(card_daemon_status) != 0) return 38;
+        std::fprintf(stderr, "PROOF DT295 card-status %s via existing pixctl path\n",
+                     card_cases[index].second);
+    }
+    (void)::unsetenv("PIX_TEST_DT295_FAKE");
+    (void)::unsetenv("PIX_TEST_DT295_RAW");
+    (void)::unsetenv("PIX_TEST_DT295_NOTIFICATION");
 
     const auto expected = read_file(expected_path);
     const auto actual = read_file(output_path);

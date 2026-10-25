@@ -187,24 +187,31 @@ target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exce
 target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
 
 add_executable(pixd_fixture pixd.cpp
-    tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
+    tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
 target_include_directories(pixd_fixture PRIVATE
     tests "${PIX_SOURCE_DIR}/tests" "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_compile_definitions(pixd_fixture PRIVATE
     _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL
+    PIX_TEST_DT295_FIXTURE
     PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
     PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50)
 if(NOT WIN32)
     target_compile_definitions(pixd_fixture PRIVATE PIX_TEST_CALLBACK_GATE)
 endif()
 target_compile_features(pixd_fixture PRIVATE cxx_std_17)
+target_compile_options(pixd_fixture PRIVATE "$<$<COMPILE_LANGUAGE:C>:-UNDEBUG>")
 target_link_libraries(pixd_fixture PRIVATE pix_product_runtime dtv::json)
 target_link_options(pixd_fixture PRIVATE
     -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
     -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
     -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
     -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
-    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close)
+    -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer -Wl,--wrap=random_bytes)
 if(WIN32)
     target_link_options(pixd_fixture PRIVATE -Wl,--wrap=CreateThread)
     add_executable(pix_windows_os_thread_proof tests/windows_os_thread_proof.c)
