@@ -1,5 +1,7 @@
 # Releases
 
+現行3コマンド配布の候補回帰手順は [`release-validation.md`](release-validation.md) を参照してください。以下の履歴的検証記録と候補ごとの達成状況を、将来候補の合格として扱わないでください。
+
 ## 3コマンド配布への移行（pixd / pixctl / pix-ts）
 
 配布する公開コマンドは `pixd`、`pixctl`、`pix-ts` の3つです。`core-integration/` の CMake が、固定した dtv-userland-core（`core-integration/dtv-userland-core.revision`）のソースから各製品として再ビルド・静的リンクします。従来の standalone C CLI は `make` で `pix-ts-legacy` として生成する内部診断・テスト用で、配布しません（同名の旧 `pix-ts` を誤って配布しないための分離です）。以下の v0.1.4 以前の記述は、従来 standalone CLI を配布していた Release の記録です。
