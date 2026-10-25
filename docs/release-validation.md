@@ -45,7 +45,9 @@ PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機�
 
 | ID | OS / ABI | 依存 / driver / permission | firmware / 補助data | RF試験入力（system / channel） | 製品CLIからの内蔵CARD操作 | native PC/SC/WinSCard adapter | 配布artifact / 手順 |
 |---|---|---|---|---|---|---|---|
+| E02 | Linux / x86_64 / musl | libusb: 静的1.0.30; USB access: native musl runtimeの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
 | E03 | Linux / x86_64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-x86_64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
+| E15-G | Linux / aarch64 / glibc | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
 | E15-M | Linux / aarch64 / musl | libusb: 静的1.0.30; USB access: native OSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Linux PC/SC: なし | artifact: `linux-aarch64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
 | E04 | macOS / arm64 / Apple system runtime | libusb: 静的1.0.30; USB access: macOSの許可済み経路 | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | macOS PC/SC: なし | artifact: `darwin-arm64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
 | E05 | Android (Termux) / aarch64 / Android NDK ABI | libusb: 静的1.0.30; USB access: Termux USB permission; handoff: platform procedure | firmware: なし; 補助data: DT181/DT295の機種固有model data | system: DT181-PU0は対応T/BS/CS、DT295はISDB-T/ISDB-S; channel: 現地channel plan（DT295例 T27/BS1） | 内部CARD statusのみ; model依存 | Android: なし | artifact: `android-aarch64`; procedure: [archive別手順](#3-配布アーカイブ別手順) |
@@ -56,6 +58,76 @@ PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機�
 archive対象と試験前提を記す表であり、実装状態・候補の有無・特定版の実施結果は版別文書へ記録する。PIXの内部CARD操作はstatus照会に限り、native PC/SC/WinSCard adapterとは別の列で扱う。DT295は製品対象として各OS/ABIの試験に含める。assetsのarchiveへの埋込状態はここで判定しない。
 
 ## 共通試験シナリオ T00–T14
+
+### run別candidateの取得と作業directory
+
+この手順書commitとcandidate source SHAは一致不要。候補は既存`release.yml` runのtarget artifactから取得し、runのhead SHA、attempt、結論、artifact ID/name/expiryと各jobの結論を確認する。`release` jobが成功して公開済みのrunは候補取得に使わない。新規workflow dispatchや正式Releaseは実行しない。候補jobがない/expiredなら未実施で止める。
+
+```sh
+set -eu
+gh run list --repo Khronos31/pix-userland --workflow release.yml --limit 20
+RUN_ID='<successful-candidate-run-id>'; TARGET='<linux-x86_64|linux-aarch64|darwin-arm64|android-aarch64|android-armv7a|android-x86_64|windows-x64>'
+RUN_JSON=$(gh run view "$RUN_ID" --repo Khronos31/pix-userland --json headSha,attempt,conclusion)
+SOURCE_SHA=$(printf '%s\n' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headSha"])')
+printf '%s\n' "$RUN_JSON" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conclusion"] == "success" and r["headSha"] and r["attempt"] > 0'
+test -n "$SOURCE_SHA"
+gh run view "$RUN_ID" --repo Khronos31/pix-userland --json jobs --jq '.jobs[] | [.name,.conclusion] | @tsv'
+RELEASE_JOB=$(gh run view "$RUN_ID" --repo Khronos31/pix-userland --json jobs --jq '.jobs[] | select(.name == "release") | .conclusion')
+test "$RELEASE_JOB" != success
+gh api "repos/Khronos31/pix-userland/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | [.id,.name,.expired] | @tsv'
+WORK=$(mktemp -d "${TMPDIR:-$HOME}/pix-run-${RUN_ID}.XXXXXX"); chmod 700 "$WORK"
+ARTIFACT_ID=$(gh api "repos/Khronos31/pix-userland/actions/runs/$RUN_ID/artifacts" --jq ".artifacts[] | select(.name == \"$TARGET\" and .expired == false) | .id")
+test -n "$ARTIFACT_ID"; DIGEST=$(gh api "repos/Khronos31/pix-userland/actions/runs/$RUN_ID/artifacts" --jq ".artifacts[] | select(.id == $ARTIFACT_ID) | .digest"); EXPECTED=${DIGEST#sha256:}
+gh api "repos/Khronos31/pix-userland/actions/artifacts/$ARTIFACT_ID/zip" > "$WORK/artifact.zip"
+if command -v sha256sum >/dev/null; then ACTUAL=$(sha256sum "$WORK/artifact.zip" | awk '{print $1}'); else ACTUAL=$(shasum -a 256 "$WORK/artifact.zip" | awk '{print $1}'); fi
+test "$ACTUAL" = "$EXPECTED"; mkdir "$WORK/download"; unzip -q "$WORK/artifact.zip" -d "$WORK/download"
+ARCHIVE=$(find "$WORK/download" -maxdepth 1 -type f -name 'pix-userland-*.tar.gz' -print -quit)
+test -n "$ARCHIVE"; if command -v sha256sum >/dev/null; then sha256sum "$ARCHIVE"; else shasum -a 256 "$ARCHIVE"; fi
+mkdir "$WORK/candidate"; tar -xzf "$ARCHIVE" -C "$WORK/candidate"
+D=$(find "$WORK/candidate" -mindepth 1 -maxdepth 1 -type d -name 'pix-userland-*' -print -quit)
+test -n "$D"; LOG="$WORK/log"; RT="$WORK/runtime"; mkdir -m 700 "$LOG" "$RT"; cd "$D"; export PATH="$D:$PATH"
+python3 -c 'import json,sys; m=json.load(open("release-info.json")); print(json.dumps(m,sort_keys=True)); assert m.get("commit") == sys.argv[1]' "$SOURCE_SHA"
+```
+
+Windows uses a new empty `$D`, `Expand-Archive`, and `Get-FileHash -Algorithm SHA256`. The target artifact digest from GitHub is checked before extraction; record the inner archive SHA-256 and `release-info.json.commit` as separate provenance evidence. This workflow artifact does not provide an inner `SHA256SUMS`. Termux uses `$PREFIX/tmp` or `$HOME`, not OS `/tmp`; install/check `gh`, Python 3.11+, `tar`, `unzip`, `coreutils` using `pkg install gh python tar unzip coreutils` only after host approval. `termux-usb -l` output is recorded, and `termux-usb -r <path>` is limited to a path identified as the target tuner. Linux access is observed with `id`, `stat`, and `lsusb -t`; permissions/udev changes require separate approval, saved original state, and restoration. Do not change HAOS/Supervisor settings.
+
+Windows PowerShellの実行例:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$RunId = '<successful-candidate-run-id>'; $Target = 'windows-x64'
+$Work = Join-Path $HOME "pix-run-$RunId"; $Download = Join-Path $Work 'download'; $D = Join-Path $Work 'candidate'
+if (Test-Path $Work) { throw "refusing to reuse $Work" }
+New-Item -ItemType Directory -Path $Download,$D,(Join-Path $Work 'log'),(Join-Path $Work 'runtime') | Out-Null
+$run = gh run view $RunId --repo Khronos31/pix-userland --json headSha,attempt,conclusion | ConvertFrom-Json
+if ($run.conclusion -ne 'success') { throw 'candidate run is not successful' }
+$CandidateSourceSha = $run.headSha
+gh run view $RunId --repo Khronos31/pix-userland --json jobs --jq '.jobs[] | [.name,.conclusion] | @tsv'
+$releaseJob = gh run view $RunId --repo Khronos31/pix-userland --json jobs --jq '.jobs[] | select(.name == "release") | .conclusion'
+if ($releaseJob -eq 'success') { throw 'published Release run cannot be used as a candidate' }
+gh api "repos/Khronos31/pix-userland/actions/runs/$RunId/artifacts" --jq '.artifacts[] | [.id,.name,.expired] | @tsv'
+$artifact = (gh api "repos/Khronos31/pix-userland/actions/runs/$RunId/artifacts" --jq ".artifacts[] | select(.name == \"$Target\" and .expired == false) | [.id,.digest] | @tsv") -split "`t"
+if (-not $artifact[0]) { throw 'candidate artifact missing or expired' }
+$ArtifactZip = Join-Path $Download 'artifact.zip'
+$token = gh auth token
+try {
+  $headers = @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json' }
+  Invoke-WebRequest -Uri "https://api.github.com/repos/Khronos31/pix-userland/actions/artifacts/$($artifact[0])/zip" -Headers $headers -OutFile $ArtifactZip
+} finally { Remove-Variable token,headers -ErrorAction SilentlyContinue }
+$expected = $artifact[1] -replace '^sha256:', ''; $actual = (Get-FileHash -Algorithm SHA256 $ArtifactZip).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw 'GitHub candidate artifact digest mismatch' }
+Expand-Archive -LiteralPath $ArtifactZip -DestinationPath $Download
+$ARCHIVE = Get-ChildItem $Download -Filter 'pix-userland-*.tar.gz' | Select-Object -First 1
+if (-not $ARCHIVE) { throw 'candidate archive missing' }
+Get-FileHash -Algorithm SHA256 $ARCHIVE.FullName
+tar -xzf $ARCHIVE.FullName -C $D
+if ($LASTEXITCODE -ne 0) { throw 'candidate archive extraction failed' }
+$D = Get-ChildItem $D -Directory | Select-Object -First 1
+if (-not $D) { throw 'candidate payload directory missing' }; $D = $D.FullName
+$info = Get-Content (Join-Path $D 'release-info.json') -Raw | ConvertFrom-Json
+if ($info.commit -ne $CandidateSourceSha) { throw 'candidate source commit mismatch' }
+$LOG = Join-Path $Work 'log'; $RT = Join-Path $Work 'runtime'; Set-Location $D
+```
 
 各IDを同じ順序・同じ6項目で実施する。$RT/$LOG/$BUS-PORT/$CHANNEL_PLANはrunごとの実値に置換し、空のcandidate専用runtime/logを使う。物理操作を依頼する各回は既定通知を行い、最大5分で応答がなければ未完了として停止する。OS/API固有の長い操作は同じT-IDから後続recipeを参照する。
 
@@ -143,11 +215,21 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 ### T09 TS・counter・終了値判定
 
 - **適用対象/頻度:** 全capture/soak。
-- **準備:** TS parser/SPEC条件とdaemon counterを確認できるようにする。
-- **実操作/利用者への依頼:** 独立TS parserとpixd packet/byte/USB counterを対応付け、通常取得exit 0と既定TS基準を確認。
+- **準備:** Python 3.11以上を`python3 --version`で確認し、手順書checkoutの[`ts-check.py`](release-validation/ts-check.py)を使う。候補ごとに新規作成した`$LOG`を使う。
+- **実操作/利用者への依頼:** POSIXでは各TSに`python3 <runbook-checkout>/docs/release-validation/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`py -3 <runbook-checkout>\docs\release-validation\ts-check.py "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
 - **期待値/終了値:** 全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
 - **停止/cleanup:** 元TS/hash/logを残してT08 cleanup。
-- **記録:** parser/version、TS hash、sync/TEI/continuity/drop/counter、exit。
+- **記録:** Python version、helperのGit SHA、TS hash、helperのJSON/終了値、sync/TEI/continuity/drop/counter、client exit。
+
+Windows PowerShellでの固定helper呼出し:
+
+```powershell
+$helper = '<runbook-checkout>\docs\release-validation\ts-check.py'; $ts = Join-Path $LOG '<capture>.ts'
+$json = Join-Path $LOG '<capture>.ts-check.json'; $err = Join-Path $LOG '<capture>.ts-check.err'
+& py -3 $helper $ts 1> $json 2> $err; $parserRc = $LASTEXITCODE
+$parserRc | Set-Content (Join-Path $LOG '<capture>.ts-check.rc')
+if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
+```
 
 ### T10 native PC/SC・WinSCard
 
@@ -203,7 +285,9 @@ N/Aは製品機能上該当しない項目だけに使う。OS/ABI候補のunsup
 | archive / E-ID / 実行環境 | T00–T14の手順リンク |
 |---|---|
 | `linux-x86_64` / [E03](#3-配布アーカイブ別手順) / Linux x86_64/glibc | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `linux-aarch64` / [E15-M](#3-配布アーカイブ別手順) / Linux aarch64/musl | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
+| `linux-x86_64` / [E02](#3-配布アーカイブ別手順) / Linux x86_64/musl | 上と同じT00–T14。glibc結果で代替せず、同じ`linux-x86_64` archiveをmusl runtime/access environmentで独立実行する。 |
+| `linux-aarch64` / [E15-G](#3-配布アーカイブ別手順) / Linux aarch64/glibc | 上と同じT00–T14。musl結果で代替せず、同じ`linux-aarch64` archiveをglibc runtime/access environmentで独立実行する。 |
+| `linux-aarch64` / [E15-M](#3-配布アーカイブ別手順) / Linux aarch64/musl | 上と同じT00–T14。glibc結果で代替せず、同じ`linux-aarch64` archiveをmusl runtime/access environmentで独立実行する。 |
 | `darwin-arm64` / [E04](#3-配布アーカイブ別手順) / macOS arm64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
 | `android-aarch64` / [E05](#android-termux-の実行) / Android Termux/aarch64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
 | `android-armv7a` / [E06](#android-termux-の実行) / Android Termux/armv7a | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
@@ -280,28 +364,34 @@ PIX内部カードは以下の `card-status` による挿入状態だけを確�
 
 ### Windows 11 x86_64の実行
 
-Windowsでの候補は`windows-x64` ZIPで、事前に対象tunerの既存WinUSB bindingをread-onlyで記録する。driver install/changeはこの手順で行わない。PowerShellでZIP hashと同梱manifestを照合し、新しい展開先を作る。
+Windowsの候補は既存runの`windows-x64` artifact内にある`windows-x64` tar.gzである。公開済みReleaseを使わず、候補runの`release` jobが未実行/skipであることを確認する。事前に対象tunerの既存WinUSB bindingをread-onlyで記録し、driver install/changeは行わない。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$ZIP = 'C:\path\to\pix-userland-<version>-windows-x64.zip'
-$D = 'C:\pix-e17-<run-id>'
-if (Test-Path $D) { throw "refusing to reuse existing path: $D" }
-Get-FileHash -Algorithm SHA256 $ZIP
-New-Item -ItemType Directory -Path $D | Out-Null
-Expand-Archive -Path $ZIP -DestinationPath $D
+$Work = Join-Path $HOME 'pix-e17-<run-id>'; $Download = Join-Path $Work 'download'; $Extract = Join-Path $Work 'extract'
+if (Test-Path $Work) { throw "refusing to reuse existing path: $Work" }
+New-Item -ItemType Directory -Path $Download,$Extract,(Join-Path $Work 'runtime'),(Join-Path $Work 'logs') | Out-Null
+$RunId = '<successful-candidate-run-id>'
+gh run view $RunId --repo Khronos31/pix-userland --json headSha,attempt,conclusion
+gh run view $RunId --repo Khronos31/pix-userland --json jobs --jq '.jobs[] | [.name,.conclusion] | @tsv'
+gh api "repos/Khronos31/pix-userland/actions/runs/$RunId/artifacts" --jq '.artifacts[] | [.id,.name,.expired] | @tsv'
+gh run download $RunId --repo Khronos31/pix-userland --name windows-x64 --dir $Download
+$Archive = Get-ChildItem $Download -Filter 'pix-userland-*-windows-x64.tar.gz' | Select-Object -First 1
+if (-not $Archive) { throw 'candidate archive missing' }
+Get-FileHash -Algorithm SHA256 $Archive.FullName
+tar -xzf $Archive.FullName -C $Extract
+if ($LASTEXITCODE -ne 0) { throw 'candidate extraction failed' }
+$D = Get-ChildItem $Extract -Directory | Select-Object -First 1
+if (-not $D) { throw 'candidate payload directory missing' }; $D = $D.FullName
 Set-Location $D
 Get-FileHash -Algorithm SHA256 .\pixd.exe, .\pixctl.exe, .\pix-ts.exe
-Get-Content .\manifest.json -Raw | ConvertFrom-Json
+$releaseInfo = Get-Content .\release-info.json -Raw | ConvertFrom-Json
 & .\pixd.exe --models
 & .\pixd.exe --list-json
 $os = Get-CimInstance Win32_OperatingSystem
 $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
 [pscustomobject]@{ Caption=$os.Caption; Version=$os.Version; Build=$os.BuildNumber; OSArchitecture=$os.OSArchitecture; ProcessorArchitecture=$cpu.Architecture }
-$RT = Join-Path $D 'runtime'
-New-Item -ItemType Directory -Path $RT | Out-Null
-$LOG = Join-Path $D 'logs'
-New-Item -ItemType Directory -Path $LOG | Out-Null
+$RT = Join-Path $Work 'runtime'; $LOG = Join-Path $Work 'logs'
 $selector = 'usb:BUS-PORT'
 ```
 
@@ -475,7 +565,8 @@ OBSERVATION_LIMIT_SECONDS=<finite-cut-observation-window>
 抜去完了の応答を受けた時点で観測窓を開始します。窓内に自然終了しなければtimeout/failを記録し、`SIGINT`でclientを通常停止します。どちらの場合も`wait`で実終了値を保存し、exit 0は切断合格にしません。
 
 ```sh
-read -r -p 'USB抜去完了後にEnter: ' _
+printf '%s' 'USB抜去完了後にEnter: '
+IFS= read -r _
 sleep "$OBSERVATION_LIMIT_SECONDS"
 if kill -0 "$C" 2>/dev/null; then
   printf '%s\n' timeout > "$LOG/cut-observation.txt"
