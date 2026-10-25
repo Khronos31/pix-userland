@@ -61,6 +61,15 @@ ReceiverAdapter::ReceiverAdapter(const char* assets_directory, const usb_selecto
     initialize(assets_directory, selector);
 }
 
+ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
+                                 const usb_selector& selector, Clock& clock,
+                                 ReceiverId receiver, std::size_t queue_packets) noexcept
+    : clock_(clock), receiver_(receiver), queue_packets_(queue_packets)
+{
+    io_.owner = this;
+    initialize(assets, assets_size, selector);
+}
+
 ReceiverAdapter::~ReceiverAdapter() noexcept
 {
     (void)shutdown();
@@ -76,6 +85,22 @@ void ReceiverAdapter::initialize(const char* assets_directory,
     path += "dt295.assets";
     char error[256]{};
     if (dt295_assets_load(path.c_str(), &assets_, error, sizeof(error)) != 0) return;
+    initialize_device(selector);
+}
+
+void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_size,
+                                 const usb_selector& selector) noexcept
+{
+    init_error_ = Error::INVALID_ARGUMENT;
+    char error[256]{};
+    if (dt295_assets_load_bytes(assets, assets_size, &assets_, error, sizeof(error)) != 0)
+        return;
+    initialize_device(selector);
+}
+
+void ReceiverAdapter::initialize_device(const usb_selector& selector) noexcept
+{
+    char error[256]{};
     if (usb_open_model(&usb_, &selector, -1, 0, USB_MODEL_DT295) != 0) return;
     const dt295_io io{&io_,
                       &ReceiverAdapter::control,

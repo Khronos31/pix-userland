@@ -35,6 +35,9 @@ public:
 
     ReceiverAdapter(const char* assets_directory, const usb_selector&, Clock&,
                     ReceiverId, std::size_t queue_packets) noexcept;
+    ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
+                    const usb_selector&, Clock&, ReceiverId,
+                    std::size_t queue_packets) noexcept;
     ~ReceiverAdapter() noexcept override;
     ReceiverAdapter(const ReceiverAdapter&) = delete;
     ReceiverAdapter& operator=(const ReceiverAdapter&) = delete;
@@ -92,6 +95,9 @@ private:
 
     bool matches(ReceiverId) const noexcept;
     void initialize(const char* assets_directory, const usb_selector&) noexcept;
+    void initialize(const std::uint8_t* assets, std::size_t assets_size,
+                    const usb_selector&) noexcept;
+    void initialize_device(const usb_selector&) noexcept;
     Result halt_unlocked() noexcept;
     Result start_stream_unlocked() noexcept;
     Result stop_receiver_unlocked() noexcept;
