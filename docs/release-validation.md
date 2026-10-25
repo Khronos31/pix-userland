@@ -380,13 +380,14 @@ $LASTEXITCODE | Out-File (Join-Path $LOG 't06-reinserted.rc')
 T07ではidle runとstream runを分ける。物理抜去直前にstatusでidle/streamingを確定し、利用者へ依頼して最大5分待つ。stream clientは別PowerShellで前景実行し、選択した観測窓内の自然終了値とstderrの`stream-end`/`packets-written`を保存する。自然終了exit 7が切断、exit 0はtime満了であり、観測窓を超えて動作中ならclient consoleでCtrl+Cを入力し、timeout未達として終了値を記録する。daemonを通常終了してUSBを戻した後、再列挙したpathで新しいruntime/daemonを作りstatus/listと短いT27受信を行う。終了後は全client/daemonを個別にwaitし、process/runtime/socketを記録する。T00–T14の頻度・期待値・cleanup・証拠項目は各T見出しのまま適用する。
 
 ```powershell
-$CAPTURE_SECONDS = 3600
-$OBSERVATION_LIMIT_SECONDS = <finite-observation-window-seconds>
-& .\pix-ts.exe --device $selector --instance rc --channel T27 --system isdb-t --time $CAPTURE_SECONDS --output (Join-Path $LOG 'usb-cut.ts') --runtime-dir $RT --group
-$LASTEXITCODE
+$CAPTURE_SECONDS = '<finite-capture-duration-seconds-from-release-matrix>'
+$OBSERVATION_LIMIT_SECONDS = '<finite-cut-observation-window-seconds>'
+$client = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time',$CAPTURE_SECONDS,'--output',(Join-Path $LOG 'usb-cut.ts'),'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $LOG 'usb-cut.out') -RedirectStandardError (Join-Path $LOG 'usb-cut.err')
+if (-not $client.WaitForExit([int]$OBSERVATION_LIMIT_SECONDS * 1000)) { 'timeout: capture still active at observation limit' | Out-File (Join-Path $LOG 'usb-cut-observation.txt'); $client.WaitForExit() }
+$client.Refresh(); $client.ExitCode | Out-File (Join-Path $LOG 'usb-cut.rc')
 ```
 
-受信を別PowerShellで前景実行し、streaming中にstatusを確認してから利用者へ抜去を依頼する。選択した観測窓が満了してもclientが動作中なら、そのconsoleでCtrl+Cを入力し実終了値を記録する。観測窓内に自然終了したexit 7だけを切断結果として評価し、exit 0やtimeoutをpassにしない。
+受信を別PowerShellで起動し、streaming中にstatusを確認してから利用者へ抜去を依頼する。観測窓が満了してもclientが動作中ならtimeout/failを記録し、有限`--time`の終了まで待って実終了値を保存する。観測窓内に自然終了したexit 7だけを切断結果として評価し、exit 0やtimeoutをpassにしない。
 
 T08ではclient終了後にdaemon consoleでCtrl+Cを入力し、daemonの終了値、process一覧、runtime内socketを保存する。daemon終了後は同じgroup modeのstatusを再実行し、endpoint不在の戻り値を確認する。T09では`Get-Command tsanalyze`と`tsanalyze --version`を保存して各TSに実行し、188-byte同期、TEI、continuityを製品SPEC基準で判定する。utilityがない場合は環境不能/未実施でありpassにしない。T10とT11は製品機能外として理由付きN/Aを記録する。T12は異なるUSB portで別consoleのdaemon A/Bとclient A/Bを起動し、A切断時のclient exit 7とBの継続・exit 0を個別記録する。T13は同じcaptureを頻度表にある各OS/ABIの指定時間で実行し、開始・5秒ごと・終了時のTS/counter/RSS/process handle countを保存する。Windowsのhandle countはPOSIX FD数と同一視せず、FD欄は取得不能として明示する。T14は全T-IDの候補/host/model/state/evidence pathを版別記録へ集約し、unsupported・未実施・失敗をpassにしない。
 
@@ -470,7 +471,19 @@ OBSERVATION_LIMIT_SECONDS=<finite-cut-observation-window>
 # streaming確認後、残りcapture時間が観測窓より長い間に利用者へ抜去を依頼
 ```
 
-依頼後は事前に選んだ観測窓内でclientが自然終了するかを見て、`wait "$C"`の実終了値とstderrを保存します。指定時間の満了後にexit 0したrunは通常time満了として切断試験を無効扱いにします。
+抜去完了の応答を受けた時点で観測窓を開始します。窓内に自然終了しなければtimeout/failを記録し、`SIGINT`でclientを通常停止します。どちらの場合も`wait`で実終了値を保存し、exit 0は切断合格にしません。
+
+```sh
+read -r -p 'USB抜去完了後にEnter: ' _
+sleep "$OBSERVATION_LIMIT_SECONDS"
+if kill -0 "$C" 2>/dev/null; then
+  printf '%s\n' timeout > "$LOG/cut-observation.txt"
+  kill -INT "$C"
+fi
+if wait "$C"; then rc=0; else rc=$?; fi
+printf '%s\n' "$rc" > "$LOG/cut.rc"
+cat "$LOG/cut.stderr" > "$LOG/cut.stderr.saved"
+```
 
 旧daemonを通常停止し、process/FD/runtime socketを確認してから、ユーザーへ同じ物理portへの再接続を依頼します。Linux/macOS/Windowsは`pixd --list-json`で再列挙し、新しいruntimeでdaemonを起動します。Androidは`termux-usb -l`で新nodeを記録し、`termux-usb -r -e`で新しいFDをdaemonへ渡して新しいruntimeで起動します。いずれもstatus/listを確認し、既知の無料T27の短TSを取得します。
 
