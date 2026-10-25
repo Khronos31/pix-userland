@@ -67,9 +67,16 @@ int __wrap_libusb_control_transfer(libusb_device_handle *handle, uint8_t type,
     uint8_t request, uint16_t value, uint16_t index, unsigned char *data,
     uint16_t length, unsigned int timeout)
 {
+#ifdef PIX_EMBEDDED_ASSETS
+    (void)timeout;
+#endif
     if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+#ifdef PIX_EMBEDDED_ASSETS
+        return LIBUSB_ERROR_NO_DEVICE;
+#else
         return __real_libusb_control_transfer(handle, type, request, value, index,
                                               data, length, timeout);
+#endif
     return dt295_actual_fixture_control(type, request, value, index, data, length);
 }
 int LIBUSB_CALL __real_libusb_bulk_transfer(libusb_device_handle *, unsigned char,
@@ -77,8 +84,15 @@ int LIBUSB_CALL __real_libusb_bulk_transfer(libusb_device_handle *, unsigned cha
 int __wrap_libusb_bulk_transfer(libusb_device_handle *handle, unsigned char endpoint,
     unsigned char *data, int length, int *actual, unsigned int timeout)
 {
+#ifdef PIX_EMBEDDED_ASSETS
+    (void)timeout;
+#endif
     if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+#ifdef PIX_EMBEDDED_ASSETS
+        return LIBUSB_ERROR_NO_DEVICE;
+#else
         return __real_libusb_bulk_transfer(handle, endpoint, data, length, actual, timeout);
+#endif
     return dt295_actual_fixture_bulk(endpoint, data, length, actual);
 }
 int LIBUSB_CALL __real_libusb_interrupt_transfer(libusb_device_handle *, unsigned char,
@@ -86,9 +100,16 @@ int LIBUSB_CALL __real_libusb_interrupt_transfer(libusb_device_handle *, unsigne
 int __wrap_libusb_interrupt_transfer(libusb_device_handle *handle, unsigned char endpoint,
     unsigned char *data, int length, int *actual, unsigned int timeout)
 {
+#ifdef PIX_EMBEDDED_ASSETS
+    (void)timeout;
+#endif
     if (handle != (libusb_device_handle *)(uintptr_t)0x29502U)
+#ifdef PIX_EMBEDDED_ASSETS
+        return LIBUSB_ERROR_NO_DEVICE;
+#else
         return __real_libusb_interrupt_transfer(handle, endpoint, data, length, actual,
                                                timeout);
+#endif
     return dt295_actual_fixture_interrupt(endpoint, data, length, actual);
 }
 int __wrap_random_bytes(void *output, size_t length)
@@ -187,19 +208,31 @@ int __wrap_pixy_certify(pixy *device) { (void)device; return 0; }
 int __wrap_pixy_shutdown(pixy *device)
 { (void)device; ++shutdown_count; fprintf(stderr, "PIX_CLEANUP shutdown=%u\n", shutdown_count); return 0; }
 
+#ifndef PIX_EMBEDDED_ASSETS
 int __real_libusb_release_interface(libusb_device_handle *, int);
 void __real_libusb_close(libusb_device_handle *);
+#endif
 int __wrap_libusb_release_interface(libusb_device_handle *handle, int interface)
 {
     ++release_count;
     fprintf(stderr, "PIX_CLEANUP release-interface=%u\n", release_count);
+#ifdef PIX_EMBEDDED_ASSETS
+    (void)handle;
+    (void)interface;
+    return 0;
+#else
     return __real_libusb_release_interface(handle, interface);
+#endif
 }
 void __wrap_libusb_close(libusb_device_handle *handle)
 {
     ++close_count;
     fprintf(stderr, "PIX_CLEANUP close-handle=%u\n", close_count);
+#ifdef PIX_EMBEDDED_ASSETS
+    (void)handle;
+#else
     __real_libusb_close(handle);
+#endif
 }
 
 #ifdef _WIN32
@@ -230,11 +263,11 @@ int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
 #endif
 
 #ifdef PIX_TEST_CALLBACK_GATE
-int __real_libusb_handle_events_timeout(libusb_context *, struct timeval *);
+int pix_test_libusb_handle_events_timeout(libusb_context *, struct timeval *);
 int __wrap_libusb_handle_events_timeout(libusb_context *context, struct timeval *timeout)
 {
     const unsigned before = pix_test_usb_completions();
-    const int result = __real_libusb_handle_events_timeout(context, timeout);
+    const int result = pix_test_libusb_handle_events_timeout(context, timeout);
     static int held;
     const char *gate = getenv("PIX_HOLD_CALLBACK_FILE");
     const char *release = getenv("PIX_RELEASE_CALLBACK_FILE");

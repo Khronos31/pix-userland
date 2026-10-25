@@ -48,10 +48,30 @@ int LIBUSB_CALL libusb_get_device_descriptor(libusb_device *device,
     (void)device; memset(desc, 0, sizeof(*desc));
     desc->idVendor = 0x06b8; desc->idProduct = 0x102b; return 0;
 }
+ssize_t LIBUSB_CALL libusb_get_device_list(libusb_context *ctx, libusb_device ***list)
+{ (void)ctx; *list = NULL; return 0; }
+void LIBUSB_CALL libusb_free_device_list(libusb_device **list, int unref_devices)
+{ (void)list; (void)unref_devices; }
+uint8_t LIBUSB_CALL libusb_get_bus_number(libusb_device *device) { (void)device; return 0; }
+uint8_t LIBUSB_CALL libusb_get_device_address(libusb_device *device) { (void)device; return 0; }
+int LIBUSB_CALL libusb_get_port_numbers(libusb_device *device, uint8_t *ports, int length)
+{ (void)device; (void)ports; (void)length; return 0; }
+int LIBUSB_CALL libusb_open(libusb_device *device, libusb_device_handle **handle)
+{ (void)device; *handle = NULL; return LIBUSB_ERROR_NO_DEVICE; }
+int LIBUSB_CALL libusb_get_string_descriptor_ascii(libusb_device_handle *handle,
+                                                    uint8_t desc_index,
+                                                    unsigned char *data, int length)
+{ (void)handle; (void)desc_index; (void)data; (void)length; return LIBUSB_ERROR_NOT_FOUND; }
 int LIBUSB_CALL libusb_kernel_driver_active(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_detach_kernel_driver(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_attach_kernel_driver(libusb_device_handle *handle, int interface)
 { (void)handle; (void)interface; return 0; }
 int LIBUSB_CALL libusb_get_configuration(libusb_device_handle *handle, int *config)
 { (void)handle; *config = 1; return 0; }
+int LIBUSB_CALL libusb_set_configuration(libusb_device_handle *handle, int config)
+{ (void)handle; (void)config; return 0; }
 int LIBUSB_CALL libusb_claim_interface(libusb_device_handle *handle, int interface)
 { (void)handle; (void)interface; return 0; }
 int LIBUSB_CALL libusb_release_interface(libusb_device_handle *handle, int interface)

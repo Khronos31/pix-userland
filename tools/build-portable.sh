@@ -140,7 +140,7 @@ cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
     "$cxx" --version | head -n 1
 } > "$out/build-info.txt"
 if [ "$embedded_assets" = ON ]; then
-    cp "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
+    install -m 0644 "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
     python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
 import hashlib
 import json

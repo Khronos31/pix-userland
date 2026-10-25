@@ -46,7 +46,8 @@ for program in pixd pixctl pix-ts; do
 done
 python3 "$src/tools/verify-embedded-assets.py" "$work/build-static/bin/pixd" \
     "$src/assets" "$src/assets/dt295.assets" "$work/build-static/embedded-assets/pix_embedded_assets.json"
-unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR
+PKG_CONFIG_PATH="$work/libusb-prefix/lib/pkgconfig" \
+PKG_CONFIG_LIBDIR="$work/libusb-prefix/lib/pkgconfig" \
 cmake -S "$src/core-integration" -B "$work/build-proof" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-proof/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
