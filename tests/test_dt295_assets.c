@@ -2,11 +2,16 @@
 #include "dt295.h"
 #include "dt295_crypto.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #define HEADER_SIZE (8 + 6 * 36)
 #define MATERIAL_SIZE 0x1280
@@ -89,14 +94,43 @@ int main(int argc, char **argv) {
     char error[128] = {0};
     assert(dt295_assets_load_bytes(bundle, length, &from_bytes, error, sizeof(error)) == 0);
     assert(from_bytes && !error[0]);
+#ifdef _WIN32
+    char path[MAX_PATH];
+    char temp_dir[MAX_PATH];
+    DWORD temp_length = GetTempPathA(MAX_PATH, temp_dir);
+    if (temp_length == 0 || temp_length >= MAX_PATH) {
+        fprintf(stderr, "GetTempPathA failed: length=%lu GetLastError=%lu\n",
+                (unsigned long)temp_length, (unsigned long)GetLastError());
+        return 1;
+    }
+    if (GetTempFileNameA(temp_dir, "pix", 0, path) == 0) {
+        fprintf(stderr, "GetTempFileNameA failed: GetLastError=%lu\n",
+                (unsigned long)GetLastError());
+        return 1;
+    }
+    FILE *f = fopen(path, "wb");
+#else
     char path[] = "/tmp/pix-dt295-assets-test-XXXXXX";
     int fd = mkstemp(path);
-    assert(fd >= 0);
+    if (fd < 0) {
+        fprintf(stderr, "mkstemp(%s) failed: errno=%d (%s)\n", path, errno, strerror(errno));
+        return 1;
+    }
     FILE *f = fdopen(fd, "wb");
-    assert(f && fwrite(bundle, 1, length, f) == length && fclose(f) == 0);
+#endif
+    if (!f) {
+        fprintf(stderr, "open temporary asset file %s failed: errno=%d (%s)\n",
+                path, errno, strerror(errno));
+        return 1;
+    }
+    assert(fwrite(bundle, 1, length, f) == length && fclose(f) == 0);
     assert(dt295_assets_load(path, &from_path, error, sizeof(error)) == 0);
     assert(from_path && !error[0]);
+#ifdef _WIN32
+    assert(DeleteFileA(path) != 0);
+#else
     assert(unlink(path) == 0);
+#endif
     assert(memcmp(bundle, original, length) == 0);
     free(bundle);
     dt295_assets_free(from_bytes);
