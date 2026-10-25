@@ -17,6 +17,7 @@ extern "C" {
 #include <cstdint>
 #include <pthread.h>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace pix::capture::dt295 {
@@ -51,6 +52,7 @@ public:
     dtv::userland::Result<dtv::userland::detail::TuneProgramming> program_hz(
         ReceiverId, ReceiverSystem, std::uint64_t, std::uint32_t) noexcept override;
     dtv::userland::Result<bool> is_locked(ReceiverId, ReceiverSystem) noexcept override;
+    std::optional<bool> sample_card_inserted() noexcept;
     Result select_satellite_slot(ReceiverId, std::uint8_t, std::uint32_t) noexcept override;
     Result select_satellite_tsid(ReceiverId, std::uint16_t, std::uint32_t) noexcept override;
     Result close(ReceiverId) noexcept override;
@@ -122,6 +124,8 @@ private:
     Attachment attachment_{};
     std::uint64_t attachment_incarnation_ = 0U;
     dtv::userland::detail::PacketStreamSession session_;
+    std::mutex operation_mutex_;
+    std::mutex protocol_mutex_;
     std::atomic<bool> pump_stop_{false};
     std::atomic<int> pump_error_{0};
     pthread_t pump_thread_{};

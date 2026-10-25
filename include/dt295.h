@@ -26,6 +26,14 @@ typedef struct {
     uint16_t cn_raw;
 } dt295_satellite_state;
 
+typedef struct {
+    unsigned raw_state;
+    uint64_t notification_generation;
+    uint64_t activation_generation;
+    uint8_t activation_valid;
+    uint8_t fresh_notification;
+} dt295_card_snapshot;
+
 /* USB operations return 0 on success. actual must equal the requested length
  * for control transfers and OUT transfers; a timed-out IN may return bytes. */
 typedef struct {
@@ -54,6 +62,8 @@ int dt295_boot(dt295 *device, char *error, size_t error_size);
 int dt295_open_session(dt295 *device, char *error, size_t error_size);
 int dt295_card_initialize(dt295 *device, char *error, size_t error_size);
 int dt295_card_activate(dt295 *device, unsigned timeout_ms, char *error, size_t error_size);
+int dt295_card_observe(dt295 *device, dt295_card_snapshot *snapshot);
+void dt295_card_invalidate_observation(dt295 *device);
 int dt295_tune_terrestrial(dt295 *device, unsigned channel, char *error, size_t error_size);
 int dt295_terrestrial_rf_divider(unsigned channel, uint16_t *divider);
 

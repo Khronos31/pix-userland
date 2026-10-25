@@ -5,6 +5,7 @@
 #include <libusb.h>
 
 #include <chrono>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,12 @@ void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 uint16_t dt295_actual_fixture_satellite_tsid(void);
 void dt295_actual_fixture_set_omit_cat(int);
 void dt295_actual_fixture_set_tsid_delay(unsigned);
+void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
+unsigned dt295_actual_fixture_card_acks(void);
+void dt295_actual_fixture_set_control_delay(unsigned);
+unsigned dt295_actual_fixture_control_active(void);
+unsigned dt295_actual_fixture_control_max_active(void);
+unsigned dt295_actual_fixture_status_reads(void);
 }
 
 namespace {
@@ -229,7 +236,60 @@ int main()
                      static_cast<int>(adapter.init_error()));
         return 1;
     }
-    CHECK_RESULT(adapter.open(0U), "open");
+    dt295_actual_fixture_set_control_delay(1U);
+    std::atomic<bool> overlap_open_ok{false};
+    std::thread overlap_open([&] {
+        overlap_open_ok.store(static_cast<bool>(adapter.open(0U)), std::memory_order_release);
+    });
+    for (unsigned attempt = 0U; attempt < 200U &&
+         dt295_actual_fixture_control_active() == 0U; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(dt295_actual_fixture_control_active() != 0U);
+    const unsigned status_reads_before_open = dt295_actual_fixture_status_reads();
+    CHECK(!adapter.sample_card_inserted().has_value());
+    CHECK(dt295_actual_fixture_status_reads() == status_reads_before_open);
+    overlap_open.join();
+    dt295_actual_fixture_set_control_delay(0U);
+    CHECK(overlap_open_ok.load(std::memory_order_acquire));
+    CHECK(dt295_actual_fixture_control_max_active() == 1U);
+    dt295_actual_fixture_set_control_delay(5U);
+    std::atomic<bool> overlap_tune_ok{false};
+    std::thread overlap_tune([&] {
+        const auto result = adapter.program_hz(0U, ReceiverSystem::terrestrial,
+                                               473142857ULL, 1000U);
+        overlap_tune_ok.store(static_cast<bool>(result), std::memory_order_release);
+    });
+    for (unsigned attempt = 0U; attempt < 200U &&
+         dt295_actual_fixture_control_active() == 0U; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(dt295_actual_fixture_control_active() != 0U);
+    const unsigned status_reads_before_overlap = dt295_actual_fixture_status_reads();
+    CHECK(!adapter.sample_card_inserted().has_value());
+    CHECK(dt295_actual_fixture_status_reads() == status_reads_before_overlap);
+    overlap_tune.join();
+    dt295_actual_fixture_set_control_delay(0U);
+    CHECK(overlap_tune_ok.load(std::memory_order_acquire));
+    CHECK(dt295_actual_fixture_control_max_active() == 1U);
+    auto card = adapter.sample_card_inserted();
+    CHECK(card.has_value() && *card);
+    dt295_actual_fixture_set_card_sample(0U, 0U, 0U);
+    CHECK(!adapter.sample_card_inserted().has_value());
+    dt295_actual_fixture_set_card_sample(0U, 1U, 0U);
+    card = adapter.sample_card_inserted();
+    CHECK(card.has_value() && !*card);
+    CHECK(dt295_actual_fixture_card_acks() == 1U);
+    card = adapter.sample_card_inserted();
+    CHECK(card.has_value() && !*card);
+    dt295_actual_fixture_set_card_sample(1U, 0U, 0U);
+    CHECK(!adapter.sample_card_inserted().has_value());
+    dt295_actual_fixture_set_card_sample(3U, 0U, 0U);
+    card = adapter.sample_card_inserted();
+    CHECK(card.has_value() && *card);
+    const unsigned card_acks = dt295_actual_fixture_card_acks();
+    dt295_actual_fixture_set_card_sample(0U, 0U, 0x400U);
+    CHECK(!adapter.sample_card_inserted().has_value());
+    CHECK(dt295_actual_fixture_card_acks() == card_acks);
+    dt295_actual_fixture_set_card_sample(3U, 0U, 0U);
 
     Attachment first = attachment_for(1U);
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
@@ -303,6 +363,7 @@ int main()
     dt295_actual_fixture_set_tsid_delay(0U);
 
     CHECK_RESULT(adapter.close(0U), "close");
+    CHECK(!adapter.sample_card_inserted().has_value());
     CHECK_RESULT(adapter.shutdown(), "shutdown");
 
     CHECK(g_stream.generations >= 4U);

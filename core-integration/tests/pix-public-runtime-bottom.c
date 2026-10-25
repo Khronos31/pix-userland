@@ -2,6 +2,7 @@
 #include <libusb.h>
 #include "pixy.h"
 #include "pix-runtime-vectors.h"
+#include "usb_backend.h"
 
 #include <stdint.h>
 #ifdef _WIN32
@@ -32,6 +33,44 @@ unsigned pix_test_shutdown_count(void) { return shutdown_count; }
 unsigned pix_test_usb_completions(void);
 unsigned pix_test_usb_device_index(libusb_device *device)
 { return device == (libusb_device *)&device_storage[1] ? 1U : 0U; }
+
+#ifdef PIX_TEST_DT295_FIXTURE
+int dt295_actual_fixture_control(uint8_t, uint8_t, uint16_t, uint16_t,
+                                 uint8_t *, uint16_t);
+int dt295_actual_fixture_bulk(uint8_t, unsigned char *, int, int *);
+int dt295_actual_fixture_interrupt(uint8_t, unsigned char *, int, int *);
+
+int __wrap_usb_open_model(usb_backend **output, const usb_selector *selector, int fd,
+                          int detach, int model)
+{
+    (void)selector; (void)fd; (void)detach;
+    if (output == NULL || model != USB_MODEL_DT295) return -1;
+    *output = (usb_backend *)(uintptr_t)0x295U;
+    return 0;
+}
+void __real_usb_close(usb_backend *backend);
+void __wrap_usb_close(usb_backend *backend)
+{ if (backend != (usb_backend *)(uintptr_t)0x295U) __real_usb_close(backend); }
+void *__wrap_usb_native_context(usb_backend *backend)
+{ (void)backend; return (void *)(uintptr_t)0x29501U; }
+void *__wrap_usb_native_handle(usb_backend *backend)
+{ (void)backend; return (void *)(uintptr_t)0x29502U; }
+int __wrap_libusb_control_transfer(libusb_device_handle *handle, uint8_t type,
+    uint8_t request, uint16_t value, uint16_t index, unsigned char *data,
+    uint16_t length, unsigned int timeout)
+{
+    (void)handle; (void)timeout;
+    return dt295_actual_fixture_control(type, request, value, index, data, length);
+}
+int __wrap_libusb_bulk_transfer(libusb_device_handle *handle, unsigned char endpoint,
+    unsigned char *data, int length, int *actual, unsigned int timeout)
+{ (void)handle; (void)timeout; return dt295_actual_fixture_bulk(endpoint, data, length, actual); }
+int __wrap_libusb_interrupt_transfer(libusb_device_handle *handle, unsigned char endpoint,
+    unsigned char *data, int length, int *actual, unsigned int timeout)
+{ (void)handle; (void)timeout; return dt295_actual_fixture_interrupt(endpoint, data, length, actual); }
+int __wrap_random_bytes(void *output, size_t length)
+{ if (output != NULL) memset(output, 0, length); return 0; }
+#endif
 void pix_test_usb_set_opened_device(libusb_device *device)
 { opened_device = pix_test_usb_device_index(device); }
 unsigned pix_test_usb_opened_device(void) { return opened_device; }

@@ -9,6 +9,8 @@
 
 #include <libusb.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
 
 static fake pipeline_fake;
 static pthread_mutex_t pipeline_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -22,6 +24,71 @@ static int pipeline_sat_rf_read;
 static uint8_t pipeline_sat_pending_tsid[2];
 static unsigned pipeline_sat_tsid_delay;
 static int pipeline_omit_cat;
+static atomic_uint pipeline_control_active;
+static atomic_uint pipeline_control_max_active;
+static unsigned pipeline_control_delay_ms;
+static unsigned pipeline_post_activation_state = 3U;
+static int pipeline_post_activation_notification;
+static int pipeline_activation_command_seen;
+static int pipeline_activation_state_seen;
+static int pipeline_post_activation_delivered;
+
+void dt295_actual_fixture_configure_presence(unsigned raw_state, int notification)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_post_activation_state = raw_state;
+    pipeline_post_activation_notification = notification;
+    pipeline_activation_command_seen = 0;
+    pipeline_activation_state_seen = 0;
+    pipeline_post_activation_delivered = 0;
+    pipeline_fake.status_notifications = 0;
+    wr16(pipeline_fake.mem + 0x822ac, 0);
+    wr16(pipeline_fake.mem + 0x90074, 0);
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+void dt295_actual_fixture_set_card_sample(unsigned raw_state, unsigned notifications,
+                                          unsigned pending)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_fake.status_notifications = notifications;
+    wr16(pipeline_fake.mem + 0x822ac, (uint16_t)(raw_state << 12));
+    wr16(pipeline_fake.mem + 0x90074, (uint16_t)(pending & 0x400));
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+unsigned dt295_actual_fixture_card_acks(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_fake.status_acks;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
+void dt295_actual_fixture_set_control_delay(unsigned milliseconds)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_control_delay_ms = milliseconds;
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
+unsigned dt295_actual_fixture_control_active(void)
+{
+    return atomic_load_explicit(&pipeline_control_active, memory_order_acquire);
+}
+
+unsigned dt295_actual_fixture_control_max_active(void)
+{
+    return atomic_load_explicit(&pipeline_control_max_active, memory_order_acquire);
+}
+
+unsigned dt295_actual_fixture_status_reads(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_fake.status_reads;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
 
 static void pipeline_satellite_write(uint8_t sub)
 {
@@ -75,6 +142,9 @@ static void pipeline_satellite_read(uint8_t sub, uint16_t length)
 int dt295_actual_fixture_open(const char *assets_path)
 {
     memset(&pipeline_fake, 0, sizeof(pipeline_fake));
+    atomic_store_explicit(&pipeline_control_active, 0U, memory_order_release);
+    atomic_store_explicit(&pipeline_control_max_active, 0U, memory_order_release);
+    pipeline_control_delay_ms = 0U;
     pipeline_route_writes = 0;
     pipeline_pid273_route_writes = 0;
     pipeline_fail_route_once = 0;
@@ -117,7 +187,27 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
                                  uint16_t index, uint8_t *data, uint16_t length)
 {
     size_t actual = 0;
+    const unsigned delay = pipeline_control_delay_ms;
+    const unsigned active = atomic_fetch_add_explicit(&pipeline_control_active, 1U,
+                                                       memory_order_acq_rel) + 1U;
+    unsigned maximum = atomic_load_explicit(&pipeline_control_max_active, memory_order_acquire);
+    while (active > maximum && !atomic_compare_exchange_weak_explicit(
+               &pipeline_control_max_active, &maximum, active,
+               memory_order_acq_rel, memory_order_acquire)) {}
+    if (delay != 0U) {
+        const struct timespec wait = {(time_t)(delay / 1000U), (long)(delay % 1000U) * 1000000L};
+        (void)nanosleep(&wait, NULL);
+    }
     pthread_mutex_lock(&pipeline_mutex);
+    const uint32_t address = (uint32_t)(value >> 8) << 16 | index;
+    if (request == 0xbc && (request_type & 0x80U) != 0U && address == 0x90074U &&
+        length == 2U && pipeline_activation_state_seen && !pipeline_post_activation_delivered) {
+        pipeline_post_activation_delivered = 1;
+        wr16(pipeline_fake.mem + 0x822ac,
+             (uint16_t)(pipeline_post_activation_state << 12));
+        if (pipeline_post_activation_notification)
+            pipeline_fake.status_notifications = 1U;
+    }
     const uint16_t pending_route_pid = (uint16_t)(pipeline_fake.mem[0x81004] << 8) |
                                        pipeline_fake.mem[0x81005];
     if (pipeline_fail_route_once && (request == 0xb8 || request == 0xb9) && length == 4 &&
@@ -126,6 +216,7 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
         pipeline_fail_route_once = 0;
         ++pipeline_route_failures;
         pthread_mutex_unlock(&pipeline_mutex);
+        atomic_fetch_sub_explicit(&pipeline_control_active, 1U, memory_order_acq_rel);
         fprintf(stderr, "DT295 injection=route_write_failure reached=1 pid=%u\n",
                 pending_route_pid);
         return LIBUSB_ERROR_IO;
@@ -135,6 +226,16 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
         pipeline_satellite_write(data[1]);
     const int rc = control(&pipeline_fake, request_type, request, value, index, data,
                            length, 500, &actual);
+    if (!rc && request == 0xb9 && length == 4U && data[0] == 0x0aU &&
+        data[1] == 1U && rd16(data + 2) == 1U) {
+        pipeline_activation_command_seen = 1;
+        wr16(pipeline_fake.mem + 0x822ac, 0x3000U);
+    }
+    if (!rc && request == 0xbc && (request_type & 0x80U) != 0U &&
+        address == 0x822acU && length == 2U && pipeline_activation_command_seen &&
+        rd16(data) == 0x3000U) {
+        pipeline_activation_state_seen = 1;
+    }
     if (satellite)
         pipeline_satellite_read(data[1], (uint16_t)(data[2] << 8 | data[3]));
     if (!rc && (request == 0xb8 || request == 0xb9) && length == 4 &&
@@ -156,6 +257,7 @@ int dt295_actual_fixture_control(uint8_t request_type, uint8_t request, uint16_t
              (uint16_t)(rd16(pipeline_fake.mem + 0x90074) | 4));
     }
     pthread_mutex_unlock(&pipeline_mutex);
+    atomic_fetch_sub_explicit(&pipeline_control_active, 1U, memory_order_acq_rel);
     if (rc)
         fprintf(stderr, "DT295 fixture_control_failed request=%02x type=%02x value=%04x index=%04x length=%u\n",
                 request, request_type, value, index, length);

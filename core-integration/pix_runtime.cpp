@@ -289,6 +289,16 @@ class Dt295TunerBackend final : public TunerServiceBackend {
 public:
     explicit Dt295TunerBackend(dt295::ReceiverAdapter& adapter) noexcept : adapter_(adapter) {}
     std::uint8_t receiver_count() const noexcept override { return 1U; }
+    bool supports_internal_card_observation() const noexcept override { return true; }
+    dtv::userland::wire::Optional<bool> sample_internal_card_inserted() noexcept override
+    {
+        dtv::userland::wire::Optional<bool> observed{};
+        const auto snapshot = adapter_.sample_card_inserted();
+        if (!snapshot.has_value()) return observed;
+        observed.present = true;
+        observed.value = *snapshot;
+        return observed;
+    }
     bool receiver_supports(std::uint8_t receiver, ipc::System system) const noexcept override
     { return receiver == 0U && (system == ipc::System::ISDB_T || system == ipc::System::ISDB_S); }
     bool selects_satellite_stream_before_tune() const noexcept override { return false; }
