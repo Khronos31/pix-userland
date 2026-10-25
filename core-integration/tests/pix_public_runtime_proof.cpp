@@ -148,6 +148,12 @@ int run_status(const std::string& runtime_dir, std::string& output,
 bool check_status(std::string_view json, const char* receiver_state, bool leased,
                   const char* tune_revision)
 {
+    const std::size_t context_key = json.find("\"context\":{");
+    const std::size_t snapshot_key = json.find("\"snapshot\":");
+    if (context_key == std::string_view::npos || snapshot_key == std::string_view::npos ||
+        snapshot_key <= context_key ||
+        json.substr(context_key, snapshot_key - context_key).find(
+            "\"state\":\"ready\"") == std::string_view::npos) return false;
     const std::size_t epoch_key = json.find("\"epoch\":\"");
     if (epoch_key == std::string_view::npos || epoch_key + 42U > json.size()) return false;
     const std::size_t epoch_start = epoch_key + 9U;
