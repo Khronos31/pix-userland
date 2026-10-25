@@ -62,8 +62,8 @@ archive対象と試験前提を記す表であり、実装状態・候補の有�
 ### T00 候補/配布物固定
 
 - **適用対象/頻度:** 毎releaseのcandidate作成時。
-- **準備:** source SHA、CI run/attempt、archive targetとhashを固定。POSIX git rev-parse HEAD/sha256sum、Windows Get-FileHashを保存。
-- **実操作/利用者への依頼:** pixd --models/--list-jsonとartifact hashを確認。candidateが無ければ停止し正式公開workflowを代用しない。
+- **準備:** source SHA、CI run/attempt、archive targetとhashを固定。POSIXではgit rev-parse HEADを保存し、macOSはshasum -a 256、Linuxはsha256sum、WindowsはGet-FileHashでhashを確認する。
+- **実操作/利用者への依頼:** 固定candidateを取得し、macOSでは`shasum -a 256 -c SHA256SUMS`、Linuxでは`sha256sum -c SHA256SUMS`、Windowsでは`Get-FileHash -Algorithm SHA256`でarchive hashを照合する。対象archive個別のdigestもmacOSでは`shasum -a 256 "$ARCHIVE"`、Linuxでは`sha256sum "$ARCHIVE"`で表示し、manifest entryと一致することを確認する。pixd --models/--list-jsonとmanifest/source refを確認する。candidateが無ければ停止し正式公開workflowを代用しない。
 - **期待値/終了値:** provenance/hash一致の候補だけ次へ進む。候補不在は未完了。
 - **停止/cleanup:** deviceを開かず、archive/logを保持。
 - **記録:** source SHA、CI run/attempt、artifact ID/target/hash、取得日時、未取得理由。
@@ -237,7 +237,7 @@ OS/ABI固有の起動方法は以下の環境recipeと§3のarchive手順を使�
 
 対象versionの候補sourceから作成されたbinary archiveとsource archiveを取得し、hash・manifest・license/provenanceを照合します。pre-release候補が用意できない場合は実機gateを完了扱いにせず、その版別文書に未実施理由を記録します。正式Releaseを作成・公開するworkflowを候補作成の代用にしません。
 
-公開後の監査を行う際は、GitHub Releaseから新規directoryへbinary/source archiveと`SHA256SUMS`を取得し、`sha256sum -c SHA256SUMS`、各archive内の`build-info.txt`が記録する固定Core SHA、source manifest/license/provenanceを照合します。これはpre-release candidate試験の代替にはなりません。
+公開後の監査を行う際は、GitHub Releaseから新規directoryへbinary/source archiveと`SHA256SUMS`を取得し、macOSでは`shasum -a 256 -c SHA256SUMS`、Linuxでは`sha256sum -c SHA256SUMS`、各archive内の`build-info.txt`が記録する固定Core SHA、source manifest/license/provenanceを照合します。これはpre-release candidate試験の代替にはなりません。
 
 ## 2. 機器非接続gate
 
@@ -340,9 +340,10 @@ $LOG = Join-Path $D 'logs'
 New-Item -ItemType Directory -Path $LOG | Out-Null
 $CHANNEL_PLAN = @('<channel-1>','<channel-2>')
 foreach ($channel in $CHANNEL_PLAN) {
+  $system = if ($channel -match '^T\d+$') { 'isdb-t' } elseif ($channel -match '^(BS|CS)\d+') { 'isdb-s' } else { throw "Unsupported channel format: $channel" }
   $out = Join-Path $LOG ($channel + '.ts')
-  $p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel',$channel,'--system','isdb-t','--time','10','--output',$out,'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -Wait
-  [pscustomobject]@{ Channel=$channel; ExitCode=$p.ExitCode; File=$out }
+  $p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel',$channel,'--system',$system,'--time','10','--output',$out,'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -Wait
+  [pscustomobject]@{ Channel=$channel; System=$system; ExitCode=$p.ExitCode; File=$out }
 }
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group status
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group list
