@@ -332,6 +332,8 @@ int run(int argc, char** argv)
     config.context.instance.present = true;
     config.context.instance.value.length = static_cast<std::uint16_t>(instance.size());
     std::memcpy(config.context.instance.value.bytes.data(), instance.data(), instance.size());
+    // STATUS is visible only after publish() succeeds below.
+    config.context.state = dtv::userland::wire::ContextState::ready;
     for (std::size_t i = 0U; i < sizeof(config.stream_engine_epoch); ++i)
         config.stream_engine_epoch = (config.stream_engine_epoch << 8U) |
             epoch.value()[i];
@@ -346,11 +348,6 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
         return fail(reserved.error());
     }
-    const auto published = context->publish();
-    if (!published) {
-        std::fprintf(stderr, "PIX_STAGE publish error=%u\n", static_cast<unsigned>(published.error()));
-        return fail(published.error());
-    }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
 #ifdef _WIN32
     px4::userland::cli::StdinEofMonitor eof_monitor;
@@ -358,6 +355,11 @@ int run(int argc, char** argv)
         !eof_monitor.start(::GetStdHandle(STD_INPUT_HANDLE),
             [](void*) noexcept { px4::userland::px4d::request_stop(); }, nullptr)) return 70;
 #endif
+    const auto published = context->publish();
+    if (!published) {
+        std::fprintf(stderr, "PIX_STAGE publish error=%u\n", static_cast<unsigned>(published.error()));
+        return fail(published.error());
+    }
     std::fprintf(stderr, "pixd ready: model=%s endpoint=%s\n",
                  model_name(located.value().model),
                  config.runtime_directory.empty() ? "Core-selected" : config.runtime_directory.c_str());
