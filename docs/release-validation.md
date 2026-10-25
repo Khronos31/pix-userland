@@ -22,7 +22,7 @@ PIXの通常の無指定時検証機種はPIX-DT295とPIX-DT181-PU0だが、機�
 | 区分 | 製品固有の確認 |
 |---|---|
 | 機種初回 | 機種ごとに異なるCLI/assets/OS対応を確認し、結果を機種別に記録する。 |
-| 回帰（毎release） | DT181-PU0はT/BS/CS、DT295は地上波の試験対象として、両機種を全配布archive/OS/ABIごとに分けて記録する。DT295を含む各試験がunsupported/nonzeroでcaptureできない場合、その候補の未達/失敗として記録する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。 |
+| 回帰（毎release） | DT181-PU0はT/BS/CS、DT295はISDB-T/ISDB-S（地上波・衛星）の試験対象として、両機種を全配布archive/OS/ABIごとに分けて記録する。DT295を含む各試験がunsupported/nonzeroでcaptureできない場合、その候補の未達/失敗として記録する。内部CARD状態は`pixctl card-status`で確認する。外部ATR/APDU・PC/SC/WinSCard・LNBは製品機能外。 |
 | 必要に応じて | PIXはLNB給電なし。model enumerationやmulti-device変更時は該当機種で確認。 |
 | 初回/major | DT295は機種としてOS/ABIごとに試験する。unsupported/nonzeroでcaptureできない候補は未達/失敗として記録する。DT181-PU0結果と分離する。 |
 
