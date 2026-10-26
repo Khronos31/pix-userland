@@ -141,9 +141,11 @@ PIXはsingle-device runで`TARGET_USB=06b8:102b`（DT181-PU0）または`06b8:10
   import json, sys
   json.dump({"options":json.load(open(sys.argv[1], encoding="utf-8"))}, open(sys.argv[2], "w", encoding="utf-8"))
   PY
+  # /options/validate accepts the raw options object; only /options uses the {"options": ...} request schema.
+  cp "$LOG/private/options.trial.json" "$LOG/private/options-trial.validate.json"
   chmod 600 "$LOG/private/"*.json
-  curl -fsS -H "Authorization: Bearer $SUPERVISOR_TOKEN" -H 'Content-Type: application/json' --data-binary @"$LOG/private/options-trial.request.json" "$API/options/validate" -o "$LOG/private/options-trial.validate.json"
-  if ! python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); x=x.get("data",x); sys.exit(0 if x.get("valid") is True else 1)' "$LOG/private/options-trial.validate.json"; then echo 'options validation rejected; no trial POST was sent' >&2; exit 1; fi
+  curl -fsS -H "Authorization: Bearer $SUPERVISOR_TOKEN" -H 'Content-Type: application/json' --data-binary @"$LOG/private/options-trial.validate.json" "$API/options/validate" -o "$LOG/private/options-trial.validation-response.json"
+  if ! python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); x=x.get("data",x); sys.exit(0 if x.get("valid") is True else 1)' "$LOG/private/options-trial.validation-response.json"; then echo 'options validation rejected; no trial POST was sent' >&2; exit 1; fi
   curl -fsS -H "Authorization: Bearer $SUPERVISOR_TOKEN" -H 'Content-Type: application/json' --data-binary @"$LOG/private/options-trial.request.json" "$API/options" -o "$LOG/private/options-trial.post.json"
   ```
   run終了後、保存したraw optionsを同じ`/options` endpointへ戻し、`/info`のraw `options`とprivate backupの完全一致を確認する。`/options/config`のvalidated値との比較で復元を判定しない。
@@ -190,34 +192,51 @@ ha addons restart "$ADDON_SLUG"
   test "$(printf '%s' "$ACTUAL_USB" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$TARGET_USB" | tr '[:upper:]' '[:lower:]')"
   stat -c '%a %u %g' "$DEVICE_NODE" > "$LOG/usb-node.before.txt"
   printf '%s\n' "$SYSFS_PATH" > "$LOG/usb-sysfs-path.before.txt"
-  # 承認済みrunでのみ適用する。対象driver ruleとgroupを確定してから実行:
-  : "${BLACKLIST_MODULES:?set only the modules required by the selected product/model}"
-  : > /etc/modprobe.d/smsusb-blacklist.conf
-  for module in $BLACKLIST_MODULES; do printf 'blacklist %s\n' "$module" >> /etc/modprobe.d/smsusb-blacklist.conf; done
-  VID=${TARGET_USB%:*}; PID=${TARGET_USB#*:}
-  printf 'SUBSYSTEM=="usb", ATTR{idVendor}=="%s", ATTR{idProduct}=="%s", MODE="0660", GROUP="video"\n' "$VID" "$PID" > /etc/udev/rules.d/99-usb-access.rules
-  udevadm control --reload-rules; udevadm trigger --action=change "$SYSFS_DEVICE"; udevadm settle
-  usermod -aG video "$TEST_USER"
-  # 承認済み復元後、同じUSB nodeだけへ元ruleを再適用してnode mode/ownerも復元:
+  # 承認済みrunでのみ適用する。適用は隔離subshell内で行い、途中失敗でも親shellの復元へ戻る:
+  apply_trial_access() (
+    set -eu
+    : "${BLACKLIST_MODULES:?set only the modules required by the selected product/model}"
+    : > /etc/modprobe.d/smsusb-blacklist.conf || exit $?
+    for module in $BLACKLIST_MODULES; do printf 'blacklist %s\n' "$module" >> /etc/modprobe.d/smsusb-blacklist.conf || exit $?; done
+    VID=${TARGET_USB%:*}; PID=${TARGET_USB#*:}
+    printf 'SUBSYSTEM=="usb", ATTR{idVendor}=="%s", ATTR{idProduct}=="%s", MODE="0660", GROUP="video"\n' "$VID" "$PID" > /etc/udev/rules.d/99-usb-access.rules || exit $?
+    udevadm control --reload-rules || exit $?
+    udevadm trigger --action=change "$SYSFS_DEVICE" || exit $?
+    udevadm settle || exit $?
+    usermod -aG video "$TEST_USER" || exit $?
+  )
+  if apply_trial_access; then APPLY_RC=0; else APPLY_RC=$?; fi
+  printf '%s\n' "$APPLY_RC" > "$LOG/access-apply.rc"
+  RESTORE_RC=0
+  set +e
   for f in /etc/modprobe.d/smsusb-blacklist.conf /etc/udev/rules.d/99-usb-access.rules; do
     n=$(basename "$f")
-    if [ "$(cat "$LOG/$n.state")" = present ]; then cp -a "$LOG/$n.before" "$f"; cmp "$LOG/$n.before" "$f"; else rm -f "$f"; test ! -e "$f"; fi
+    if [ "$(cat "$LOG/$n.state")" = present ]; then
+      cp -a "$LOG/$n.before" "$f" || RESTORE_RC=1
+      cmp "$LOG/$n.before" "$f" || RESTORE_RC=1
+    else
+      rm -f "$f" || RESTORE_RC=1
+      test ! -e "$f" || RESTORE_RC=1
+    fi
   done
-  udevadm control --reload-rules
-  test -c "$DEVICE_NODE"
-  test "$(udevadm info --query=path --name="$DEVICE_NODE")" = "$SYSFS_PATH"
-  test "$(cat "$SYSFS_DEVICE/idVendor"):$(cat "$SYSFS_DEVICE/idProduct")" = "$ACTUAL_USB"
-  udevadm trigger --action=change "$SYSFS_DEVICE"; udevadm settle
-  set -- $(cat "$LOG/usb-node.before.txt"); test "$#" -eq 3
-  chown "$2:$3" "$DEVICE_NODE"; chmod "$1" "$DEVICE_NODE"
-  stat -c '%a %u %g' "$DEVICE_NODE" > "$LOG/usb-node.after.txt"
-  cmp "$LOG/usb-node.before.txt" "$LOG/usb-node.after.txt"
-  GROUPS_BEFORE=$(cat "$LOG/groups.before.txt")
-  if [ -n "$GROUPS_BEFORE" ]; then usermod -G "$GROUPS_BEFORE" "$TEST_USER"; else usermod -G '' "$TEST_USER"; fi
-  id "$TEST_USER" > "$LOG/test-user.after.txt"
-  PRIMARY_AFTER=$(id -gn "$TEST_USER")
-  id -nG "$TEST_USER" | python3 -c 'import sys; p=sys.argv[1]; print(",".join(g for g in sys.stdin.read().split() if g != p))' "$PRIMARY_AFTER" > "$LOG/groups.after.txt"
-  cmp "$LOG/groups.before.txt" "$LOG/groups.after.txt"
+  udevadm control --reload-rules || RESTORE_RC=1
+  if test -c "$DEVICE_NODE" && test "$(udevadm info --query=path --name="$DEVICE_NODE")" = "$SYSFS_PATH" && test "$(cat "$SYSFS_DEVICE/idVendor"):$(cat "$SYSFS_DEVICE/idProduct")" = "$ACTUAL_USB"; then :; else RESTORE_RC=1; fi
+  udevadm trigger --action=change "$SYSFS_DEVICE" || RESTORE_RC=1
+  udevadm settle || RESTORE_RC=1
+  if set -- $(cat "$LOG/usb-node.before.txt") && test "$#" -eq 3; then
+    chown "$2:$3" "$DEVICE_NODE" || RESTORE_RC=1
+    chmod "$1" "$DEVICE_NODE" || RESTORE_RC=1
+  else RESTORE_RC=1; fi
+  if stat -c '%a %u %g' "$DEVICE_NODE" > "$LOG/usb-node.after.txt"; then cmp "$LOG/usb-node.before.txt" "$LOG/usb-node.after.txt" || RESTORE_RC=1; else RESTORE_RC=1; fi
+  if GROUPS_BEFORE=$(cat "$LOG/groups.before.txt"); then
+    if [ -n "$GROUPS_BEFORE" ]; then usermod -G "$GROUPS_BEFORE" "$TEST_USER" || RESTORE_RC=1; else usermod -G '' "$TEST_USER" || RESTORE_RC=1; fi
+    id "$TEST_USER" > "$LOG/test-user.after.txt" || RESTORE_RC=1
+    if PRIMARY_AFTER=$(id -gn "$TEST_USER") && id -nG "$TEST_USER" | python3 -c 'import sys; p=sys.argv[1]; print(",".join(g for g in sys.stdin.read().split() if g != p))' "$PRIMARY_AFTER" > "$LOG/groups.after.txt"; then cmp "$LOG/groups.before.txt" "$LOG/groups.after.txt" || RESTORE_RC=1; else RESTORE_RC=1; fi
+  else RESTORE_RC=1; fi
+  printf '%s\n' "$RESTORE_RC" > "$LOG/access-restore.rc"
+  set -e
+  if [ "$APPLY_RC" -ne 0 ]; then exit "$APPLY_RC"; fi
+  if [ "$RESTORE_RC" -ne 0 ]; then echo 'access state restoration incomplete; retain evidence and stop' >&2; exit "$RESTORE_RC"; fi
   ```
 
 - **E07 Android stay-awake:**初回ADB readが非0/空/不正値なら書込み前に停止する。`null`は未設定、十進整数は保存値として区別する。権限・readback失敗を無視しない。次は端末設定に触れないsynthetic確認用の状態遷移であり、実Androidへは実行しない。
@@ -390,6 +409,8 @@ Set-Location $D
 - **停止/cleanup:** idle/streamそれぞれでowned client/daemonを通常停止してwaitし、終了値、process/FD/socketを確認する。再接続後の新daemonも通常停止する。Androidはpermission/FD再取得。
 - **記録:** model/idle/stream、USB open/claimを含む起動条件、依頼/応答時刻、path、status response/exit、daemon診断/process実状態と終了値、stream client exit、再取得TS/counter、cleanup。
 
+OS/ABI別の具体操作は [USB切断・LNBの環境別手順](#pix-os-t07-recipes) を参照する。
+
 ### T08 通常停止・cleanup
 
 - **適用対象/頻度:** 全test終了時。
@@ -399,12 +420,12 @@ Set-Location $D
 - **停止/cleanup:** 無関係processへsignalしない。test専用runtimeだけ片付け失敗log保持。
 - **記録:** PID/role/exit、process/FD/IPC/socket/runtime、復旧状態。
 
-### T09 helperの固定取得
+### 共通helperの固定取得（T09前提）
 
-候補sourceとは独立した共通runbook helperを、Siano runbookのimmutable commit `4fa86d0a51253bc0da99178f63a46e5dfbd927d0`から取得する。candidate checkout/archive内のhelper有無に依存しない。POSIX/Termuxでは次を一度実行し、以後の全captureで`$TOOL/ts-check.py`を使う。
+T09を実行する前に、候補sourceとは独立した共通runbook helperをSiano runbookのimmutable commit `c2378ea3c52b3e415ec6c7acfea4b8f758b46eda`から取得する。candidate checkout/archive内のhelper有無に依存しない。POSIX/Termuxでは次を一度実行し、以後の全captureで`$TOOL/ts-check.py`を使う。
 
 ```sh
-RUNBOOK_REF='4fa86d0a51253bc0da99178f63a46e5dfbd927d0'; HELPER_SHA256='3224747ccf74d752fd70e0fd5599418cfa20d6d4bfafc8e8220a002c1dcbcffd'
+RUNBOOK_REF='c2378ea3c52b3e415ec6c7acfea4b8f758b46eda'; HELPER_SHA256='dbb4826e3eb4f0cb13850b59864c7219b8929822976c9e213d3948edbe450f05'
 TOOL="$WORK/tooling"; mkdir -m 700 -p "$TOOL"
 gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-check.py?ref=$RUNBOOK_REF" > "$TOOL/ts-check.py"
 if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | sha256sum -c -; else printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | shasum -a 256 -c -; fi
@@ -414,7 +435,7 @@ printf '%s\n' "$RUNBOOK_REF $HELPER_SHA256" > "$LOG/ts-helper-version.txt"
 Windows PowerShell 5.1でも同じ固定版を新しいtooling directoryへ取得し、hash一致後にのみ使う。
 
 ```powershell
-$RunbookRef = '4fa86d0a51253bc0da99178f63a46e5dfbd927d0'; $HelperSha256 = '3224747ccf74d752fd70e0fd5599418cfa20d6d4bfafc8e8220a002c1dcbcffd'
+$RunbookRef = 'c2378ea3c52b3e415ec6c7acfea4b8f758b46eda'; $HelperSha256 = 'dbb4826e3eb4f0cb13850b59864c7219b8929822976c9e213d3948edbe450f05'
 $Tool = Join-Path $Work 'tooling'; New-Item -ItemType Directory -Path $Tool | Out-Null
 $Helper = Join-Path $Tool 'ts-check.py'
 Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khronos31/siano-userland/$RunbookRef/docs/release-validation/ts-check.py" -OutFile $Helper
@@ -430,7 +451,7 @@ helperのversionはrunbook Git commitとSHA-256の組で固定する。candidate
 - **適用対象/頻度:** 全capture/soak。
 - **準備:** Python 3.11以上を`python3 --version`で確認し、固定取得した`$TOOL/ts-check.py`（Windowsは`$Helper`）を使う。候補ごとに新規作成した`$LOG`を使う。
 - **実操作/利用者への依頼:** POSIXでは各TSに`python3 $TOOL/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`python $Helper "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
-- **期待値/終了値:** null PIDはcontinuity判定から除外する。同一PIDの隣接payload duplicate pairはPCR timestamp以外の全byte一致時だけ1組を許容し、duplicate indexをJSONへ記録する。3個目、内容差、非連続再送はcontinuity error。PCR reserved bits/extension違反とinvalid adaptationはfail。全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
+- **期待値/終了値:** null PIDはcontinuity判定から除外する。同一PIDの隣接payload duplicate pairはPCR timestamp以外の全byte一致時だけ1組を許容し、duplicate indexをJSONへ記録する。3個目、内容差、非連続再送はcontinuity error。retune境界を確認できるrunはzero-basedの最初の出力packet indexを`--retune-boundary-at`へ渡し、境界後の各PID初回packetだけCC比較を除外する。TEI、sync、framing、invalid adaptationは除外しない。PCR reserved bits/extension違反とinvalid adaptationはfail。全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
 - **停止/cleanup:** 元TS/hash/logを残してT08 cleanup。
 - **記録:** Python version、helperのGit SHA/hash、TS hash、helperのJSON/終了値、duplicate/null/invalid packet index、sync/TEI/continuity/drop/counter、client exit。
 
@@ -573,6 +594,7 @@ PIX内部カードは以下の `card-status` による挿入状態だけを確�
 ./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
 ```
 
+<a id="pix-os-t07-recipes"></a>
 ## 4. USB切断とLNB
 
 ### Windows 11 x86_64の実行
