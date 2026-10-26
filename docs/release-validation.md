@@ -894,19 +894,19 @@ Get-ChildItem -LiteralPath $RT -Force
 E05/E06/E07ごとに対応するABI archiveを展開し、Termux:APIと`termux-api`を使う。`termux-usb -l`で実nodeを記録する。`pixd --list-json`や`--device`は`--fd`と併用できないため、Androidは`termux-usb -r -e`でdaemon自身を起動し、渡されたFDでUSBを開く。以下をdaemon起動に使い、clientは別Termux sessionから同じruntime/instance/groupを指定する。
 
 ```sh
+set -e
 RUN_ID='rc-20261026-e05'; RT="$PREFIX/tmp/pix-${RUN_ID}"; LOG="$PREFIX/tmp/pix-${RUN_ID}-log"
 mkdir -p "$LOG"; chmod 700 "$LOG"
-mkdir -p "$RT" && chmod 700 "$RT"
-termux-usb -l > "$LOG/termux-usb-paths.json"
+termux-usb -l > "$LOG/termux-usb-paths.json" || exit $?
 if [ -z "${TARGET_USB:-}" ]; then echo 'set TARGET_USB=06b8:102b for DT181-PU0 or 06b8:103b for DT295' >&2; exit 2; fi
 case "$TARGET_USB" in 06b8:102b|06b8:103b) ;; *) echo 'TARGET_USB must match DT181-PU0 or DT295' >&2; exit 2 ;; esac
 EXPECTED_NODES='1'
 SYSFS_ROOT=${SYSFS_ROOT:-/sys/bus/usb/devices}
-python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" "$SYSFS_ROOT" <<'PY'
+python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" "$SYSFS_ROOT" <<'PY' || exit $?
 import glob,json,os,re,sys
 paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); expected=int(sys.argv[3]); sysroot=sys.argv[5]
 if not isinstance(paths,list) or any(not isinstance(p,str) for p in paths): raise SystemExit('termux-usb -l must return USB path strings')
-selected=[]
+selected=[]; read_errors=[]
 for path in paths:
  m=re.fullmatch(r'/dev/bus/usb/(\d{3})/(\d{3})',path)
  if not m: continue
@@ -914,11 +914,14 @@ for path in paths:
  for node in glob.glob(sysroot+'/*'):
   try:
    if open(node+'/busnum').read().strip()==bus and open(node+'/devnum').read().strip()==dev and (open(node+'/idVendor').read().strip()+':'+open(node+'/idProduct').read().strip()).lower()==target: selected.append(path)
-  except OSError: pass
+  except OSError as error: read_errors.append(f'{node}: {type(error).__name__}: {error}')
 json.dump({'api_paths':paths,'target':target,'selected':selected},open(sys.argv[4],'w',encoding='utf-8'),indent=2)
-if len(selected)!=expected: raise SystemExit(f'expected {expected} matching USB path(s), found {len(selected)}')
+if read_errors: raise SystemExit('sysfs read failed; USB identity cannot be determined: '+ '; '.join(read_errors))
+if len(selected)==0: raise SystemExit(f'no USB path matches target {target}')
+if len(selected)!=expected: raise SystemExit(f'ambiguous USB match: expected {expected} path(s), found {len(selected)}')
 PY
 USB_NODE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selected"][0])' "$LOG/termux-usb-map.json")
+mkdir -p "$RT" && chmod 700 "$RT"
 termux-usb -r -e "./pixd --instance rc --runtime-dir $RT --group" "$USB_NODE" > "$LOG/daemon.out" 2> "$LOG/daemon.err"
 ```
 
