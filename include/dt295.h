@@ -58,6 +58,8 @@ typedef struct {
 
 /* Private runtime bundle produced by tools/prepare-dt295-assets.py. */
 int dt295_assets_load(const char *path, dt295_assets **out, char *error, size_t error_size);
+int dt295_assets_load_bytes(const uint8_t *data, size_t length, dt295_assets **out, char *error,
+                            size_t error_size);
 void dt295_assets_free(dt295_assets *assets);
 
 int dt295_create(dt295 **out, const dt295_io *io, const dt295_assets *assets, char *error,

@@ -598,6 +598,25 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory
     return dtv::userland::Result<std::unique_ptr<Assets>>::success(std::move(assets));
 }
 
+dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
+    const std::uint8_t* firmware, std::size_t firmware_size,
+    const std::uint8_t* bootstrap, std::size_t bootstrap_size,
+    const std::uint8_t* validation, std::size_t validation_size) noexcept
+{
+    if (firmware == nullptr || firmware_size != 699673U || bootstrap == nullptr ||
+        bootstrap_size != 16U || validation == nullptr || validation_size != 64U)
+        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
+    std::unique_ptr<Assets> assets(new (std::nothrow) Assets());
+    if (!assets) return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
+    assets->firmware = static_cast<std::uint8_t*>(std::malloc(firmware_size));
+    if (assets->firmware == nullptr)
+        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
+    std::memcpy(assets->firmware, firmware, firmware_size);
+    std::memcpy(assets->bootstrap.data(), bootstrap, bootstrap_size);
+    std::memcpy(assets->validation.data(), validation, validation_size);
+    return dtv::userland::Result<std::unique_ptr<Assets>>::success(std::move(assets));
+}
+
 dtv::userland::Result<std::unique_ptr<Family>> Family::create(
     const LocatedDevice& device, const char* assets_directory) noexcept
 {
