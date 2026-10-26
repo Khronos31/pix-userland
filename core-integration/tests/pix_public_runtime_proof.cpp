@@ -337,6 +337,18 @@ int main()
                        "--runtime-dir", "relative"},
                       root + "/pixd-relative-runtime.log",
                       {"--runtime-dir must be a non-empty absolute local path"})) return 47;
+    const std::string mode_log = root + "/pixd-runtime-mode.log";
+    const pid_t mode_process = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", root}, mode_log);
+    int mode_status = 0;
+    if (mode_process <= 0 || ::waitpid(mode_process, &mode_status, 0) != mode_process ||
+        !WIFEXITED(mode_status) || WEXITSTATUS(mode_status) != 70) return 51;
+    const auto mode_bytes = read_file(mode_log);
+    const std::string mode_text(mode_bytes.begin(), mode_bytes.end());
+    if (mode_text.find("runtime directory permissions are too broad") == std::string::npos ||
+        mode_text.find("Restrict --runtime-dir permissions") == std::string::npos ||
+        mode_text.find(root) != std::string::npos) return 51;
     const auto client_failure = [&](const char* executable,
                                     const std::vector<std::string>& arguments,
                                     const std::string& log_path,
@@ -428,6 +440,26 @@ int main()
         std::fprintf(stderr, "PROOF pixd startup failed root=%s\n", root.c_str());
         if (daemon > 0) { (void)::kill(daemon, SIGTERM); (void)::waitpid(daemon, nullptr, 0); }
         return 4;
+    }
+    const std::string duplicate_log = root + "/pixd-duplicate.log";
+    const pid_t duplicate = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", root, "--group"}, duplicate_log);
+    int duplicate_status = 0;
+    const bool duplicate_failed = duplicate > 0 &&
+        ::waitpid(duplicate, &duplicate_status, 0) == duplicate &&
+        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 70;
+    const auto duplicate_bytes = read_file(duplicate_log);
+    const std::string duplicate_text(duplicate_bytes.begin(), duplicate_bytes.end());
+    if (!duplicate_failed ||
+        duplicate_text.find("PIX_STAGE reserve error=4") == std::string::npos ||
+        duplicate_text.find("endpoint namespace is already in use") == std::string::npos ||
+        duplicate_text.find("ownership") != std::string::npos ||
+        duplicate_text.find("permissions") != std::string::npos) {
+        if (duplicate > 0) { (void)::kill(duplicate, SIGTERM); (void)::waitpid(duplicate, nullptr, 0); }
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 52;
     }
 
     std::string idle_status;

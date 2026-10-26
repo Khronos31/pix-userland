@@ -357,38 +357,58 @@ void print_endpoint_error(const char* program, std::string_view endpoint,
         diagnostic.reason == EndpointDiagnosticReason::instance ? "instance" : "endpoint");
 }
 
-void print_listener_error(const ListenerDiagnostic& diagnostic) noexcept
+void print_listener_error(const ListenerDiagnostic& diagnostic, Error error) noexcept
 {
     if (diagnostic.reason == ListenerDiagnosticReason::endpoint_path) {
         print_endpoint_error("pixd", diagnostic.endpoint_name, diagnostic.endpoint);
         return;
     }
     const char* reason = "runtime directory could not be checked";
+    const char* advice = "Verify the runtime directory configuration and retry.";
     switch (diagnostic.reason) {
     case ListenerDiagnosticReason::runtime_directory_missing:
         reason = "runtime directory is missing";
+        advice = "Create it or choose another --runtime-dir.";
         break;
     case ListenerDiagnosticReason::runtime_directory_lookup:
         reason = "runtime directory lookup failed";
+        advice = "Verify that --runtime-dir can be inspected.";
         break;
     case ListenerDiagnosticReason::runtime_directory_type:
         reason = "runtime path is not a directory";
+        advice = "Choose a directory for --runtime-dir.";
         break;
     case ListenerDiagnosticReason::runtime_directory_owner:
         reason = "runtime directory has an unexpected owner";
+        advice = "Check --runtime-dir ownership.";
         break;
     case ListenerDiagnosticReason::runtime_directory_mode:
         reason = "runtime directory permissions are too broad";
+        advice = "Restrict --runtime-dir permissions.";
         break;
     case ListenerDiagnosticReason::runtime_directory_security:
         reason = "runtime directory security check failed";
+        advice = "Review the platform runtime directory security requirements.";
         break;
     default:
-        break;
+        if (error == Error::BUSY) {
+            std::fprintf(stderr,
+                "pixd: the PIX endpoint namespace is already in use. Stop the existing pixd for this instance or choose another --instance.\n");
+            return;
+        }
+        if (error == Error::INVALID_ARGUMENT) {
+            advice = "Verify --runtime-dir and --instance.";
+        } else if (error == Error::NOT_READY) {
+            advice = "Choose another runtime endpoint or retry after it is available.";
+        }
+        std::fprintf(stderr,
+            "pixd: cannot reserve the PIX endpoint namespace (error=%u); %s\n",
+            static_cast<unsigned>(error), advice);
+        return;
     }
     std::fprintf(stderr,
-        "pixd: cannot reserve the PIX endpoint namespace: %s. Check --runtime-dir ownership and permissions.\n",
-        reason);
+        "pixd: cannot reserve the PIX endpoint namespace: %s. %s\n",
+        reason, advice);
 }
 
 }  // namespace
@@ -572,7 +592,7 @@ int run(int argc, char** argv)
     const auto reserved = context->reserve_namespace(&listener_diagnostic);
     if (!reserved) {
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
-        print_listener_error(listener_diagnostic);
+        print_listener_error(listener_diagnostic, reserved.error());
         return fail(reserved.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
