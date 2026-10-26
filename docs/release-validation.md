@@ -898,17 +898,20 @@ RUN_ID='rc-20261026-e05'; RT="$PREFIX/tmp/pix-${RUN_ID}"; LOG="$PREFIX/tmp/pix-$
 mkdir -p "$LOG"; chmod 700 "$LOG"
 mkdir -p "$RT" && chmod 700 "$RT"
 termux-usb -l > "$LOG/termux-usb-paths.json"
-TARGET_USB='06b8:102b'; EXPECTED_NODES='1'
-python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" <<'PY'
+if [ -z "${TARGET_USB:-}" ]; then echo 'set TARGET_USB=06b8:102b for DT181-PU0 or 06b8:103b for DT295' >&2; exit 2; fi
+case "$TARGET_USB" in 06b8:102b|06b8:103b) ;; *) echo 'TARGET_USB must match DT181-PU0 or DT295' >&2; exit 2 ;; esac
+EXPECTED_NODES='1'
+SYSFS_ROOT=${SYSFS_ROOT:-/sys/bus/usb/devices}
+python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" "$SYSFS_ROOT" <<'PY'
 import glob,json,os,re,sys
-paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); expected=int(sys.argv[3])
+paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); expected=int(sys.argv[3]); sysroot=sys.argv[5]
 if not isinstance(paths,list) or any(not isinstance(p,str) for p in paths): raise SystemExit('termux-usb -l must return USB path strings')
 selected=[]
 for path in paths:
  m=re.fullmatch(r'/dev/bus/usb/(\d{3})/(\d{3})',path)
  if not m: continue
  bus,dev=(str(int(v)) for v in m.groups())
- for node in glob.glob('/sys/bus/usb/devices/*'):
+ for node in glob.glob(sysroot+'/*'):
   try:
    if open(node+'/busnum').read().strip()==bus and open(node+'/devnum').read().strip()==dev and (open(node+'/idVendor').read().strip()+':'+open(node+'/idProduct').read().strip()).lower()==target: selected.append(path)
   except OSError: pass
@@ -965,6 +968,17 @@ case "$ID:$CAPTURE_SECONDS" in *'<'*|*'>'*|*[!A-Za-z0-9:/.-]*) echo 'set a disco
 echo 0 > "$LOG/t27.rc"
 ```
 
+代表機の必須2時間runは同じ候補daemonを保持した同じterminal shellで、短いT27確認とは別runにする。初回/majorのmacOS・Windowsは1800秒、他OS/ABIは600秒をCAPTURE_SECONDSに設定する。Android clientではdevice selectorを付けず、同じinstance/runtime/groupに接続する。
+
+```sh
+CAPTURE_SECONDS='7200'
+case "$CAPTURE_SECONDS" in ''|*[!0-9]*|0) echo 'CAPTURE_SECONDS must be positive seconds' >&2; exit 2 ;; esac
+./pix-ts --instance "$INSTANCE" --channel T27 --system isdb-t \
+  --time "$CAPTURE_SECONDS" --output "$LOG/representative-soak.ts" --runtime-dir "$RT2" --group \
+  > "$LOG/representative-soak.out" 2> "$LOG/representative-soak.err" || { RC=$?; echo "$RC" > "$LOG/representative-soak.rc"; exit "$RC"; }
+echo 0 > "$LOG/representative-soak.rc"
+```
+
 Androidでは上の`RT2`を新しいrun固有pathへ置き換え、再接続後のTermux USB nodeを使ってdaemonだけを次のように起動します。client consoleでは同じ`RT2`/`rc`/`--group`を指定して上の`pixctl`と`pix-ts`を実行します。
 
 ```sh
@@ -973,14 +987,19 @@ mkdir -p "$LOG"; chmod 700 "$LOG"
 mkdir -p "$RT2" && chmod 700 "$RT2"
 termux-usb -l > "$LOG/termux-usb-paths.json"
 # 上記のsysfs照合を再実行し、再接続後の新しい実nodeだけを選ぶ。
-python3 - "$LOG/termux-usb-paths.json" '06b8:102b' '1' "$LOG/termux-usb-map.json" <<'PY'
+if [ -z "${TARGET_USB:-}" ]; then echo 'set TARGET_USB for the model under test before reconnecting' >&2; exit 2; fi
+case "$TARGET_USB" in 06b8:102b|06b8:103b) ;; *) echo 'TARGET_USB must match DT181-PU0 or DT295' >&2; exit 2 ;; esac
+EXPECTED_NODES='1'
+SYSFS_ROOT=${SYSFS_ROOT:-/sys/bus/usb/devices}
+python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" "$SYSFS_ROOT" <<'PY'
 import glob,json,re,sys
-paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); selected=[]
+paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); expected=int(sys.argv[3]); sysroot=sys.argv[5]; selected=[]
+if not isinstance(paths,list) or any(not isinstance(p,str) for p in paths): raise SystemExit('termux-usb -l must return USB path strings')
 for path in paths:
  m=re.fullmatch(r'/dev/bus/usb/(\d{3})/(\d{3})',path)
  if not m: continue
  bus,dev=(str(int(v)) for v in m.groups())
- for node in glob.glob('/sys/bus/usb/devices/*'):
+ for node in glob.glob(sysroot+'/*'):
   try:
    if open(node+'/busnum').read().strip()==bus and open(node+'/devnum').read().strip()==dev and (open(node+'/idVendor').read().strip()+':'+open(node+'/idProduct').read().strip()).lower()==target: selected.append(path)
   except OSError: pass
@@ -1002,12 +1021,19 @@ termux-usb -r -e "./pixd --instance rc --runtime-dir $RT2 --group" "$USB_NODE"
 `pix-ts`を通常終了し、`pixd`へSIGTERMを送り、status/process/runtime socket cleanupを確認します。`pixd`終了後もruntime rootを残したまま同じ`--group` accessでstatus照会し、IPC endpointの消失と接続失敗を対応付けます。
 
 ```sh
+set -eu
+if [ -z "${PORT:-}" ]; then echo 'set PORT from the candidate discovery JSON before cleanup' >&2; exit 2; fi
+case "$PORT" in *'<'*|*'>'*|*[!A-Za-z0-9._-]*) echo 'invalid or unreplaced USB port' >&2; exit 2 ;; esac
+ID="usb:$PORT"
 kill -TERM "$P"
 if wait "$P"; then daemon_rc=0; else daemon_rc=$?; fi
 printf '%s\n' "$daemon_rc" > "$LOG/daemon.rc"
 find "$RT" -type s -print > "$LOG/socket-after-stop.txt"
-if ./pixctl --runtime-dir "$RT" --instance rc --device usb:<BUS-PORT> --group status > "$LOG/status-after-stop.txt" 2>&1; then rc=0; else rc=$?; fi
+if ./pixctl --runtime-dir "$RT" --instance rc --device "$ID" --group status > "$LOG/status-after-stop.txt" 2>&1; then rc=0; else rc=$?; fi
 printf '%s\n' "$rc" > "$LOG/status-after-stop.rc"
+test "$daemon_rc" -eq 0 || { echo "pixd exit=$daemon_rc" >&2; exit "$daemon_rc"; }
+test ! -s "$LOG/socket-after-stop.txt" || { echo 'IPC socket remains after daemon exit' >&2; exit 1; }
+test "$rc" -eq 3 || { echo "expected same-group endpoint-absent status exit 3, got $rc" >&2; exit 1; }
 rmdir "$RT"
 ```
 
