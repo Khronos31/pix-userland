@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "pix_runtime.h"
+#if defined(PIX_EMBEDDED_ASSETS)
+#include "pix_embedded_assets.h"
+#endif
 
 #include "pix-dt295-receiver-adapter.h"
 
@@ -620,6 +623,12 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
 dtv::userland::Result<std::unique_ptr<Family>> Family::create(
     const LocatedDevice& device, const char* assets_directory) noexcept
 {
+#if defined(PIX_EMBEDDED_ASSETS)
+    (void)assets_directory;
+    const char* asset_manifest = pix_embedded_assets_manifest();
+    if (asset_manifest == nullptr || asset_manifest[0] == '\0')
+        return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+#endif
     std::unique_ptr<Family> family(new (std::nothrow) Family());
     if (!family) return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     family->impl_.reset(new (std::nothrow) Impl());
@@ -627,9 +636,18 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     family->impl_->model = device.model;
     if (device.model == Model::dt295) {
+#if defined(PIX_EMBEDDED_ASSETS)
+        std::size_t asset_size = 0U;
+        const std::uint8_t* asset_data = pix_embedded_dt295_bundle(&asset_size);
+        std::unique_ptr<dt295::ReceiverAdapter> adapter(
+            new (std::nothrow) dt295::ReceiverAdapter(
+                asset_data, asset_size, device.selector, family->impl_->clock, 0U,
+                kTsQueuePackets));
+#else
         std::unique_ptr<dt295::ReceiverAdapter> adapter(
             new (std::nothrow) dt295::ReceiverAdapter(
                 assets_directory, device.selector, family->impl_->clock, 0U, kTsQueuePackets));
+#endif
         if (!adapter)
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
         if (!adapter->ready())
@@ -645,7 +663,16 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
         return dtv::userland::Result<std::unique_ptr<Family>>::success(std::move(family));
     }
+#if defined(PIX_EMBEDDED_ASSETS)
+    std::size_t firmware_size = 0U, bootstrap_size = 0U, validation_size = 0U;
+    const std::uint8_t* firmware = pix_embedded_dt181_firmware(&firmware_size);
+    const std::uint8_t* bootstrap = pix_embedded_dt181_bootstrap(&bootstrap_size);
+    const std::uint8_t* validation = pix_embedded_dt181_validation(&validation_size);
+    auto assets = load_assets_bytes(firmware, firmware_size, bootstrap, bootstrap_size,
+                                    validation, validation_size);
+#else
     auto assets = load_assets(assets_directory);
+#endif
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
     const int opened = dt181_session_open(&family->impl_->session, &device.selector, -1, 0);

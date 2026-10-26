@@ -43,7 +43,9 @@ struct Arguments final {
     std::string device;
     std::string instance;
     std::string runtime_directory;
+#if !defined(PIX_EMBEDDED_ASSETS)
     std::string assets = "assets";
+#endif
     bool group = false;
 #ifdef _WIN32
     bool exit_on_stdin_eof = false;
@@ -53,7 +55,11 @@ struct Arguments final {
 void usage(FILE* output) noexcept
 {
     std::fprintf(output,
+#if defined(PIX_EMBEDDED_ASSETS)
+        "usage: pixd --device serial:SELECTOR|usb:SELECTOR "
+#else
         "usage: pixd --device serial:SELECTOR|usb:SELECTOR [--assets DIR] "
+#endif
         "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
@@ -66,7 +72,10 @@ void usage(FILE* output) noexcept
 
 bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
 {
-    bool device = false, instance = false, runtime = false, assets = false;
+    bool device = false, instance = false, runtime = false;
+#if !defined(PIX_EMBEDDED_ASSETS)
+    bool assets = false;
+#endif
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
@@ -87,7 +96,9 @@ bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
+#if !defined(PIX_EMBEDDED_ASSETS)
         else if (option == "--assets" && !assets) { out.assets = value; assets = true; }
+#endif
         else return false;
     }
     return device && (!out.group || (runtime && !out.runtime_directory.empty())) &&
@@ -286,6 +297,9 @@ int run(int argc, char** argv)
     if (help) { usage(stdout); return 0; }
 
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
+#if defined(PIX_EMBEDDED_ASSETS)
+    const bool fake_dt295 = false;
+#else
     const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
                             arguments.device == "serial:PIXDT29501";
     if (fake_dt295) {
@@ -300,13 +314,18 @@ int run(int argc, char** argv)
         dt295_actual_fixture_configure_presence(raw_state, notification);
     }
 #endif
+#endif
 
     const auto located = pix::runtime::locate(arguments.device);
     if (!located) {
         std::fprintf(stderr, "PIX_STAGE locate error=%u\n", static_cast<unsigned>(located.error()));
         return fail(located.error());
     }
+#if defined(PIX_EMBEDDED_ASSETS)
+    auto family_result = pix::runtime::Family::create(located.value(), nullptr);
+#else
     auto family_result = pix::runtime::Family::create(located.value(), arguments.assets.c_str());
+#endif
     if (!family_result) {
         std::fprintf(stderr, "PIX_STAGE family error=%u\n", static_cast<unsigned>(family_result.error()));
         return fail(family_result.error());

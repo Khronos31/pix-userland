@@ -151,11 +151,68 @@ endif()
 
 set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
+option(PIX_EMBEDDED_ASSETS "Embed the authorized DT181 and DT295 assets in pixd" OFF)
+set(PIX_DT181_ASSET_DIR "" CACHE PATH "Private directory containing DT181 assets")
+set(PIX_DT295_ASSET_FILE "" CACHE FILEPATH "Private DT295 asset bundle")
+
+if(PIX_EMBEDDED_ASSETS)
+    if(NOT IS_DIRECTORY "${PIX_DT181_ASSET_DIR}" OR NOT EXISTS "${PIX_DT295_ASSET_FILE}")
+        message(FATAL_ERROR "PIX_EMBEDDED_ASSETS requires DT181 and DT295 asset inputs")
+    endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(PIX_EMBEDDED_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/embedded-assets")
+    set(PIX_EMBEDDED_ASSET_HEADER "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.h")
+    set(PIX_EMBEDDED_ASSET_SOURCE "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.c")
+    set(PIX_EMBEDDED_ASSET_MANIFEST "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.json")
+    execute_process(
+        COMMAND git -C "${PIX_SOURCE_DIR}" rev-parse HEAD
+        OUTPUT_VARIABLE PIX_SOURCE_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(NOT PIX_SOURCE_REVISION)
+        set(PIX_SOURCE_REVISION "unknown")
+    else()
+        execute_process(
+            COMMAND git -C "${PIX_SOURCE_DIR}" status --porcelain
+            OUTPUT_VARIABLE PIX_SOURCE_STATUS
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(PIX_SOURCE_STATUS)
+            string(APPEND PIX_SOURCE_REVISION "-dirty")
+        endif()
+    endif()
+    set(PIX_EMBEDDED_TOOLCHAIN
+        "C=${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION};CXX=${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+    add_custom_command(
+        OUTPUT "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}"
+               "${PIX_EMBEDDED_ASSET_MANIFEST}"
+        COMMAND "${Python3_EXECUTABLE}" "${PIX_SOURCE_DIR}/tools/embed-assets.py"
+            --dt181-assets "${PIX_DT181_ASSET_DIR}"
+            --dt295-assets "${PIX_DT295_ASSET_FILE}"
+            --output-dir "${PIX_EMBEDDED_ASSET_DIR}"
+            --source-revision "${PIX_SOURCE_REVISION}"
+            --core-revision "${PIX_CORE_REVISION}"
+            --toolchain "${PIX_EMBEDDED_TOOLCHAIN}"
+        DEPENDS
+            "${PIX_SOURCE_DIR}/tools/embed-assets.py"
+            "${PIX_SOURCE_DIR}/tools/finalize-private-release.py"
+            "${PIX_DT181_ASSET_DIR}/fpga.bin"
+            "${PIX_DT181_ASSET_DIR}/bootstrap.bin"
+            "${PIX_DT181_ASSET_DIR}/validation.bin"
+            "${PIX_DT295_ASSET_FILE}"
+        VERBATIM)
+endif()
 
 add_library(pix_product_runtime STATIC pix_runtime.cpp)
 target_include_directories(pix_product_runtime PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}"
     PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+if(PIX_EMBEDDED_ASSETS)
+    target_sources(pix_product_runtime PRIVATE
+        "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}")
+    target_include_directories(pix_product_runtime PRIVATE "${PIX_EMBEDDED_ASSET_DIR}")
+    target_compile_definitions(pix_product_runtime PRIVATE PIX_EMBEDDED_ASSETS)
+endif()
 target_compile_definitions(pix_product_runtime PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix_product_runtime PUBLIC cxx_std_17)
@@ -169,6 +226,9 @@ target_link_libraries(pix_product_runtime PUBLIC
 
 add_executable(pixd pixd.cpp)
 target_compile_definitions(pixd PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+if(PIX_EMBEDDED_ASSETS)
+    target_compile_definitions(pixd PRIVATE PIX_EMBEDDED_ASSETS)
+endif()
 target_compile_features(pixd PRIVATE cxx_std_17)
 target_compile_options(pixd PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pixd PRIVATE pix_product_runtime dtv::json PkgConfig::LIBUSB)
@@ -203,6 +263,9 @@ target_compile_definitions(pixd_fixture PRIVATE
     PIX_TEST_DT295_FIXTURE
     PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
     PIX_RUNTIME_TEST_CLOSE_BUDGET_MS=50)
+if(PIX_EMBEDDED_ASSETS)
+    target_compile_definitions(pixd_fixture PRIVATE PIX_EMBEDDED_ASSETS)
+endif()
 if(NOT WIN32)
     target_compile_definitions(pixd_fixture PRIVATE PIX_TEST_CALLBACK_GATE)
 endif()
@@ -229,7 +292,7 @@ else()
         -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
 endif()
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT PIX_EMBEDDED_ASSETS)
 add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
 target_include_directories(pix_public_runtime_proof PRIVATE
@@ -250,4 +313,14 @@ target_link_options(pix_public_runtime_proof PRIVATE
     -Wl,--wrap=pthread_create)
 add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
+endif()
+
+if(PIX_EMBEDDED_ASSETS AND NOT WIN32)
+add_executable(pix_embedded_runtime_proof tests/pix_embedded_runtime_proof.cpp)
+target_compile_definitions(pix_embedded_runtime_proof PRIVATE
+    PIXD_PATH="$<TARGET_FILE:pixd_fixture>")
+target_compile_features(pix_embedded_runtime_proof PRIVATE cxx_std_17)
+target_compile_options(pix_embedded_runtime_proof PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_dependencies(pix_embedded_runtime_proof pixd_fixture)
+add_test(NAME pix_embedded_runtime_proof COMMAND pix_embedded_runtime_proof)
 endif()
