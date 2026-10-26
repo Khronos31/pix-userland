@@ -1,4 +1,10 @@
 #include "pix_runtime.h"
+#if defined(PIX_EMBEDDED_ASSETS)
+extern "C" {
+#include "dt295.h"
+}
+#include "pix_embedded_assets.h"
+#endif
 
 #include <array>
 #include <cassert>
@@ -37,9 +43,29 @@ int main(int argc, char** argv)
         std::string(size_diagnostic.detail.data()) == "file size does not match" &&
         size_diagnostic.byte_counts_valid && size_diagnostic.expected_bytes == 699673U &&
         size_diagnostic.actual_bytes == sizeof(short_data);
+    const std::uint8_t bad_bundle[] = {0x01U};
+#if defined(PIX_EMBEDDED_ASSETS)
+    std::size_t embedded_bundle_size = 0U;
+    const std::uint8_t* embedded_bundle = pix_embedded_dt295_bundle(&embedded_bundle_size);
+    dt295_assets* embedded_assets = nullptr;
+    char embedded_error[128]{};
+    const bool embedded_bundle_ok = embedded_bundle != nullptr && embedded_bundle_size > 0U &&
+        pix_embedded_assets_manifest() != nullptr && pix_embedded_assets_manifest()[0] != '\0' &&
+        dt295_assets_load_bytes(embedded_bundle, embedded_bundle_size, &embedded_assets,
+                                embedded_error, sizeof(embedded_error)) == 0 &&
+        embedded_assets != nullptr;
+    dt295_assets_free(embedded_assets);
+    dt295_assets* rejected_assets = nullptr;
+    char rejected_error[128]{};
+    const bool invalid_bundle_ok =
+        dt295_assets_load_bytes(bad_bundle, sizeof(bad_bundle), &rejected_assets,
+                                rejected_error, sizeof(rejected_error)) != 0 &&
+        rejected_assets == nullptr &&
+        std::string(rejected_error) == "invalid DT295 asset bundle header";
+    dt295_assets_free(rejected_assets);
+#else
     const std::string dt295_bundle = std::string(diagnostic_root) + "/dt295.assets";
     const int bundle_fd = ::open(dt295_bundle.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-    const std::uint8_t bad_bundle[] = {0x01U};
     bool wrote_bundle = bundle_fd >= 0 &&
         ::write(bundle_fd, bad_bundle, sizeof(bad_bundle)) ==
             static_cast<ssize_t>(sizeof(bad_bundle));
@@ -55,10 +81,16 @@ int main(int argc, char** argv)
         std::string(bundle_diagnostic.detail.data()) ==
             "invalid DT295 asset bundle header";
     const bool removed_bundle = ::unlink(dt295_bundle.c_str()) == 0;
+#endif
     const bool removed_file = ::unlink(short_firmware.c_str()) == 0;
     const bool removed_root = ::rmdir(diagnostic_root) == 0;
+#if defined(PIX_EMBEDDED_ASSETS)
+    assert(missing_ok && wrote_short && size_ok && embedded_bundle_ok && invalid_bundle_ok &&
+           removed_file && removed_root);
+#else
     assert(missing_ok && wrote_short && size_ok && wrote_bundle && bundle_ok &&
            removed_bundle && removed_file && removed_root);
+#endif
 #endif
 
     std::vector<std::uint8_t> firmware(699673U, 0x41U);
