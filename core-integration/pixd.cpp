@@ -365,6 +365,20 @@ void print_listener_error(const ListenerDiagnostic& diagnostic, Error error) noe
     }
     const char* reason = "runtime directory could not be checked";
     const char* advice = "Verify the runtime directory configuration and retry.";
+    const char* directory_layer = "runtime root";
+    switch (diagnostic.directory_layer) {
+    case RuntimeDirectoryLayer::product:
+        directory_layer = "product";
+        break;
+    case RuntimeDirectoryLayer::version:
+        directory_layer = "version";
+        break;
+    case RuntimeDirectoryLayer::instance:
+        directory_layer = "instance";
+        break;
+    default:
+        break;
+    }
     switch (diagnostic.reason) {
     case ListenerDiagnosticReason::runtime_directory_missing:
         reason = "runtime directory is missing";
@@ -390,6 +404,10 @@ void print_listener_error(const ListenerDiagnostic& diagnostic, Error error) noe
         reason = "runtime directory security check failed";
         advice = "Review the platform runtime directory security requirements.";
         break;
+    case ListenerDiagnosticReason::runtime_directory_encoding:
+        reason = "runtime directory path is not valid UTF-8";
+        advice = "Use a valid UTF-8 --runtime-dir.";
+        break;
     default:
         if (error == Error::BUSY) {
             std::fprintf(stderr,
@@ -407,8 +425,8 @@ void print_listener_error(const ListenerDiagnostic& diagnostic, Error error) noe
         return;
     }
     std::fprintf(stderr,
-        "pixd: cannot reserve the PIX endpoint namespace: %s. %s\n",
-        reason, advice);
+        "pixd: cannot reserve the PIX endpoint namespace: %s (directory layer: %s). %s\n",
+        reason, directory_layer, advice);
 }
 
 }  // namespace

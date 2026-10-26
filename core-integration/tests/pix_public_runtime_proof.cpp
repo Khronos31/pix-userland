@@ -349,6 +349,25 @@ int main()
     if (mode_text.find("runtime directory permissions are too broad") == std::string::npos ||
         mode_text.find("Restrict --runtime-dir permissions") == std::string::npos ||
         mode_text.find(root) != std::string::npos) return 51;
+    const std::string nested_runtime = root + "/nested-runtime";
+    const std::string product_directory = nested_runtime + "/pix-userland";
+    if (::mkdir(nested_runtime.c_str(), 0700) != 0 ||
+        ::chmod(nested_runtime.c_str(), 0770) != 0 ||
+        ::mkdir(product_directory.c_str(), 0700) != 0) return 53;
+    const std::string nested_mode_log = root + "/pixd-product-mode.log";
+    const pid_t nested_mode_process = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", nested_runtime, "--instance", "pix", "--group"}, nested_mode_log);
+    int nested_mode_status = 0;
+    if (nested_mode_process <= 0 ||
+        ::waitpid(nested_mode_process, &nested_mode_status, 0) != nested_mode_process ||
+        !WIFEXITED(nested_mode_status) || WEXITSTATUS(nested_mode_status) != 70) return 53;
+    const auto nested_mode_bytes = read_file(nested_mode_log);
+    const std::string nested_mode_text(nested_mode_bytes.begin(), nested_mode_bytes.end());
+    if (nested_mode_text.find("runtime directory permissions are too broad") ==
+            std::string::npos ||
+        nested_mode_text.find("directory layer: product") == std::string::npos ||
+        nested_mode_text.find(nested_runtime) != std::string::npos) return 53;
     const auto client_failure = [&](const char* executable,
                                     const std::vector<std::string>& arguments,
                                     const std::string& log_path,
