@@ -122,7 +122,7 @@ pkgdir=$build/prefix/lib/pkgconfig
 out=$root/build/$mode
 [ "$mode" != android ] || out=$out-$abi
 mkdir -p "$out"
-set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
+set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" "-DPIX_SOURCE_REVISION_OVERRIDE=${PIX_SOURCE_REVISION_OVERRIDE:-}" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
 [ -z "$toolchain_file" ] || set -- "$@" -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" -DANDROID_ABI="$android_abi" -DANDROID_PLATFORM="android-$api" -DANDROID_STL=c++_static -DCMAKE_FIND_ROOT_PATH="$build/prefix"
 [ ! -d "$core_root" ] || set -- "$@" "-DPIX_CORE_SOURCE_DIR=$core_root"
 if [ "$embedded_assets" = ON ]; then
@@ -140,6 +140,7 @@ cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
     "$cxx" --version | head -n 1
 } > "$out/build-info.txt"
 if [ "$embedded_assets" = ON ]; then
+    install -m 0644 "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
     python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
 import hashlib
 import json

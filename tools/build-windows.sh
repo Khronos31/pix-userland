@@ -105,6 +105,7 @@ cmake -S "$root/core-integration" -B "$build/cmake" \
     -DCMAKE_RC_COMPILER="$chain/bin/llvm-rc" \
     -DCMAKE_EXE_LINKER_FLAGS='-static -Wl,--no-insert-timestamp' \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" \
+    "-DPIX_SOURCE_REVISION_OVERRIDE=${PIX_SOURCE_REVISION_OVERRIDE:-}" \
     "${source_args[@]}" "${embedded_args[@]}"
 cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 cp "$build/bin/pixd.exe" "$build/bin/pixctl.exe" "$build/bin/pix-ts.exe" "$out/"
@@ -123,6 +124,7 @@ fi
     done
 } > "$out/build-info.txt"
 if [[ "$embedded_assets" == ON ]]; then
+    cp "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
     python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
 import hashlib
 import json

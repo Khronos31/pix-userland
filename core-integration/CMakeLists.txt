@@ -164,11 +164,16 @@ if(PIX_EMBEDDED_ASSETS)
     set(PIX_EMBEDDED_ASSET_HEADER "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.h")
     set(PIX_EMBEDDED_ASSET_SOURCE "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.c")
     set(PIX_EMBEDDED_ASSET_MANIFEST "${PIX_EMBEDDED_ASSET_DIR}/pix_embedded_assets.json")
-    execute_process(
-        COMMAND git -C "${PIX_SOURCE_DIR}" rev-parse HEAD
-        OUTPUT_VARIABLE PIX_SOURCE_REVISION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET)
+    set(PIX_SOURCE_REVISION_OVERRIDE "" CACHE STRING "Source revision recorded for embedded assets")
+    if(PIX_SOURCE_REVISION_OVERRIDE)
+        set(PIX_SOURCE_REVISION "${PIX_SOURCE_REVISION_OVERRIDE}")
+    else()
+        execute_process(
+            COMMAND git -C "${PIX_SOURCE_DIR}" rev-parse HEAD
+            OUTPUT_VARIABLE PIX_SOURCE_REVISION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
     if(NOT PIX_SOURCE_REVISION)
         set(PIX_SOURCE_REVISION "unknown")
     else()
@@ -217,7 +222,8 @@ target_compile_definitions(pix_product_runtime PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
 target_compile_features(pix_product_runtime PUBLIC cxx_std_17)
 target_compile_options(pix_product_runtime PRIVATE
-    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_product_runtime PUBLIC
     pix_dt181_composition pix_dt295_composition
     dtv::host_listener_context dtv::host_runtime dtv::host_facade
