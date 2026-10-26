@@ -514,21 +514,19 @@ N/Aは製品機能上該当しない項目だけに使う。OS/ABI候補のunsup
 
 ## 対象アーカイブ・環境から全試験への対応
 
-選択したarchive/E-IDごとに、下表のT00–T14を同じrun記録へ実施する。各T見出しは準備・実操作・期待値/終了値・停止/cleanup・記録を含む手順本体であり、表は対象環境からその全項目へ直接辿る索引である。環境表に載る別OS/ABIの結果や過去runで代用しない。
+各正式archive/E-IDで適用されるT00–T14を独立して実行する。試験項目の準備、操作、期待値/終了値、停止/cleanup、記録は「共通試験シナリオ T00–T14」を唯一の定義とし、下表はarchiveごとのOS/ABI環境手順への参照を示す。異なるarchive、libc、OS/ABI、USB access boundaryの結果で代替しない。機能対象外はT本文と製品固有条件に理由を記し、未実施・unsupported・候補未入手・環境不足は未達として記録する。
 
-| archive / E-ID / 実行環境 | T00–T14の手順リンク |
-|---|---|
-| `linux-x86_64` / [E03](#3-配布アーカイブ別手順) / Linux x86_64/glibc | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `linux-x86_64` / [E02](#3-配布アーカイブ別手順) / Linux x86_64/musl | 上と同じT00–T14。glibc結果で代替せず、同じ`linux-x86_64` archiveをmusl runtime/access environmentで独立実行する。 |
-| `linux-aarch64` / [E15-G](#3-配布アーカイブ別手順) / Linux aarch64/glibc | 上と同じT00–T14。musl結果で代替せず、同じ`linux-aarch64` archiveをglibc runtime/access environmentで独立実行する。 |
-| `linux-aarch64` / [E15-M](#3-配布アーカイブ別手順) / Linux aarch64/musl | 上と同じT00–T14。glibc結果で代替せず、同じ`linux-aarch64` archiveをmusl runtime/access environmentで独立実行する。 |
-| `darwin-arm64` / [E04](#3-配布アーカイブ別手順) / macOS arm64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `android-aarch64` / [E05](#android-termux-の実行) / Android Termux/aarch64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `android-armv7a` / [E06](#android-termux-の実行) / Android Termux/armv7a | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `android-x86_64` / [E07](#android-termux-の実行) / Android Termux/x86_64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-| `windows-x64` / [E17](#windows-11-x86_64の実行) / Windows 11 x86_64 | [T00](#t00-候補配布物固定) · [T01](#t01-実行環境アクセス権入力) · [T02](#t02-列挙selectorready確認) · [T03](#t03-最大同時受信) · [T04](#t04-不足波全無料channel) · [T05](#t05-受信中の状態確認制御) · [T06](#t06-card物理挿抜復帰) · [T07](#t07-usb待機中受信中の切断と再取得) · [T08](#t08-通常停止cleanup) · [T09](#t09-tscounter終了値判定) · [T10](#t10-native-pcscwinscard) · [T11](#t11-lnb非対応要求の拒否) · [T12](#t12-複数devicedaemonaccess) · [T13](#t13-連続受信頻度) · [T14](#t14-失敗リリース判定) |
-
-OS/ABI固有の起動方法は以下の環境recipeと§3のarchive手順を使う。試験の期待・cleanup・記録項目はリンク先T本文に従う。機能対象外だけを理由付きN/Aとし、候補未入手・unsupported・未実施・環境不足は未達で記録する。
+| archive / E-ID / 実行環境とprocedure |
+|---|
+| `linux-x86_64` / [E03](#3-配布アーカイブ別手順) / Linux x86_64/glibc |
+| `linux-x86_64` / [E02](#3-配布アーカイブ別手順) / Linux x86_64/musl |
+| `linux-aarch64` / [E15-G](#3-配布アーカイブ別手順) / Linux aarch64/glibc |
+| `linux-aarch64` / [E15-M](#3-配布アーカイブ別手順) / Linux aarch64/musl |
+| `darwin-arm64` / [E04](#3-配布アーカイブ別手順) / macOS arm64 |
+| `android-aarch64` / [E05](#android-termux-の実行) / Android Termux/aarch64 |
+| `android-armv7a` / [E06](#android-termux-の実行) / Android Termux/armv7a |
+| `android-x86_64` / [E07](#android-termux-の実行) / Android Termux/x86_64 |
+| `windows-x64` / [E17](#windows-11-x86_64の実行) / Windows 11 x86_64 |
 
 ## 0. 共通配布アーカイブと共通手順
 
