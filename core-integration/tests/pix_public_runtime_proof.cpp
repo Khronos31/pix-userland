@@ -337,6 +337,29 @@ int main()
                        "--runtime-dir", "relative"},
                       root + "/pixd-relative-runtime.log",
                       {"--runtime-dir must be a non-empty absolute local path"})) return 47;
+    const auto client_failure = [&](const char* executable,
+                                    const std::vector<std::string>& arguments,
+                                    const std::string& log_path,
+                                    const char* detail) {
+        const pid_t child = launch(executable, arguments, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        return log.find(detail) != std::string::npos &&
+               log.find(root) == std::string::npos;
+    };
+    if (!client_failure(PIXCTL_PATH,
+            {"--runtime-dir", "relative", "--instance", "pix-proof",
+             "--device", "usb:1-2", "status"},
+            root + "/pixctl-invalid-runtime.log",
+            "--runtime-dir must be an absolute local runtime directory")) return 48;
+    if (!client_failure(PIXCTL_PATH,
+            {"--runtime-dir", long_runtime, "--instance", "pix-proof",
+             "--device", "usb:1-2", "status"},
+            root + "/pixctl-long-endpoint.log",
+            "endpoint path is too long")) return 49;
     const std::string expected_path = root + "/expected.ts";
     const std::string output_path = root + "/client.ts";
     const std::string off_grid_path = root + "/off-grid.ts";
