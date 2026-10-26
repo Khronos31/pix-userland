@@ -667,11 +667,16 @@ $LOG = Join-Path $D 'logs'
 $selector = 'usb:BUS-PORT'
 & .\pixctl.exe --device $selector --runtime-dir $RT --instance rc --group status
 & .\pixctl.exe --device $selector --runtime-dir $RT --instance rc --group list
-$p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time','30','--output',(Join-Path $D 'capture.ts'),'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow
-$p.WaitForExit()
+$p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time','30','--output',(Join-Path $LOG 'capture.ts'),'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $LOG 't03.out') -RedirectStandardError (Join-Path $LOG 't03.err')
+if (-not $p.WaitForExit(90000)) {
+  $p.Id | Out-File (Join-Path $LOG 't03-client-timeout.txt')
+  Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+  if (-not $p.WaitForExit(5000)) { $p.Id | Out-File (Join-Path $LOG 't03-client-cleanup-timeout.txt') }
+}
 $p.Refresh()
-$p.ExitCode
-Get-FileHash -Algorithm SHA256 (Join-Path $D 'capture.ts')
+if (-not $p.HasExited -or $p.ExitCode -ne 0 -or (Test-Path (Join-Path $LOG 't03-client-timeout.txt'))) { 'incomplete: client timeout/exit failure' | Set-Content (Join-Path $LOG 't03-state.txt') } else { 'complete: client exited 0' | Set-Content (Join-Path $LOG 't03-state.txt') }
+if ($p.HasExited) { $p.ExitCode | Out-File (Join-Path $LOG 't03-client.rc') } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG 't03-client.rc') }
+if (Test-Path (Join-Path $LOG 'capture.ts')) { Get-FileHash -Algorithm SHA256 (Join-Path $LOG 'capture.ts') } else { 'capture.ts unavailable' | Out-File (Join-Path $LOG 't03-ts-missing.txt') }
 ```
 
 T04は`$CHANNEL_PLAN`に対象channelを並べ、各channel/modelを独立captureとして実行する。T05は別consoleのstatus/listを受信中にも実行する。T06はcaptureを止めdaemonを維持し、利用者の抜去前後に`card-status`を記録する。外部ATR/APDUは本製品の対象外であり、内部CARDがないOSを理由に試験を省略しない。
