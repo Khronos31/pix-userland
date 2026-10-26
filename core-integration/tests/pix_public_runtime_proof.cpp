@@ -569,6 +569,35 @@ int main()
         (void)::waitpid(daemon, nullptr, 0);
         return 27;
     }
+    const std::string stream_endpoint = root + "/pix-userland/v1/" + idle_instance +
+        "/stream.sock";
+    if (::unlink(stream_endpoint.c_str()) != 0) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 54;
+    }
+    const std::string missing_stream_log = root + "/pix-ts-missing-stream.log";
+    const pid_t missing_stream_client = launch(PIXTS_PATH,
+        {"--device", "serial:PIXDT18101", "--channel", "T13", "--time", "1",
+         "--output", root + "/missing-stream.ts", "--runtime-dir", root, "--group"},
+        missing_stream_log);
+    int missing_stream_status = 0;
+    if (missing_stream_client <= 0 ||
+        ::waitpid(missing_stream_client, &missing_stream_status, 0) != missing_stream_client ||
+        !WIFEXITED(missing_stream_status) || WEXITSTATUS(missing_stream_status) != 3) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 55;
+    }
+    const auto missing_stream_bytes = read_file(missing_stream_log);
+    const std::string missing_stream_text(missing_stream_bytes.begin(), missing_stream_bytes.end());
+    if (missing_stream_text.find("stream endpoint is missing") == std::string::npos ||
+        missing_stream_text.find("control endpoint is missing") != std::string::npos ||
+        missing_stream_text.find(root) != std::string::npos) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 56;
+    }
     (void)::kill(daemon, SIGTERM);
     int daemon_status = 0;
     if (::waitpid(daemon, &daemon_status, 0) != daemon || !WIFEXITED(daemon_status) ||
