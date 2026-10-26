@@ -54,20 +54,21 @@ bool same_identity(const dtv::userland::detail::Attachment& left,
 
 ReceiverAdapter::ReceiverAdapter(const char* assets_directory, const usb_selector& selector,
                                  Clock& clock, ReceiverId receiver,
-                                 std::size_t queue_packets) noexcept
+                                 std::size_t queue_packets, int device_fd) noexcept
     : clock_(clock), receiver_(receiver), queue_packets_(queue_packets)
 {
     io_.owner = this;
-    initialize(assets_directory, selector);
+    initialize(assets_directory, selector, device_fd);
 }
 
 ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
                                  const usb_selector& selector, Clock& clock,
-                                 ReceiverId receiver, std::size_t queue_packets) noexcept
+                                 ReceiverId receiver, std::size_t queue_packets,
+                                 int device_fd) noexcept
     : clock_(clock), receiver_(receiver), queue_packets_(queue_packets)
 {
     io_.owner = this;
-    initialize(assets, assets_size, selector);
+    initialize(assets, assets_size, selector, device_fd);
 }
 
 ReceiverAdapter::~ReceiverAdapter() noexcept
@@ -76,7 +77,7 @@ ReceiverAdapter::~ReceiverAdapter() noexcept
 }
 
 void ReceiverAdapter::initialize(const char* assets_directory,
-                                 const usb_selector& selector) noexcept
+                                 const usb_selector& selector, int device_fd) noexcept
 {
     init_error_ = Error::INVALID_ARGUMENT;
     if (assets_directory == nullptr || assets_directory[0] == '\0') return;
@@ -88,11 +89,11 @@ void ReceiverAdapter::initialize(const char* assets_directory,
         std::snprintf(init_detail_.data(), init_detail_.size(), "%s", error);
         return;
     }
-    initialize_device(selector);
+    initialize_device(selector, device_fd);
 }
 
 void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_size,
-                                 const usb_selector& selector) noexcept
+                                 const usb_selector& selector, int device_fd) noexcept
 {
     init_error_ = Error::INVALID_ARGUMENT;
     char error[256]{};
@@ -100,13 +101,13 @@ void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_
         std::snprintf(init_detail_.data(), init_detail_.size(), "%s", error);
         return;
     }
-    initialize_device(selector);
+    initialize_device(selector, device_fd);
 }
 
-void ReceiverAdapter::initialize_device(const usb_selector& selector) noexcept
+void ReceiverAdapter::initialize_device(const usb_selector& selector, int device_fd) noexcept
 {
     char error[256]{};
-    if (usb_open_model(&usb_, &selector, -1, 0, USB_MODEL_DT295) != 0) return;
+    if (usb_open_model(&usb_, &selector, device_fd, 0, USB_MODEL_DT295) != 0) return;
     const dt295_io io{&io_,
                       &ReceiverAdapter::control,
                       &ReceiverAdapter::bulk,

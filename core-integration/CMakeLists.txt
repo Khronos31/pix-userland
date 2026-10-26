@@ -250,6 +250,8 @@ if(PIX_EMBEDDED_ASSETS)
     target_compile_definitions(pix_asset_memory_proof PRIVATE PIX_EMBEDDED_ASSETS)
 endif()
 add_test(NAME pix_asset_memory_proof COMMAND pix_asset_memory_proof)
+add_test(NAME pix_android_launcher
+    COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh")
 
 add_executable(pixctl tools/pixctl.cpp)
 target_compile_definitions(pixctl PRIVATE

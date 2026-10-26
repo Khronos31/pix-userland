@@ -17,6 +17,7 @@ EXTENSIONS = {'.c', '.h', '.cpp', '.sh', '.py', '.md', '.json', '.yml', '.rules'
 SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','assets'}
 
 SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.txt', 'core-integration/dtv-userland-core.revision',
+                'packaging/pix-termux',
                 'assets/fpga.bin', 'assets/bootstrap.bin', 'assets/validation.bin', 'assets/dt295.assets'}
 DT181_ASSETS = ('fpga.bin', 'bootstrap.bin', 'validation.bin')
 DT181_SIZES = {'fpga.bin': 699673, 'bootstrap.bin': 16, 'validation.bin': 64}
@@ -135,7 +136,7 @@ def package(target, binary_dir=None, core_source_root=None, output_dir=None):
         build_info = next(data for name, data, _ in members if name == 'build-info.txt')
         metadata['embedded_assets'] = embedded_build_metadata(build_info, manifest, manifest_bytes)
         metadata['device_assets'] = True
-    required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions'}
+    required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions','packaging/pix-termux'}
     if target == 'source':
         required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp','tools/build-windows.sh','include/os.h','src/dt181_capture_host.c','pix-dt181-consumer.cpp','core-integration/tests/windows_os_thread_proof.c','tests/test_windows_runtime.py','assets/fpga.bin','assets/bootstrap.bin','assets/validation.bin','assets/dt295.assets'}
     assert required <= {name for name, _, _ in members}, 'Missing package documentation or licenses'

@@ -560,6 +560,7 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
             selected.serial = observed;
             selected.serial_present = true;
             selected.serial_unique = true;
+            selected.serial_uniqueness_known = true;
             found = true;
             continue;
         }
@@ -591,6 +592,7 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
         continue;
     }
     if (!serial_selector && found && selected.serial_present) {
+        selected.serial_uniqueness_known = true;
         for (ssize_t index = 0; index < count; ++index) {
             if (index == selected_index) continue;
             libusb_device_descriptor descriptor{};
@@ -611,6 +613,123 @@ dtv::userland::Result<LocatedDevice> locate(const std::string& input) noexcept
         return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
     if (!found) return dtv::userland::Result<LocatedDevice>::failure(failure);
     return dtv::userland::Result<LocatedDevice>::success(std::move(selected));
+}
+
+dtv::userland::Result<LocatedDevice> locate_fd(
+    int fd, const std::string* input) noexcept
+{
+#ifdef _WIN32
+    (void)fd;
+    (void)input;
+    return dtv::userland::Result<LocatedDevice>::failure(Error::UNSUPPORTED);
+#else
+    if (fd < 3 || ::fcntl(fd, F_GETFD) < 0)
+        return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
+
+    dtv::userland::identity::Selector wanted{};
+    usb_selector wanted_usb{};
+    bool has_selector = input != nullptr;
+    bool serial_selector = false;
+    if (has_selector) {
+        const auto parsed = dtv::userland::identity::parse_device_selector(*input);
+        if (!parsed)
+            return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
+        wanted = parsed.value();
+        serial_selector = wanted.kind ==
+            dtv::userland::identity::SelectorKind::serial;
+        if (!serial_selector &&
+            (wanted.kind != dtv::userland::identity::SelectorKind::usb_topology ||
+             wanted.topology.count != 1U ||
+             usb_selector_parse(input->c_str() + 4U, &wanted_usb) != 0 ||
+             wanted_usb.kind != USB_SELECT_PATH))
+            return dtv::userland::Result<LocatedDevice>::failure(Error::INVALID_ARGUMENT);
+    }
+
+    const int owned_fd = ::dup(fd);
+    if (owned_fd < 0 || ::fcntl(owned_fd, F_SETFD, FD_CLOEXEC) < 0) {
+        if (owned_fd >= 0) (void)::close(owned_fd);
+        return dtv::userland::Result<LocatedDevice>::failure(Error::USB_IO);
+    }
+    (void)libusb_set_option(nullptr, LIBUSB_OPTION_NO_DEVICE_DISCOVERY);
+    libusb_context* context = nullptr;
+    const int initialized = libusb_init(&context);
+    if (initialized != LIBUSB_SUCCESS) {
+        (void)::close(owned_fd);
+        return dtv::userland::Result<LocatedDevice>::failure(Error::USB_IO);
+    }
+    libusb_device_handle* handle = nullptr;
+    const int wrapped = libusb_wrap_sys_device(context,
+        static_cast<intptr_t>(owned_fd), &handle);
+    if (wrapped != LIBUSB_SUCCESS || handle == nullptr) {
+        libusb_exit(context);
+        (void)::close(owned_fd);
+        return dtv::userland::Result<LocatedDevice>::failure(
+            wrapped == LIBUSB_ERROR_INVALID_PARAM || wrapped == LIBUSB_ERROR_NO_DEVICE
+                ? Error::INVALID_ARGUMENT : Error::USB_IO);
+    }
+
+    LocatedDevice selected{};
+    selected.fd = fd;
+    auto* device = libusb_get_device(handle);
+    libusb_device_descriptor descriptor{};
+    Error failure = Error::NOT_FOUND;
+    if (device == nullptr ||
+        libusb_get_device_descriptor(device, &descriptor) != LIBUSB_SUCCESS) {
+        failure = Error::INVALID_ARGUMENT;
+    }
+    bool matches = failure != Error::INVALID_ARGUMENT &&
+        descriptor.idVendor == 0x06b8U &&
+        (descriptor.idProduct == 0x102bU || descriptor.idProduct == 0x103bU);
+    if (matches) {
+        selected.model = descriptor.idProduct == 0x102bU ? Model::dt181 : Model::dt295;
+        const unsigned bus = libusb_get_bus_number(device);
+        std::uint8_t ports[USB_SELECTOR_MAX_PORTS]{};
+        const int port_count = libusb_get_port_numbers(device, ports, sizeof(ports));
+        selected.bus = static_cast<std::uint8_t>(bus);
+        selected.address = libusb_get_device_address(device);
+        if (port_count > 0 && static_cast<std::size_t>(port_count) <= selected.ports.size()) {
+            selected.port_count = static_cast<std::uint8_t>(port_count);
+            std::copy(ports, ports + port_count, selected.ports.begin());
+            char path[64]{};
+            if (usb_selector_format_path(path, sizeof(path), bus, ports,
+                                         static_cast<unsigned>(port_count)) == 0)
+                selected.path.assign(path);
+        }
+        if (descriptor.iSerialNumber != 0U) {
+            unsigned char serial[256]{};
+            const int length = libusb_get_string_descriptor_ascii(
+                handle, descriptor.iSerialNumber, serial, sizeof(serial));
+            if (length > 0 && static_cast<std::size_t>(length) <= selected.serial.bytes.size()) {
+                selected.serial.length = static_cast<std::uint16_t>(length);
+                std::memcpy(selected.serial.bytes.data(), serial,
+                            static_cast<std::size_t>(length));
+                selected.serial_present = true;
+                selected.serial_unique = false;
+                selected.serial_uniqueness_known = false;
+            }
+        } else {
+            selected.serial_absent = true;
+        }
+        if (has_selector && serial_selector) {
+            matches = selected.serial_present && same_serial(selected.serial, wanted.serial);
+        } else if (has_selector) {
+            matches = selected.bus == wanted_usb.bus && selected.port_count != 0U &&
+                usb_selector_matches(&wanted_usb, 0U, selected.bus, selected.address,
+                                     selected.ports.data(), selected.port_count);
+        }
+        if (!matches) failure = Error::NOT_FOUND;
+        selected.selector.kind = USB_SELECT_INDEX;
+    } else if (failure != Error::INVALID_ARGUMENT) {
+        failure = Error::NOT_FOUND;
+    }
+
+    libusb_close(handle);
+    libusb_exit(context);
+    (void)::close(owned_fd);
+    if (!matches)
+        return dtv::userland::Result<LocatedDevice>::failure(failure);
+    return dtv::userland::Result<LocatedDevice>::success(std::move(selected));
+#endif
 }
 
 dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& input) noexcept
@@ -724,11 +843,12 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         std::unique_ptr<dt295::ReceiverAdapter> adapter(
             new (std::nothrow) dt295::ReceiverAdapter(
                 asset_data, asset_size, device.selector, family->impl_->clock, 0U,
-                kTsQueuePackets));
+                kTsQueuePackets, device.fd));
 #else
         std::unique_ptr<dt295::ReceiverAdapter> adapter(
             new (std::nothrow) dt295::ReceiverAdapter(
-                assets_directory, device.selector, family->impl_->clock, 0U, kTsQueuePackets));
+                assets_directory, device.selector, family->impl_->clock, 0U,
+                kTsQueuePackets, device.fd));
 #endif
         if (!adapter)
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
@@ -762,7 +882,8 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
 #endif
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
-    const int opened = dt181_session_open(&family->impl_->session, &device.selector, -1, 0);
+    const int opened = dt181_session_open(&family->impl_->session, &device.selector,
+                                          device.fd, 0);
     if (opened != 0)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(
             opened == 3 ? Error::NOT_FOUND : opened == 4 ? Error::BUSY : Error::USB_IO);
@@ -874,8 +995,9 @@ Result<void> build_list(const LocatedDevice& device, const std::string& version,
         if (!set_string(list.enclosure.value.identity.serial.value,
                         std::string_view(device.serial.bytes.data(), device.serial.length)))
             return Result<void>::failure(Error::INTERNAL);
-        list.enclosure.value.identity.uniqueness = device.serial_unique
-            ? Uniqueness::unique_in_scan : Uniqueness::duplicate;
+        list.enclosure.value.identity.uniqueness = !device.serial_uniqueness_known
+            ? Uniqueness::unknown : device.serial_unique
+                ? Uniqueness::unique_in_scan : Uniqueness::duplicate;
     } else if (device.serial_absent) {
         list.enclosure.value.identity.serial_state = IdentitySerialState::absent;
         list.enclosure.value.identity.uniqueness = Uniqueness::not_applicable;
@@ -891,14 +1013,17 @@ Result<void> build_list(const LocatedDevice& device, const std::string& version,
     function.vid = 0x06b8U;
     function.pid = dt295 ? 0x103bU : 0x102bU;
     function.mode = Mode::runtime;
-    function.location.bus.present = true;
-    function.location.bus.value = device.bus;
-    function.location.address.present = true;
-    function.location.address.value = device.address;
-    function.location.usb_path.present = true;
-    if (!set_string(function.location.usb_path.value, device.path) ||
-        !set_string(function.model.value.name, model_id))
+    if (!set_string(function.model.value.name, model_id))
         return Result<void>::failure(Error::INTERNAL);
+    if (!device.path.empty()) {
+        function.location.bus.present = true;
+        function.location.bus.value = device.bus;
+        function.location.address.present = true;
+        function.location.address.value = device.address;
+        function.location.usb_path.present = true;
+        if (!set_string(function.location.usb_path.value, device.path))
+            return Result<void>::failure(Error::INTERNAL);
+    }
     function.model.present = true;
     if (device.serial_present) {
         function.serial_state = SerialState::present;

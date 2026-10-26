@@ -22,6 +22,7 @@ enum class Model : std::uint8_t { dt181 = 0U, dt295 = 1U };
 
 struct LocatedDevice final {
     Model model = Model::dt181;
+    int fd = -1;
     usb_selector selector{};
     std::uint8_t bus = 0U;
     std::uint8_t address = 0U;
@@ -31,10 +32,13 @@ struct LocatedDevice final {
     bool serial_present = false;
     bool serial_absent = false;
     bool serial_unique = false;
+    bool serial_uniqueness_known = false;
     dtv::userland::identity::SerialText serial{};
 };
 
 dtv::userland::Result<LocatedDevice> locate(const std::string& selector) noexcept;
+dtv::userland::Result<LocatedDevice> locate_fd(
+    int fd, const std::string* selector = nullptr) noexcept;
 dtv::userland::Result<LocatedDevice> locate_dt181(const std::string& selector) noexcept;
 
 struct Assets final {

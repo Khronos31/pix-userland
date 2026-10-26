@@ -44,6 +44,14 @@ int __real_usb_open_model(usb_backend **, const usb_selector *, int, int, int);
 int __wrap_usb_open_model(usb_backend **output, const usb_selector *selector, int fd,
                           int detach, int model)
 {
+    const char *fd_log = getenv("PIX_TEST_USB_FD_LOG");
+    if (fd_log != NULL) {
+        FILE *file = fopen(fd_log, "a");
+        if (file != NULL) {
+            fprintf(file, "usb_open_model model=%d fd=%d\n", model, fd);
+            fclose(file);
+        }
+    }
     if (output == NULL) return -1;
     if (model != USB_MODEL_DT295)
         return __real_usb_open_model(output, selector, fd, detach, model);
@@ -118,6 +126,7 @@ int __wrap_random_bytes(void *output, size_t length)
 void pix_test_usb_set_opened_device(libusb_device *device)
 { opened_device = pix_test_usb_device_index(device); }
 unsigned pix_test_usb_opened_device(void) { return opened_device; }
+void pix_test_usb_select_fd_model(unsigned model) { opened_device = model; }
 
 ssize_t LIBUSB_CALL libusb_get_device_list(libusb_context *context, libusb_device ***list)
 {
@@ -140,6 +149,7 @@ uint8_t LIBUSB_CALL libusb_get_device_address(libusb_device *device)
 
 int LIBUSB_CALL libusb_get_port_numbers(libusb_device *device, uint8_t *ports, int length)
 {
+    if (getenv("PIX_TEST_USB_FD_NO_PATH") != NULL) return 0;
     if (length < 1) return LIBUSB_ERROR_OVERFLOW;
     ports[0] = pix_test_usb_device_index(device) == 0U ? 2U : 3U;
     return 1;

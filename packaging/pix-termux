@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# < 2)); then
+    printf 'usage: termux-usb -r -e "%s [pix-ts options...]" USB_DEVICE\n' "$0" >&2
+    exit 2
+fi
+
+arguments=("$@")
+fd=${arguments[$((${#arguments[@]} - 1))]}
+if [[ ! $fd =~ ^[0-9]+$ ]] || ((10#$fd < 3 || 10#$fd > 2147483647)); then
+    echo 'pix-termux: expected the USB file descriptor appended by termux-usb' >&2
+    exit 2
+fi
+client_arguments=("${arguments[@]:0:$((${#arguments[@]} - 1))}")
+
+for argument in "${client_arguments[@]}"; do
+    if [[ $argument == --instance || $argument == --runtime-dir || $argument == --group ]]; then
+        echo 'pix-termux: instance and runtime options are managed by the launcher' >&2
+        exit 2
+    fi
+done
+
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+tmp_root=${TMPDIR:-${PREFIX:-/data/data/com.termux/files/usr}/tmp}
+runtime_directory=$(mktemp -d "$tmp_root/pix-termux.XXXXXX")
+chmod 700 "$runtime_directory"
+daemon_pid=
+
+cleanup()
+{
+    result=$?
+    trap - EXIT INT TERM
+    if [[ -n $daemon_pid ]]; then
+        kill -TERM "$daemon_pid" 2>/dev/null || true
+        wait "$daemon_pid" 2>/dev/null || true
+    fi
+    rm -rf -- "$runtime_directory"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+cd "$root"
+"$root/pixd" --fd "$fd" --runtime-dir "$runtime_directory" \
+    --instance pix-fd >"$runtime_directory/pixd.log" 2>&1 &
+daemon_pid=$!
+
+ready=false
+for ((attempt = 0; attempt < 100; ++attempt)); do
+    if "$root/pixctl" --runtime-dir "$runtime_directory" \
+        --instance pix-fd status >/dev/null 2>&1; then
+        ready=true
+        break
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+        cat "$runtime_directory/pixd.log" >&2
+        exit 7
+    fi
+    sleep 0.1
+done
+if [[ $ready != true ]]; then
+    cat "$runtime_directory/pixd.log" >&2
+    echo 'pix-termux: pixd did not become ready' >&2
+    exit 7
+fi
+
+"$root/pix-ts" --runtime-dir "$runtime_directory" --instance pix-fd \
+    "${client_arguments[@]}"

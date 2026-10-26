@@ -17,6 +17,7 @@
 #include "px4d_signals.h"
 
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -41,6 +42,7 @@ extern "C" void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigne
 
 struct Arguments final {
     std::string device;
+    int fd = -1;
     std::string instance;
     std::string runtime_directory;
 #if !defined(PIX_EMBEDDED_ASSETS)
@@ -56,15 +58,18 @@ void usage(FILE* output) noexcept
 {
     std::fprintf(output,
 #if defined(PIX_EMBEDDED_ASSETS)
-        "usage: pixd --device serial:SELECTOR|usb:SELECTOR "
+        "usage: pixd (--device serial:SELECTOR|usb:SELECTOR | --fd N [--device SELECTOR]) "
 #else
-        "usage: pixd --device serial:SELECTOR|usb:SELECTOR [--assets DIR] "
+        "usage: pixd (--device serial:SELECTOR|usb:SELECTOR [--assets DIR] | --fd N [--device SELECTOR]) "
 #endif
         "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
         "       --device accepts serial:VALUE or usb:BUS-PORT[.PORT...]\n"
+#ifndef _WIN32
+        "       --fd accepts a borrowed Android/POSIX USB descriptor (3..INT_MAX)\n"
+#endif
         "       serial:VALUE is 1..512 UTF-8 bytes without control characters.\n"
         "       --instance is 1..64 ASCII bytes, starts with a letter or digit,\n"
         "       then uses letters, digits, '.', '_' or '-'; avoid a trailing dot\n"
@@ -81,7 +86,7 @@ void usage(FILE* output) noexcept
 bool parse(int argc, char** argv, Arguments& out, bool& help,
            const char*& error) noexcept
 {
-    bool device = false, instance = false, runtime = false;
+    bool device = false, fd = false, instance = false, runtime = false;
 #if !defined(PIX_EMBEDDED_ASSETS)
     bool assets = false;
 #endif
@@ -108,6 +113,9 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         }
         const bool value_option = option == "--device" || option == "--instance" ||
             option == "--runtime-dir"
+#ifndef _WIN32
+            || option == "--fd"
+#endif
 #if !defined(PIX_EMBEDDED_ASSETS)
             || option == "--assets"
 #endif
@@ -120,10 +128,26 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
             error = option == "--device" ? "--device requires a selector value" :
                 option == "--instance" ? "--instance requires a token value" :
                 option == "--runtime-dir" ? "--runtime-dir requires a directory value" :
+                option == "--fd" ? "--fd requires a decimal descriptor" :
                 "--assets requires a directory value";
             return false;
         }
         const char* value = argv[++i];
+#ifndef _WIN32
+        if (option == "--fd") {
+            int parsed = 0;
+            const char* end = value + std::strlen(value);
+            const auto result = std::from_chars(value, end, parsed, 10);
+            if (fd || result.ec != std::errc{} || result.ptr != end || parsed < 3) {
+                error = fd ? "--fd may be used once" :
+                    "--fd must be a decimal descriptor in the range 3..INT_MAX";
+                return false;
+            }
+            out.fd = parsed;
+            fd = true;
+            continue;
+        }
+#endif
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
@@ -142,20 +166,20 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
             return false;
         }
     }
-    if (!device) {
-        error = "--device is required";
+    if (!device && !fd) {
+        error = "--device or --fd is required";
         return false;
     }
     if (out.group && (!runtime || out.runtime_directory.empty())) {
         error = "--group requires an explicit non-empty --runtime-dir";
         return false;
     }
-    if (out.device.rfind("serial:", 0U) != 0U &&
+    if (device && out.device.rfind("serial:", 0U) != 0U &&
         out.device.rfind("usb:", 0U) != 0U) {
         error = "--device must use serial:VALUE or usb:BUS-PORT[.PORT...]";
         return false;
     }
-    if (out.device == "serial:" || out.device == "usb:") {
+    if (device && (out.device == "serial:" || out.device == "usb:")) {
         error = "--device selector is empty; provide a serial or USB bus-port path";
         return false;
     }
@@ -323,7 +347,8 @@ int write_discovery_json()
 int fail(Error error) noexcept
 {
     std::fprintf(stderr, "pixd: %s\n", error_string(error));
-    return error == Error::INVALID_ARGUMENT ? 2 : error == Error::NOT_FOUND ? 3 : 70;
+    return error == Error::INVALID_ARGUMENT ? 2 : error == Error::NOT_FOUND ? 3 :
+        error == Error::USB_IO ? 7 : 70;
 }
 
 // "pixd ready" reports the model the running enclosure family was built from.
@@ -452,33 +477,39 @@ int run(int argc, char** argv)
     }
     if (help) { usage(stdout); return 0; }
 
-    const auto parsed_selector = dtv::userland::identity::parse_device_selector(arguments.device);
-    if (!parsed_selector) {
-        std::fprintf(stderr,
-            "pixd: invalid --device selector; serial:VALUE requires 1..512 valid UTF-8 bytes without control characters, and usb:VALUE requires a valid PIX USB topology.\n");
-        return 2;
-    }
-    if (parsed_selector.value().kind ==
-        dtv::userland::identity::SelectorKind::usb_topology) {
-        if (parsed_selector.value().topology.count != 1U) {
+    if (!arguments.device.empty()) {
+        const auto parsed_selector =
+            dtv::userland::identity::parse_device_selector(arguments.device);
+        if (!parsed_selector) {
             std::fprintf(stderr,
-                "pixd: PIX accepts one usb:BUS-PORT[.PORT...] topology per --device.\n");
+                "pixd: invalid --device selector; serial:VALUE requires 1..512 valid UTF-8 bytes without control characters, and usb:VALUE requires a valid PIX USB topology.\n");
             return 2;
         }
-        usb_selector selector{};
-        if (usb_selector_parse(arguments.device.c_str() + 4U, &selector) != 0 ||
-            selector.kind != USB_SELECT_PATH) {
-            std::fprintf(stderr,
-                "pixd: invalid --device USB topology; use usb:BUS-PORT[.PORT...] with decimal bus and port numbers.\n");
-            return 2;
+        if (parsed_selector.value().kind ==
+            dtv::userland::identity::SelectorKind::usb_topology) {
+            if (parsed_selector.value().topology.count != 1U) {
+                std::fprintf(stderr,
+                    "pixd: PIX accepts one usb:BUS-PORT[.PORT...] topology per --device.\n");
+                return 2;
+            }
+            usb_selector selector{};
+            if (usb_selector_parse(arguments.device.c_str() + 4U, &selector) != 0 ||
+                selector.kind != USB_SELECT_PATH) {
+                std::fprintf(stderr,
+                    "pixd: invalid --device USB topology; use usb:BUS-PORT[.PORT...] with decimal bus and port numbers.\n");
+                return 2;
+            }
         }
     }
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
 #if defined(PIX_EMBEDDED_ASSETS)
     const bool fake_dt295 = false;
 #else
+    const char* fd_model = std::getenv("PIX_TEST_USB_FD_MODEL");
     const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
-                            arguments.device == "serial:PIXDT29501";
+        (arguments.device == "serial:PIXDT29501" ||
+         (arguments.fd >= 0 && fd_model != nullptr &&
+          std::strcmp(fd_model, "dt295") == 0));
     if (fake_dt295) {
         std::string bundle = arguments.assets;
         if (!bundle.empty() && bundle.back() != '/') bundle.push_back('/');
@@ -493,7 +524,10 @@ int run(int argc, char** argv)
 #endif
 #endif
 
-    const auto located = pix::runtime::locate(arguments.device);
+    const auto located = arguments.fd >= 0
+        ? pix::runtime::locate_fd(arguments.fd,
+              arguments.device.empty() ? nullptr : &arguments.device)
+        : pix::runtime::locate(arguments.device);
     if (!located) {
         std::fprintf(stderr, "PIX_STAGE locate error=%u\n", static_cast<unsigned>(located.error()));
         return fail(located.error());
@@ -548,25 +582,39 @@ int run(int argc, char** argv)
     }
 #endif
 
-    const auto resolved_selector = dtv::userland::identity::resolve_selector(
-        dtv::userland::identity::Product::pix, parsed_selector.value());
-    if (!resolved_selector) return fail(resolved_selector.error());
-    const auto automatic_instance = dtv::userland::identity::auto_instance(
-        resolved_selector.value());
-    if (!automatic_instance) return fail(automatic_instance.error());
     std::string instance;
-    if (arguments.instance.empty()) {
-        instance.assign(automatic_instance.value().bytes.data(),
-                        automatic_instance.value().length);
-    } else {
-        const auto canonical = dtv::userland::identity::canonicalize_instance(
-            arguments.instance);
-        if (!canonical) {
-            std::fprintf(stderr,
-                "pixd: invalid --instance; use 1..64 ASCII bytes, start with a letter or digit, then use letters, digits, '.', '_' or '-'; avoid a trailing dot and Windows reserved device names.\n");
-            return 2;
+    if (arguments.fd >= 0 && arguments.device.empty()) {
+        if (arguments.instance.empty()) {
+            instance = "pix-fd";
+        } else {
+            const auto canonical = dtv::userland::identity::canonicalize_instance(
+                arguments.instance);
+            if (!canonical) return fail(canonical.error());
+            instance.assign(canonical.value().bytes.data(), canonical.value().length);
         }
-        instance.assign(canonical.value().bytes.data(), canonical.value().length);
+    } else {
+        const auto parsed_selector =
+            dtv::userland::identity::parse_device_selector(arguments.device);
+        if (!parsed_selector) return fail(parsed_selector.error());
+        const auto resolved_selector = dtv::userland::identity::resolve_selector(
+            dtv::userland::identity::Product::pix, parsed_selector.value());
+        if (!resolved_selector) return fail(resolved_selector.error());
+        const auto automatic_instance = dtv::userland::identity::auto_instance(
+            resolved_selector.value());
+        if (!automatic_instance) return fail(automatic_instance.error());
+        if (arguments.instance.empty()) {
+            instance.assign(automatic_instance.value().bytes.data(),
+                            automatic_instance.value().length);
+        } else {
+            const auto canonical = dtv::userland::identity::canonicalize_instance(
+                arguments.instance);
+            if (!canonical) {
+                std::fprintf(stderr,
+                    "pixd: invalid --instance; use 1..64 ASCII bytes, start with a letter or digit, then use letters, digits, '.', '_' or '-'; avoid a trailing dot and Windows reserved device names.\n");
+                return 2;
+            }
+            instance.assign(canonical.value().bytes.data(), canonical.value().length);
+        }
     }
 
     std::unique_ptr<TunerNonceSource> nonce_source(new (std::nothrow)
