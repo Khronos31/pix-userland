@@ -286,6 +286,116 @@ int main()
         !write_zero_file(assets + "/bootstrap.bin", 16U) ||
         !write_zero_file(assets + "/validation.bin", 64U) ||
         ::chmod(root.c_str(), 0770) != 0) return 2;
+    const auto asset_failure = [&](const std::string& asset_root,
+                                   const std::string& log_path,
+                                   const char* detail) {
+        const pid_t child = launch(PIXD_PATH,
+            {"--device", "serial:PIXDT18101", "--assets", asset_root,
+             "--runtime-dir", root}, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        return log.find(detail) != std::string::npos &&
+               log.find("--assets entry fpga.bin") != std::string::npos &&
+               log.find(root) == std::string::npos;
+    };
+    if (!asset_failure(root + "/missing-assets", root + "/pixd-missing-asset.log",
+                       "not found")) return 42;
+    const std::string short_assets = root + "/short-assets";
+    const std::uint8_t short_asset[] = {1U, 2U, 3U};
+    if (::mkdir(short_assets.c_str(), 0700) != 0 ||
+        !write_file(short_assets + "/fpga.bin", short_asset, sizeof(short_asset)) ||
+        !asset_failure(short_assets, root + "/pixd-short-asset.log",
+                       "expected 699673 bytes, found 3")) return 43;
+    const auto pixd_failure = [&](const std::vector<std::string>& arguments,
+                                  const std::string& log_path,
+                                  const std::vector<std::string>& details) {
+        const pid_t child = launch(PIXD_PATH, arguments, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        for (const std::string& detail : details)
+            if (log.find(detail) == std::string::npos) return false;
+        return log.find(root) == std::string::npos;
+    };
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", root, "--instance", "bad/"},
+                      root + "/pixd-invalid-instance.log",
+                      {"invalid --instance", "1..64 ASCII bytes",
+                       "Windows reserved device names"})) return 45;
+    const std::string long_runtime = root + "/" + std::string(180U, 'x');
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", long_runtime},
+                      root + "/pixd-long-endpoint.log",
+                      {"endpoint path is too long", "path bytes", "including NUL",
+                       "native capacity", "Shorten --runtime-dir or --instance"})) return 46;
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", "relative"},
+                      root + "/pixd-relative-runtime.log",
+                      {"--runtime-dir must be a non-empty absolute local path"})) return 47;
+    const std::string mode_log = root + "/pixd-runtime-mode.log";
+    const pid_t mode_process = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", root}, mode_log);
+    int mode_status = 0;
+    if (mode_process <= 0 || ::waitpid(mode_process, &mode_status, 0) != mode_process ||
+        !WIFEXITED(mode_status) || WEXITSTATUS(mode_status) != 70) return 51;
+    const auto mode_bytes = read_file(mode_log);
+    const std::string mode_text(mode_bytes.begin(), mode_bytes.end());
+    if (mode_text.find("runtime directory permissions are too broad") == std::string::npos ||
+        mode_text.find("Restrict --runtime-dir permissions") == std::string::npos ||
+        mode_text.find(root) != std::string::npos) return 51;
+    const std::string nested_runtime = root + "/nested-runtime";
+    const std::string product_directory = nested_runtime + "/pix-userland";
+    if (::mkdir(nested_runtime.c_str(), 0700) != 0 ||
+        ::chmod(nested_runtime.c_str(), 0770) != 0 ||
+        ::mkdir(product_directory.c_str(), 0700) != 0) return 53;
+    const std::string nested_mode_log = root + "/pixd-product-mode.log";
+    const pid_t nested_mode_process = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", nested_runtime, "--instance", "pix", "--group"}, nested_mode_log);
+    int nested_mode_status = 0;
+    if (nested_mode_process <= 0 ||
+        ::waitpid(nested_mode_process, &nested_mode_status, 0) != nested_mode_process ||
+        !WIFEXITED(nested_mode_status) || WEXITSTATUS(nested_mode_status) != 70) return 53;
+    const auto nested_mode_bytes = read_file(nested_mode_log);
+    const std::string nested_mode_text(nested_mode_bytes.begin(), nested_mode_bytes.end());
+    if (nested_mode_text.find("runtime directory permissions are too broad") ==
+            std::string::npos ||
+        nested_mode_text.find("directory layer: product") == std::string::npos ||
+        nested_mode_text.find(nested_runtime) != std::string::npos) return 53;
+    const auto client_failure = [&](const char* executable,
+                                    const std::vector<std::string>& arguments,
+                                    const std::string& log_path,
+                                    const char* detail) {
+        const pid_t child = launch(executable, arguments, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        return log.find(detail) != std::string::npos &&
+               log.find(root) == std::string::npos;
+    };
+    if (!client_failure(PIXCTL_PATH,
+            {"--runtime-dir", "relative", "--instance", "pix-proof",
+             "--device", "usb:1-2", "status"},
+            root + "/pixctl-invalid-runtime.log",
+            "--runtime-dir must be an absolute local runtime directory")) return 48;
+    if (!client_failure(PIXCTL_PATH,
+            {"--runtime-dir", long_runtime, "--instance", "pix-proof",
+             "--device", "usb:1-2", "status"},
+            root + "/pixctl-long-endpoint.log",
+            "endpoint path is too long")) return 49;
+    if (!client_failure(PIXTS_PATH,
+            {"--device", "usb:1-2", "--instance", "pix-proof", "--channel", "T13",
+             "--runtime-dir", long_runtime, "--output", "-"},
+            root + "/pix-ts-long-endpoint.log",
+            "endpoint path is too long")) return 50;
     const std::string expected_path = root + "/expected.ts";
     const std::string output_path = root + "/client.ts";
     const std::string off_grid_path = root + "/off-grid.ts";
@@ -349,6 +459,26 @@ int main()
         std::fprintf(stderr, "PROOF pixd startup failed root=%s\n", root.c_str());
         if (daemon > 0) { (void)::kill(daemon, SIGTERM); (void)::waitpid(daemon, nullptr, 0); }
         return 4;
+    }
+    const std::string duplicate_log = root + "/pixd-duplicate.log";
+    const pid_t duplicate = launch(PIXD_PATH,
+        {"--device", "serial:PIXDT18101", "--assets", assets,
+         "--runtime-dir", root, "--group"}, duplicate_log);
+    int duplicate_status = 0;
+    const bool duplicate_failed = duplicate > 0 &&
+        ::waitpid(duplicate, &duplicate_status, 0) == duplicate &&
+        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 70;
+    const auto duplicate_bytes = read_file(duplicate_log);
+    const std::string duplicate_text(duplicate_bytes.begin(), duplicate_bytes.end());
+    if (!duplicate_failed ||
+        duplicate_text.find("PIX_STAGE reserve error=4") == std::string::npos ||
+        duplicate_text.find("endpoint namespace is already in use") == std::string::npos ||
+        duplicate_text.find("ownership") != std::string::npos ||
+        duplicate_text.find("permissions") != std::string::npos) {
+        if (duplicate > 0) { (void)::kill(duplicate, SIGTERM); (void)::waitpid(duplicate, nullptr, 0); }
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 52;
     }
 
     std::string idle_status;
@@ -438,6 +568,35 @@ int main()
         (void)::kill(daemon, SIGTERM);
         (void)::waitpid(daemon, nullptr, 0);
         return 27;
+    }
+    const std::string stream_endpoint = root + "/pix-userland/v1/" + idle_instance +
+        "/stream.sock";
+    if (::unlink(stream_endpoint.c_str()) != 0) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 54;
+    }
+    const std::string missing_stream_log = root + "/pix-ts-missing-stream.log";
+    const pid_t missing_stream_client = launch(PIXTS_PATH,
+        {"--device", "serial:PIXDT18101", "--channel", "T13", "--time", "1",
+         "--output", root + "/missing-stream.ts", "--runtime-dir", root, "--group"},
+        missing_stream_log);
+    int missing_stream_status = 0;
+    if (missing_stream_client <= 0 ||
+        ::waitpid(missing_stream_client, &missing_stream_status, 0) != missing_stream_client ||
+        !WIFEXITED(missing_stream_status) || WEXITSTATUS(missing_stream_status) != 3) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 55;
+    }
+    const auto missing_stream_bytes = read_file(missing_stream_log);
+    const std::string missing_stream_text(missing_stream_bytes.begin(), missing_stream_bytes.end());
+    if (missing_stream_text.find("stream endpoint is missing") == std::string::npos ||
+        missing_stream_text.find("control endpoint is missing") != std::string::npos ||
+        missing_stream_text.find(root) != std::string::npos) {
+        (void)::kill(daemon, SIGTERM);
+        (void)::waitpid(daemon, nullptr, 0);
+        return 56;
     }
     (void)::kill(daemon, SIGTERM);
     int daemon_status = 0;

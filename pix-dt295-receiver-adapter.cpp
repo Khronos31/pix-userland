@@ -84,7 +84,10 @@ void ReceiverAdapter::initialize(const char* assets_directory,
     if (!path.empty() && path.back() != '/') path.push_back('/');
     path += "dt295.assets";
     char error[256]{};
-    if (dt295_assets_load(path.c_str(), &assets_, error, sizeof(error)) != 0) return;
+    if (dt295_assets_load(path.c_str(), &assets_, error, sizeof(error)) != 0) {
+        std::snprintf(init_detail_.data(), init_detail_.size(), "%s", error);
+        return;
+    }
     initialize_device(selector);
 }
 
@@ -93,8 +96,10 @@ void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_
 {
     init_error_ = Error::INVALID_ARGUMENT;
     char error[256]{};
-    if (dt295_assets_load_bytes(assets, assets_size, &assets_, error, sizeof(error)) != 0)
+    if (dt295_assets_load_bytes(assets, assets_size, &assets_, error, sizeof(error)) != 0) {
+        std::snprintf(init_detail_.data(), init_detail_.size(), "%s", error);
         return;
+    }
     initialize_device(selector);
 }
 

@@ -24,6 +24,7 @@
 #include <limits>
 #include <new>
 #include <string_view>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #ifdef _WIN32
@@ -55,8 +56,24 @@ bool set_string(dtv::userland::wire::WString<N>& out, std::string_view value) no
     return true;
 }
 
-Result<void> load_exact(const std::string& path, std::uint8_t* output,
-                        std::size_t expected) noexcept
+void set_asset_diagnostic(RuntimeFailureDiagnostic* diagnostic, const char* asset,
+                          const char* detail, std::size_t expected = 0U,
+                          std::size_t actual = 0U, bool counts_valid = false,
+                          bool lower_bound = false) noexcept
+{
+    if (diagnostic == nullptr) return;
+    std::snprintf(diagnostic->asset.data(), diagnostic->asset.size(), "%s", asset);
+    std::snprintf(diagnostic->detail.data(), diagnostic->detail.size(), "%.*s",
+                  static_cast<int>(diagnostic->detail.size() - 1U), detail);
+    diagnostic->expected_bytes = expected;
+    diagnostic->actual_bytes = actual;
+    diagnostic->byte_counts_valid = counts_valid;
+    diagnostic->actual_is_lower_bound = lower_bound;
+}
+
+Result<void> load_exact(const std::string& path, const char* asset,
+                        std::uint8_t* output, std::size_t expected,
+                        RuntimeFailureDiagnostic* diagnostic) noexcept
 {
 #ifdef _WIN32
     const auto wide = px4::userland::cli::utf8_to_wide_path(path);
@@ -65,13 +82,38 @@ Result<void> load_exact(const std::string& path, std::uint8_t* output,
 #else
     const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
 #endif
-    if (fd < 0) return Result<void>::failure(Error::NOT_FOUND);
+    if (fd < 0) {
+        const char* detail = errno == ENOENT || errno == ENOTDIR ? "not found" :
+            errno == EACCES || errno == EPERM ? "permission denied" : "open failed";
+        set_asset_diagnostic(diagnostic, asset, detail);
+        return Result<void>::failure(Error::NOT_FOUND);
+    }
+#ifdef _WIN32
+    struct _stat64 status{};
+    const int stat_result = ::_fstat64(fd, &status);
+    const bool regular_file = stat_result == 0 &&
+        (status.st_mode & _S_IFMT) == _S_IFREG;
+#else
+    struct stat status{};
+    const int stat_result = ::fstat(fd, &status);
+    const bool regular_file = stat_result == 0 && S_ISREG(status.st_mode);
+#endif
+    if (regular_file && status.st_size >= 0 &&
+        static_cast<std::uint64_t>(status.st_size) != expected) {
+        const std::size_t actual = static_cast<std::size_t>(status.st_size);
+        (void)::close(fd);
+        set_asset_diagnostic(diagnostic, asset, "file size does not match", expected,
+                             actual, true);
+        return Result<void>::failure(Error::INVALID_ARGUMENT);
+    }
     std::size_t offset = 0U;
     while (offset < expected) {
         const ssize_t count = ::read(fd, output + offset, expected - offset);
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) {
             (void)::close(fd);
+            set_asset_diagnostic(diagnostic, asset, "read ended before the expected size",
+                                 expected, offset, true);
             return Result<void>::failure(Error::INVALID_ARGUMENT);
         }
         offset += static_cast<std::size_t>(count);
@@ -80,8 +122,16 @@ Result<void> load_exact(const std::string& path, std::uint8_t* output,
     ssize_t trailing = 0;
     do { trailing = ::read(fd, &extra, 1U); } while (trailing < 0 && errno == EINTR);
     const int close_result = ::close(fd);
-    if (trailing != 0 || close_result != 0)
+    if (trailing > 0) {
+        set_asset_diagnostic(diagnostic, asset, "file contains extra data", expected,
+                             expected + 1U, true, true);
         return Result<void>::failure(Error::INVALID_ARGUMENT);
+    }
+    if (trailing < 0 || close_result != 0) {
+        set_asset_diagnostic(diagnostic, asset, "file read or close failed", expected,
+                             expected, true);
+        return Result<void>::failure(Error::INVALID_ARGUMENT);
+    }
     return Result<void>::success();
 }
 
@@ -583,10 +633,14 @@ Assets::~Assets() noexcept
     secure_clear(validation.data(), validation.size());
 }
 
-dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory) noexcept
+dtv::userland::Result<std::unique_ptr<Assets>> load_assets(
+    const char* directory, RuntimeFailureDiagnostic* diagnostic) noexcept
 {
-    if (directory == nullptr || directory[0] == '\0')
+    if (diagnostic != nullptr) *diagnostic = RuntimeFailureDiagnostic{};
+    if (directory == nullptr || directory[0] == '\0') {
+        set_asset_diagnostic(diagnostic, "assets", "--assets directory is empty");
         return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
+    }
     std::unique_ptr<Assets> assets(new (std::nothrow) Assets());
     if (!assets) return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
     std::string root(directory);
@@ -594,9 +648,12 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory
     assets->firmware = static_cast<std::uint8_t*>(std::malloc(699673U));
     if (assets->firmware == nullptr)
         return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
-    if (!load_exact(root + "fpga.bin", assets->firmware, 699673U) ||
-        !load_exact(root + "bootstrap.bin", assets->bootstrap.data(), assets->bootstrap.size()) ||
-        !load_exact(root + "validation.bin", assets->validation.data(), assets->validation.size()))
+    if (!load_exact(root + "fpga.bin", "fpga.bin", assets->firmware, 699673U,
+                    diagnostic) ||
+        !load_exact(root + "bootstrap.bin", "bootstrap.bin", assets->bootstrap.data(),
+                    assets->bootstrap.size(), diagnostic) ||
+        !load_exact(root + "validation.bin", "validation.bin", assets->validation.data(),
+                    assets->validation.size(), diagnostic))
         return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
     return dtv::userland::Result<std::unique_ptr<Assets>>::success(std::move(assets));
 }
@@ -604,11 +661,31 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory
 dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
     const std::uint8_t* firmware, std::size_t firmware_size,
     const std::uint8_t* bootstrap, std::size_t bootstrap_size,
-    const std::uint8_t* validation, std::size_t validation_size) noexcept
+    const std::uint8_t* validation, std::size_t validation_size,
+    RuntimeFailureDiagnostic* diagnostic) noexcept
 {
-    if (firmware == nullptr || firmware_size != 699673U || bootstrap == nullptr ||
-        bootstrap_size != 16U || validation == nullptr || validation_size != 64U)
+    if (diagnostic != nullptr) *diagnostic = RuntimeFailureDiagnostic{};
+    if (firmware == nullptr || firmware_size != 699673U) {
+        set_asset_diagnostic(diagnostic, "fpga.bin",
+                             firmware == nullptr ? "embedded asset is missing" :
+                                 "embedded asset size does not match",
+                             699673U, firmware_size, firmware != nullptr);
         return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
+    }
+    if (bootstrap == nullptr || bootstrap_size != 16U) {
+        set_asset_diagnostic(diagnostic, "bootstrap.bin",
+                             bootstrap == nullptr ? "embedded asset is missing" :
+                                 "embedded asset size does not match", 16U,
+                             bootstrap_size, bootstrap != nullptr);
+        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
+    }
+    if (validation == nullptr || validation_size != 64U) {
+        set_asset_diagnostic(diagnostic, "validation.bin",
+                             validation == nullptr ? "embedded asset is missing" :
+                                 "embedded asset size does not match", 64U,
+                             validation_size, validation != nullptr);
+        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
+    }
     std::unique_ptr<Assets> assets(new (std::nothrow) Assets());
     if (!assets) return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
     assets->firmware = static_cast<std::uint8_t*>(std::malloc(firmware_size));
@@ -621,13 +698,18 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
 }
 
 dtv::userland::Result<std::unique_ptr<Family>> Family::create(
-    const LocatedDevice& device, const char* assets_directory) noexcept
+    const LocatedDevice& device, const char* assets_directory,
+    RuntimeFailureDiagnostic* diagnostic) noexcept
 {
+    if (diagnostic != nullptr) *diagnostic = RuntimeFailureDiagnostic{};
 #if defined(PIX_EMBEDDED_ASSETS)
     (void)assets_directory;
     const char* asset_manifest = pix_embedded_assets_manifest();
-    if (asset_manifest == nullptr || asset_manifest[0] == '\0')
+    if (asset_manifest == nullptr || asset_manifest[0] == '\0') {
+        set_asset_diagnostic(diagnostic, "embedded assets",
+                             "asset manifest is missing or empty");
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+    }
 #endif
     std::unique_ptr<Family> family(new (std::nothrow) Family());
     if (!family) return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
@@ -651,7 +733,12 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         if (!adapter)
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
         if (!adapter->ready())
+        {
+            if (diagnostic != nullptr && adapter->init_detail()[0] != '\0')
+                set_asset_diagnostic(diagnostic, "dt295.assets",
+                                     adapter->init_detail());
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(adapter->init_error());
+        }
         family->impl_->dt295_adapter = std::move(adapter);
         family->impl_->dt295_tuner.reset(new (std::nothrow) Dt295TunerBackend(
             *family->impl_->dt295_adapter));
@@ -669,9 +756,9 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
     const std::uint8_t* bootstrap = pix_embedded_dt181_bootstrap(&bootstrap_size);
     const std::uint8_t* validation = pix_embedded_dt181_validation(&validation_size);
     auto assets = load_assets_bytes(firmware, firmware_size, bootstrap, bootstrap_size,
-                                    validation, validation_size);
+                                    validation, validation_size, diagnostic);
 #else
-    auto assets = load_assets(assets_directory);
+    auto assets = load_assets(assets_directory, diagnostic);
 #endif
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
