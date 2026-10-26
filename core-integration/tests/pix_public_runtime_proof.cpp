@@ -360,6 +360,11 @@ int main()
              "--device", "usb:1-2", "status"},
             root + "/pixctl-long-endpoint.log",
             "endpoint path is too long")) return 49;
+    if (!client_failure(PIXTS_PATH,
+            {"--device", "usb:1-2", "--instance", "pix-proof", "--channel", "T13",
+             "--runtime-dir", long_runtime, "--output", "-"},
+            root + "/pix-ts-long-endpoint.log",
+            "endpoint path is too long")) return 50;
     const std::string expected_path = root + "/expected.ts";
     const std::string output_path = root + "/client.ts";
     const std::string off_grid_path = root + "/off-grid.ts";
