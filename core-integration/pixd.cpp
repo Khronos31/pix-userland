@@ -43,7 +43,9 @@ struct Arguments final {
     std::string device;
     std::string instance;
     std::string runtime_directory;
+#if !defined(PIX_EMBEDDED_ASSETS)
     std::string assets = "assets";
+#endif
     bool group = false;
 #ifdef _WIN32
     bool exit_on_stdin_eof = false;
@@ -53,46 +55,111 @@ struct Arguments final {
 void usage(FILE* output) noexcept
 {
     std::fprintf(output,
+#if defined(PIX_EMBEDDED_ASSETS)
+        "usage: pixd --device serial:SELECTOR|usb:SELECTOR "
+#else
         "usage: pixd --device serial:SELECTOR|usb:SELECTOR [--assets DIR] "
+#endif
         "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
+        "       --device accepts serial:VALUE or usb:BUS-PORT[.PORT...]\n"
+        "       serial:VALUE is 1..512 UTF-8 bytes without control characters.\n"
+        "       --instance is 1..64 ASCII bytes, starts with a letter or digit,\n"
+        "       then uses letters, digits, '.', '_' or '-'; avoid a trailing dot\n"
+        "       and Windows reserved device names.\n"
+        "       --runtime-dir must leave room for the complete local endpoint path;\n"
+        "       its byte limit depends on this build's native socket path capacity.\n"
+        "       If too long, shorten --runtime-dir or --instance.\n"
 #ifdef _WIN32
         "       Windows: --exit-on-stdin-eof stops when parent stdin closes\n"
 #endif
         );
 }
 
-bool parse(int argc, char** argv, Arguments& out, bool& help) noexcept
+bool parse(int argc, char** argv, Arguments& out, bool& help,
+           const char*& error) noexcept
 {
-    bool device = false, instance = false, runtime = false, assets = false;
+    bool device = false, instance = false, runtime = false;
+#if !defined(PIX_EMBEDDED_ASSETS)
+    bool assets = false;
+#endif
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
 #ifdef _WIN32
         if (option == "--exit-on-stdin-eof") {
-            if (out.exit_on_stdin_eof) return false;
+            if (out.exit_on_stdin_eof) {
+                error = "--exit-on-stdin-eof may be used once";
+                return false;
+            }
             out.exit_on_stdin_eof = true;
             continue;
         }
 #endif
         if (option == "--group") {
-            if (out.group) return false;
+            if (out.group) {
+                error = "--group may be used once";
+                return false;
+            }
             out.group = true;
             continue;
         }
-        if (i + 1 >= argc) return false;
+        const bool value_option = option == "--device" || option == "--instance" ||
+            option == "--runtime-dir"
+#if !defined(PIX_EMBEDDED_ASSETS)
+            || option == "--assets"
+#endif
+            ;
+        if (!value_option) {
+            error = "unknown option";
+            return false;
+        }
+        if (i + 1 >= argc) {
+            error = option == "--device" ? "--device requires a selector value" :
+                option == "--instance" ? "--instance requires a token value" :
+                option == "--runtime-dir" ? "--runtime-dir requires a directory value" :
+                "--assets requires a directory value";
+            return false;
+        }
         const char* value = argv[++i];
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
+#if !defined(PIX_EMBEDDED_ASSETS)
         else if (option == "--assets" && !assets) { out.assets = value; assets = true; }
-        else return false;
+#endif
+        else if (option == "--instance") {
+            error = "--instance may be used once";
+            return false;
+        } else if (option == "--device" || option == "--runtime-dir" ||
+                   option == "--assets") {
+            error = "option may be used once";
+            return false;
+        } else {
+            error = "unknown option";
+            return false;
+        }
     }
-    return device && (!out.group || (runtime && !out.runtime_directory.empty())) &&
-           (out.device.rfind("serial:", 0U) == 0U ||
-            out.device.rfind("usb:", 0U) == 0U);
+    if (!device) {
+        error = "--device is required";
+        return false;
+    }
+    if (out.group && (!runtime || out.runtime_directory.empty())) {
+        error = "--group requires an explicit non-empty --runtime-dir";
+        return false;
+    }
+    if (out.device.rfind("serial:", 0U) != 0U &&
+        out.device.rfind("usb:", 0U) != 0U) {
+        error = "--device must use serial:VALUE or usb:BUS-PORT[.PORT...]";
+        return false;
+    }
+    if (out.device == "serial:" || out.device == "usb:") {
+        error = "--device selector is empty; provide a serial or USB bus-port path";
+        return false;
+    }
+    return true;
 }
 
 int write_models()
@@ -267,6 +334,101 @@ const char* model_name(pix::runtime::Model model) noexcept
     return model == pix::runtime::Model::dt295 ? "PIX-DT295" : "PIX-DT181-PU0";
 }
 
+void print_endpoint_error(const char* program, std::string_view endpoint,
+                          const EndpointDiagnostic& diagnostic) noexcept
+{
+    if (diagnostic.reason == EndpointDiagnosticReason::path_too_long) {
+        std::fprintf(stderr,
+            "%s: %.*s endpoint path is too long (%zu path bytes; %zu bytes including NUL; this build's native capacity is %zu bytes). Shorten --runtime-dir or --instance.\n",
+            program, static_cast<int>(endpoint.size()), endpoint.data(),
+            diagnostic.path_bytes, diagnostic.required_bytes,
+            diagnostic.native_capacity);
+        return;
+    }
+    if (diagnostic.reason == EndpointDiagnosticReason::runtime_directory) {
+        std::fprintf(stderr,
+            "%s: --runtime-dir must be a non-empty absolute local path on this platform.\n",
+            program);
+        return;
+    }
+    std::fprintf(stderr, "%s: cannot form the %.*s endpoint path (invalid %s component).\n",
+        program, static_cast<int>(endpoint.size()), endpoint.data(),
+        diagnostic.reason == EndpointDiagnosticReason::product ? "product" :
+        diagnostic.reason == EndpointDiagnosticReason::instance ? "instance" : "endpoint");
+}
+
+void print_listener_error(const ListenerDiagnostic& diagnostic, Error error) noexcept
+{
+    if (diagnostic.reason == ListenerDiagnosticReason::endpoint_path) {
+        print_endpoint_error("pixd", diagnostic.endpoint_name, diagnostic.endpoint);
+        return;
+    }
+    const char* reason = "runtime directory could not be checked";
+    const char* advice = "Verify the runtime directory configuration and retry.";
+    const char* directory_layer = "runtime root";
+    switch (diagnostic.directory_layer) {
+    case RuntimeDirectoryLayer::product:
+        directory_layer = "product";
+        break;
+    case RuntimeDirectoryLayer::version:
+        directory_layer = "version";
+        break;
+    case RuntimeDirectoryLayer::instance:
+        directory_layer = "instance";
+        break;
+    default:
+        break;
+    }
+    switch (diagnostic.reason) {
+    case ListenerDiagnosticReason::runtime_directory_missing:
+        reason = "runtime directory is missing";
+        advice = "Create it or choose another --runtime-dir.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_lookup:
+        reason = "runtime directory lookup failed";
+        advice = "Verify that --runtime-dir can be inspected.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_type:
+        reason = "runtime path is not a directory";
+        advice = "Choose a directory for --runtime-dir.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_owner:
+        reason = "runtime directory has an unexpected owner";
+        advice = "Check --runtime-dir ownership.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_mode:
+        reason = "runtime directory permissions are too broad";
+        advice = "Restrict --runtime-dir permissions.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_security:
+        reason = "runtime directory security check failed";
+        advice = "Review the platform runtime directory security requirements.";
+        break;
+    case ListenerDiagnosticReason::runtime_directory_encoding:
+        reason = "runtime directory path is not valid UTF-8";
+        advice = "Use a valid UTF-8 --runtime-dir.";
+        break;
+    default:
+        if (error == Error::BUSY) {
+            std::fprintf(stderr,
+                "pixd: the PIX endpoint namespace is already in use. Stop the existing pixd for this instance or choose another --instance.\n");
+            return;
+        }
+        if (error == Error::INVALID_ARGUMENT) {
+            advice = "Verify --runtime-dir and --instance.";
+        } else if (error == Error::NOT_READY) {
+            advice = "Choose another runtime endpoint or retry after it is available.";
+        }
+        std::fprintf(stderr,
+            "pixd: cannot reserve the PIX endpoint namespace (error=%u); %s\n",
+            static_cast<unsigned>(error), advice);
+        return;
+    }
+    std::fprintf(stderr,
+        "pixd: cannot reserve the PIX endpoint namespace: %s (directory layer: %s). %s\n",
+        reason, directory_layer, advice);
+}
+
 }  // namespace
 
 int run(int argc, char** argv)
@@ -282,10 +444,39 @@ int run(int argc, char** argv)
     }
     Arguments arguments;
     bool help = false;
-    if (!parse(argc, argv, arguments, help)) { usage(stderr); return 2; }
+    const char* parse_error = "invalid command line";
+    if (!parse(argc, argv, arguments, help, parse_error)) {
+        std::fprintf(stderr, "pixd: %s\n", parse_error);
+        usage(stderr);
+        return 2;
+    }
     if (help) { usage(stdout); return 0; }
 
+    const auto parsed_selector = dtv::userland::identity::parse_device_selector(arguments.device);
+    if (!parsed_selector) {
+        std::fprintf(stderr,
+            "pixd: invalid --device selector; serial:VALUE requires 1..512 valid UTF-8 bytes without control characters, and usb:VALUE requires a valid PIX USB topology.\n");
+        return 2;
+    }
+    if (parsed_selector.value().kind ==
+        dtv::userland::identity::SelectorKind::usb_topology) {
+        if (parsed_selector.value().topology.count != 1U) {
+            std::fprintf(stderr,
+                "pixd: PIX accepts one usb:BUS-PORT[.PORT...] topology per --device.\n");
+            return 2;
+        }
+        usb_selector selector{};
+        if (usb_selector_parse(arguments.device.c_str() + 4U, &selector) != 0 ||
+            selector.kind != USB_SELECT_PATH) {
+            std::fprintf(stderr,
+                "pixd: invalid --device USB topology; use usb:BUS-PORT[.PORT...] with decimal bus and port numbers.\n");
+            return 2;
+        }
+    }
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
+#if defined(PIX_EMBEDDED_ASSETS)
+    const bool fake_dt295 = false;
+#else
     const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
                             arguments.device == "serial:PIXDT29501";
     if (fake_dt295) {
@@ -300,15 +491,43 @@ int run(int argc, char** argv)
         dt295_actual_fixture_configure_presence(raw_state, notification);
     }
 #endif
+#endif
 
     const auto located = pix::runtime::locate(arguments.device);
     if (!located) {
         std::fprintf(stderr, "PIX_STAGE locate error=%u\n", static_cast<unsigned>(located.error()));
         return fail(located.error());
     }
-    auto family_result = pix::runtime::Family::create(located.value(), arguments.assets.c_str());
+    pix::runtime::RuntimeFailureDiagnostic family_diagnostic{};
+#if defined(PIX_EMBEDDED_ASSETS)
+    auto family_result = pix::runtime::Family::create(
+        located.value(), nullptr, &family_diagnostic);
+#else
+    auto family_result = pix::runtime::Family::create(
+        located.value(), arguments.assets.c_str(), &family_diagnostic);
+#endif
     if (!family_result) {
         std::fprintf(stderr, "PIX_STAGE family error=%u\n", static_cast<unsigned>(family_result.error()));
+        if (family_diagnostic.asset[0] != '\0') {
+#if defined(PIX_EMBEDDED_ASSETS)
+            std::fprintf(stderr, "pixd: embedded PIX asset %s: %s",
+                family_diagnostic.asset.data(), family_diagnostic.detail.data());
+#else
+            std::fprintf(stderr, "pixd: --assets entry %s: %s",
+                family_diagnostic.asset.data(), family_diagnostic.detail.data());
+#endif
+            if (family_diagnostic.byte_counts_valid) {
+                std::fprintf(stderr, " (expected %zu bytes, found %s%zu)",
+                    family_diagnostic.expected_bytes,
+                    family_diagnostic.actual_is_lower_bound ? "at least " : "",
+                    family_diagnostic.actual_bytes);
+            }
+#if defined(PIX_EMBEDDED_ASSETS)
+            std::fprintf(stderr, ". The packaged PIX asset bundle is invalid.\n");
+#else
+            std::fprintf(stderr, ". Check the PIX asset files selected by --assets and retry.\n");
+#endif
+        }
         return fail(family_result.error());
     }
     std::unique_ptr<EnclosureFamily> family(std::move(family_result.value()));
@@ -329,21 +548,27 @@ int run(int argc, char** argv)
     }
 #endif
 
-    const auto parsed_selector = dtv::userland::identity::parse_device_selector(arguments.device);
-    if (!parsed_selector) return fail(parsed_selector.error());
-    const auto resolved = dtv::userland::identity::resolve_selector(
+    const auto resolved_selector = dtv::userland::identity::resolve_selector(
         dtv::userland::identity::Product::pix, parsed_selector.value());
-    if (!resolved) return fail(resolved.error());
-    const auto automatic = dtv::userland::identity::auto_instance(resolved.value());
-    if (!automatic) return fail(automatic.error());
+    if (!resolved_selector) return fail(resolved_selector.error());
+    const auto automatic_instance = dtv::userland::identity::auto_instance(
+        resolved_selector.value());
+    if (!automatic_instance) return fail(automatic_instance.error());
     std::string instance;
     if (arguments.instance.empty()) {
-        instance.assign(automatic.value().bytes.data(), automatic.value().length);
+        instance.assign(automatic_instance.value().bytes.data(),
+                        automatic_instance.value().length);
     } else {
-        const auto canonical = dtv::userland::identity::canonicalize_instance(arguments.instance);
-        if (!canonical) return fail(Error::INVALID_ARGUMENT);
+        const auto canonical = dtv::userland::identity::canonicalize_instance(
+            arguments.instance);
+        if (!canonical) {
+            std::fprintf(stderr,
+                "pixd: invalid --instance; use 1..64 ASCII bytes, start with a letter or digit, then use letters, digits, '.', '_' or '-'; avoid a trailing dot and Windows reserved device names.\n");
+            return 2;
+        }
         instance.assign(canonical.value().bytes.data(), canonical.value().length);
     }
+
     std::unique_ptr<TunerNonceSource> nonce_source(new (std::nothrow)
 #ifdef _WIN32
         px4::userland::ipc::windows::WindowsTunerNonceSource());
@@ -381,9 +606,11 @@ int run(int argc, char** argv)
         std::move(family), std::move(nonce_source), config);
     if (!assembled) return fail(assembled.error());
     std::unique_ptr<EnclosureContext> context(std::move(assembled.value()));
-    const auto reserved = context->reserve_namespace();
+    ListenerDiagnostic listener_diagnostic{};
+    const auto reserved = context->reserve_namespace(&listener_diagnostic);
     if (!reserved) {
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
+        print_listener_error(listener_diagnostic, reserved.error());
         return fail(reserved.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;

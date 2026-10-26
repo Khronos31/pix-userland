@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <string>
 
@@ -46,12 +47,29 @@ struct Assets final {
     Assets& operator=(const Assets&) = delete;
 };
 
-dtv::userland::Result<std::unique_ptr<Assets>> load_assets(const char* directory) noexcept;
+struct RuntimeFailureDiagnostic final {
+    std::array<char, 32U> asset{};
+    std::array<char, 192U> detail{};
+    std::size_t expected_bytes = 0U;
+    std::size_t actual_bytes = 0U;
+    bool byte_counts_valid = false;
+    bool actual_is_lower_bound = false;
+};
+
+dtv::userland::Result<std::unique_ptr<Assets>> load_assets(
+    const char* directory, RuntimeFailureDiagnostic* diagnostic = nullptr) noexcept;
+/* Copy exact-size borrowed bytes into the existing owned, secure-clearable Assets object. */
+dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
+    const std::uint8_t* firmware, std::size_t firmware_size,
+    const std::uint8_t* bootstrap, std::size_t bootstrap_size,
+    const std::uint8_t* validation, std::size_t validation_size,
+    RuntimeFailureDiagnostic* diagnostic = nullptr) noexcept;
 
 class Family final : public dtv::userland::host_runtime::EnclosureFamily {
 public:
     static dtv::userland::Result<std::unique_ptr<Family>> create(
-        const LocatedDevice&, const char* assets_directory) noexcept;
+        const LocatedDevice&, const char* assets_directory,
+        RuntimeFailureDiagnostic* diagnostic = nullptr) noexcept;
     ~Family() noexcept override;
     Family(const Family&) = delete;
     Family& operator=(const Family&) = delete;

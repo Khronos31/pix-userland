@@ -165,6 +165,7 @@ int run(int argc, char** argv)
 #endif
     if (!result) {
         std::fprintf(stderr, "pix-ts: %s\n", error_string(result.error()));
+        print_px4_ts_run_diagnostic(stderr, "pix-ts", result.error(), diagnostics);
         std::fprintf(stderr,
             "pix-ts: diagnostics stream-end=%s error=%u packets-written=%llu packets-final=%llu\n",
             diagnostics.stream_end_valid ? "valid" : "missing",

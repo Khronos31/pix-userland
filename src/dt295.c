@@ -63,62 +63,63 @@ static void sleep_ms(dt295 *d, unsigned ms) {
         d->io.sleep_ms(d->io.user, ms);
 }
 
-static int read_exact(FILE *f, void *p, size_t n) {
-    return fread(p, 1, n, f) == n ? 0 : -1;
-}
-int dt295_assets_load(const char *path, dt295_assets **out, char *error, size_t error_size) {
-    if (!path || !out) {
-        seterr(error, error_size, "invalid asset path/output");
+int dt295_assets_load_bytes(const uint8_t *data, size_t length, dt295_assets **out, char *error,
+                            size_t error_size) {
+    if (!data || !out) {
+        seterr(error, error_size, "invalid asset data/output");
         return -1;
     }
     *out = NULL;
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        seterr(error, error_size, "cannot open DT295 asset bundle");
-        return -1;
-    }
     uint8_t head[8 + ASSET_SECTIONS * 36];
-    if (read_exact(f, head, sizeof(head)) || memcmp(head, "D295A1\0\0", 8)) {
-        fclose(f);
+    if (length < sizeof(head) || memcmp(data, "D295A1\0\0", 8)) {
         seterr(error, error_size, "invalid DT295 asset bundle header");
         return -1;
     }
+    memcpy(head, data, sizeof(head));
     uint32_t lens[ASSET_SECTIONS];
+    const uint8_t *sections[ASSET_SECTIONS];
     size_t total = 0;
     for (unsigned i = 0; i < ASSET_SECTIONS; i++) {
         lens[i] = le32(head + 8 + i * 36);
         if (lens[i] > MAX_BUNDLE - total) {
-            fclose(f);
             seterr(error, error_size, "DT295 asset bundle size limit");
             return -1;
         }
         total += lens[i];
     }
+    if (length != sizeof(head) + total) {
+        seterr(error, error_size, "DT295 asset bundle length is invalid");
+        return -1;
+    }
     if (lens[0] == 0 || lens[0] > DT295_ASSET_MAX_IMAGE || lens[1] == 0 ||
         lens[1] > DT295_ASSET_MAX_IMAGE || lens[2] != MAT_SIZE || lens[3] == 0 || lens[3] % 8 ||
         lens[3] > DT295_MAX_FIELDS * 8 || lens[4] != 12 || lens[5] != 16) {
-        fclose(f);
         seterr(error, error_size, "DT295 asset section size is invalid");
         return -1;
     }
+    size_t offset = sizeof(head);
+    for (unsigned i = 0; i < ASSET_SECTIONS; i++) {
+        sections[i] = data + offset;
+        uint8_t hash[32];
+        dt295_sha256(sections[i], lens[i], hash);
+        if (memcmp(hash, head + 8 + i * 36 + 4, 32)) {
+            seterr(error, error_size, "DT295 asset section SHA-256 mismatch");
+            return -1;
+        }
+        offset += lens[i];
+    }
     dt295_assets *a = calloc(1, sizeof(*a));
     if (!a) {
-        fclose(f);
         seterr(error, error_size, "out of memory loading DT295 assets");
         return -1;
     }
     uint8_t *raw[ASSET_SECTIONS] = {0};
     for (unsigned i = 0; i < ASSET_SECTIONS; i++) {
         raw[i] = malloc(lens[i]);
-        if (!raw[i] || read_exact(f, raw[i], lens[i]))
+        if (!raw[i])
             goto bad;
-        uint8_t hash[32];
-        dt295_sha256(raw[i], lens[i], hash);
-        if (memcmp(hash, head + 8 + i * 36 + 4, 32))
-            goto bad;
+        memcpy(raw[i], sections[i], lens[i]);
     }
-    if (fgetc(f) != EOF)
-        goto bad;
     a->idle = raw[0];
     a->idle_n = lens[0];
     raw[0] = NULL;
@@ -156,17 +157,88 @@ int dt295_assets_load(const char *path, dt295_assets **out, char *error, size_t 
     memcpy(a->iv, raw[5], 16);
     for (unsigned i = 0; i < ASSET_SECTIONS; i++)
         free(raw[i]);
-    fclose(f);
     *out = a;
     seterr(error, error_size, "");
     return 0;
 bad:
     for (unsigned i = 0; i < ASSET_SECTIONS; i++)
         free(raw[i]);
-    fclose(f);
     dt295_assets_free(a);
     seterr(error, error_size, "DT295 asset bundle integrity or contents invalid");
     return -1;
+}
+
+static int read_bundle(FILE *f, uint8_t **data, size_t *length) {
+    const size_t limit = MAX_BUNDLE + 8 + ASSET_SECTIONS * 36;
+    size_t capacity = 8192, used = 0;
+    uint8_t *buffer = malloc(capacity);
+    if (!buffer)
+        return -1;
+    for (;;) {
+        if (used == capacity) {
+            if (capacity >= limit + 1) {
+                secure_clear(buffer, capacity);
+                free(buffer);
+                return -1;
+            }
+            size_t next = capacity > (limit + 1) / 2 ? limit + 1 : capacity * 2;
+            uint8_t *grown = malloc(next);
+            if (!grown) {
+                secure_clear(buffer, capacity);
+                free(buffer);
+                return -1;
+            }
+            memcpy(grown, buffer, used);
+            secure_clear(buffer, capacity);
+            free(buffer);
+            buffer = grown;
+            capacity = next;
+        }
+        size_t count = fread(buffer + used, 1, capacity - used, f);
+        used += count;
+        if (!count) {
+            if (ferror(f)) {
+                secure_clear(buffer, capacity);
+                free(buffer);
+                return -1;
+            }
+            break;
+        }
+    }
+    if (used > limit) {
+        secure_clear(buffer, capacity);
+        free(buffer);
+        return -1;
+    }
+    *data = buffer;
+    *length = used;
+    return 0;
+}
+
+int dt295_assets_load(const char *path, dt295_assets **out, char *error, size_t error_size) {
+    if (!path || !out) {
+        seterr(error, error_size, "invalid asset path/output");
+        return -1;
+    }
+    *out = NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (error && error_size)
+            snprintf(error, error_size, "cannot open DT295 asset bundle: %s", strerror(errno));
+        return -1;
+    }
+    uint8_t *data = NULL;
+    size_t length = 0;
+    int read_error = read_bundle(f, &data, &length);
+    fclose(f);
+    if (read_error) {
+        seterr(error, error_size, "cannot read DT295 asset bundle");
+        return -1;
+    }
+    int result = dt295_assets_load_bytes(data, length, out, error, error_size);
+    secure_clear(data, length);
+    free(data);
+    return result;
 }
 void dt295_assets_free(dt295_assets *a) {
     if (!a)

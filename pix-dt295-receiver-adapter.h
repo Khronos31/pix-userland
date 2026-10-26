@@ -13,6 +13,7 @@ extern "C" {
 }
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <pthread.h>
@@ -35,12 +36,16 @@ public:
 
     ReceiverAdapter(const char* assets_directory, const usb_selector&, Clock&,
                     ReceiverId, std::size_t queue_packets) noexcept;
+    ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
+                    const usb_selector&, Clock&, ReceiverId,
+                    std::size_t queue_packets) noexcept;
     ~ReceiverAdapter() noexcept override;
     ReceiverAdapter(const ReceiverAdapter&) = delete;
     ReceiverAdapter& operator=(const ReceiverAdapter&) = delete;
 
     bool ready() const noexcept { return init_error_ == dtv::userland::Error::OK; }
     dtv::userland::Error init_error() const noexcept { return init_error_; }
+    const char* init_detail() const noexcept { return init_detail_.data(); }
     bool opened() const noexcept { return opened_; }
 
     static Result configure(Engine&, ReceiverId, std::uint64_t epoch) noexcept;
@@ -92,6 +97,9 @@ private:
 
     bool matches(ReceiverId) const noexcept;
     void initialize(const char* assets_directory, const usb_selector&) noexcept;
+    void initialize(const std::uint8_t* assets, std::size_t assets_size,
+                    const usb_selector&) noexcept;
+    void initialize_device(const usb_selector&) noexcept;
     Result halt_unlocked() noexcept;
     Result start_stream_unlocked() noexcept;
     Result stop_receiver_unlocked() noexcept;
@@ -113,6 +121,7 @@ private:
     dt295_stream* stream_ = nullptr;
     dt295_route_plan live_{};
     dtv::userland::Error init_error_ = dtv::userland::Error::INTERNAL;
+    std::array<char, 256U> init_detail_{};
     bool opened_ = false;
     bool recovery_failed_ = false;
     bool streaming_ = false;

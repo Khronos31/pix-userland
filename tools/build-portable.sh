@@ -6,6 +6,20 @@ set -eu
 mode=${1:-native}
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 case "$mode" in native|musl|android) ;; *) echo 'Usage: build-portable.sh native|musl|android' >&2; exit 2;; esac
+embedded_assets=${PIX_EMBEDDED_ASSETS:-OFF}
+case "$embedded_assets" in
+    ON|on|1|TRUE|true)
+        dt181_assets=${PIX_DT181_ASSET_DIR:-$root/assets}
+        dt295_assets=${PIX_DT295_ASSET_FILE:-$root/assets/dt295.assets}
+        [ -d "$dt181_assets" ] && [ -f "$dt295_assets" ] || {
+            echo 'Embedded builds require PIX_DT181_ASSET_DIR and PIX_DT295_ASSET_FILE' >&2
+            exit 2
+        }
+        embedded_assets=ON
+        ;;
+    OFF|off|0|FALSE|false) embedded_assets=OFF;;
+    *) echo 'PIX_EMBEDDED_ASSETS must be ON or OFF' >&2; exit 2;;
+esac
 build=$(mktemp -d "${TMPDIR:-/tmp}/pix-build.XXXXXX")
 echo "Build directory: $build" >&2
 # Keep intermediates for reproducibility/debugging; no unbounded rm -rf.
@@ -32,6 +46,7 @@ abi=${ANDROID_ABI:-aarch64}
 toolchain_file=
 android_abi=
 api=${ANDROID_API:-24}
+build_target=
 if [ "$mode" = android ]; then
     ndk=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
     [ -d "$ndk" ] || { echo 'Set ANDROID_NDK_HOME' >&2; exit 2; }
@@ -43,6 +58,7 @@ if [ "$mode" = android ]; then
         armv7a) target=armv7a-linux-androideabi;triplet=arm-linux-androideabi;android_abi=armeabi-v7a;;
         *) echo "Unsupported Android ABI: $abi" >&2; exit 2;;
     esac
+    build_target=android-$abi
     cc=$toolchain/bin/${target}${api}-clang
     cxx=$toolchain/bin/${target}${api}-clang++
     [ -x "$cc" ] && [ -x "$cxx" ] || { echo "Android compiler missing: $cc or $cxx" >&2; exit 2; }
@@ -57,6 +73,13 @@ elif [ "$mode" = musl ]; then
         exit 2
     fi
     extra_link=-static
+    build_target=linux-$(uname -m)
+else
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) build_target=darwin-arm64;;
+        Linux-*) build_target=linux-$(uname -m);;
+        *) build_target=$(uname -s)-$(uname -m);;
+    esac
 fi
 (
     cd "$build/libusb-1.0.30"
@@ -99,19 +122,43 @@ pkgdir=$build/prefix/lib/pkgconfig
 out=$root/build/$mode
 [ "$mode" != android ] || out=$out-$abi
 mkdir -p "$out"
-set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
+set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" "-DPIX_SOURCE_REVISION_OVERRIDE=${PIX_SOURCE_REVISION_OVERRIDE:-}" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
 [ -z "$toolchain_file" ] || set -- "$@" -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" -DANDROID_ABI="$android_abi" -DANDROID_PLATFORM="android-$api" -DANDROID_STL=c++_static -DCMAKE_FIND_ROOT_PATH="$build/prefix"
 [ ! -d "$core_root" ] || set -- "$@" "-DPIX_CORE_SOURCE_DIR=$core_root"
+if [ "$embedded_assets" = ON ]; then
+    set -- "$@" -DPIX_EMBEDDED_ASSETS=ON \
+        "-DPIX_DT181_ASSET_DIR=$dt181_assets" "-DPIX_DT295_ASSET_FILE=$dt295_assets"
+fi
 CC=$cc CXX=$cxx PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir "$@"
 PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 cp "$build/bin/pixd" "$build/bin/pixctl" "$build/bin/pix-ts" "$out/"
 cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
 {
-    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\nmode=%s\ncompiler=%s\ncxx=%s\n' "$version" "$actual" "$mode" "$cc" "$cxx"
+    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\nmode=%s\ntarget=%s\nembedded_assets=%s\ncompiler=%s\ncxx=%s\n' "$version" "$actual" "$mode" "$build_target" "$embedded_assets" "$cc" "$cxx"
     printf 'dtv-userland-core %s\n' "$core_pin"
     "$cc" --version | head -n 1
     "$cxx" --version | head -n 1
 } > "$out/build-info.txt"
+if [ "$embedded_assets" = ON ]; then
+    install -m 0644 "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
+    python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
+import hashlib
+import json
+import sys
+
+path = sys.argv[1]
+manifest_bytes = open(path, "rb").read()
+manifest = json.loads(manifest_bytes)
+print("embedded_source_revision=" + manifest["source_revision"])
+print("embedded_core_revision=" + manifest["dtv_userland_core_revision"])
+print("embedded_toolchain=" + manifest["toolchain"])
+print("embedded_manifest_sha256=" + hashlib.sha256(manifest_bytes).hexdigest())
+for model, entries in manifest["assets"].items():
+    files = entries["files"] if "files" in entries else {entries["file"]["name"]: entries["file"]}
+    for name, item in sorted(files.items()):
+        print(f"embedded_asset={model}/{name} size={item['size']} sha256={item['sha256']}")
+PY
+fi
 mkdir -p "$out/licenses"
 python3 "$root/tools/core-notices.py" "$core_root" "$out/licenses"
 echo "Built $out/pixd, $out/pixctl, and $out/pix-ts" >&2

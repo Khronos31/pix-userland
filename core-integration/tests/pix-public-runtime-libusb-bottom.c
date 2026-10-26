@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+int pix_test_libusb_handle_events_timeout(libusb_context *, struct timeval *);
+
 static int fake_context_storage;
 static int fake_device_storage[2];
 static int fake_handle_storage;
@@ -56,6 +58,12 @@ int LIBUSB_CALL libusb_get_device_descriptor(libusb_device *device,
 }
 int LIBUSB_CALL libusb_kernel_driver_active(libusb_device_handle *handle, int interface)
 { (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_set_configuration(libusb_device_handle *handle, int config)
+{ (void)handle; (void)config; return 0; }
+int LIBUSB_CALL libusb_attach_kernel_driver(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
+int LIBUSB_CALL libusb_detach_kernel_driver(libusb_device_handle *handle, int interface)
+{ (void)handle; (void)interface; return 0; }
 int LIBUSB_CALL libusb_get_configuration(libusb_device_handle *handle, int *config)
 { (void)handle; *config = 1; return 0; }
 int LIBUSB_CALL libusb_claim_interface(libusb_device_handle *handle, int interface)
@@ -71,12 +79,6 @@ const char * LIBUSB_CALL libusb_error_name(int error) { (void)error; return "off
 
 #ifdef _WIN32
 /* Resolve every static libusb reference without pulling real USB backends. */
-int LIBUSB_CALL libusb_set_configuration(libusb_device_handle *handle, int config)
-{ (void)handle; (void)config; return 0; }
-int LIBUSB_CALL libusb_attach_kernel_driver(libusb_device_handle *handle, int interface)
-{ (void)handle; (void)interface; return 0; }
-int LIBUSB_CALL libusb_detach_kernel_driver(libusb_device_handle *handle, int interface)
-{ (void)handle; (void)interface; return 0; }
 int LIBUSB_CALL libusb_control_transfer(libusb_device_handle *handle, uint8_t type,
     uint8_t request, uint16_t value, uint16_t index, unsigned char *data,
     uint16_t length, unsigned int timeout)
@@ -92,13 +94,14 @@ int LIBUSB_CALL libusb_interrupt_transfer(libusb_device_handle *handle, unsigned
     *actual = 0;
     return LIBUSB_ERROR_NOT_SUPPORTED;
 }
+#endif
+
 int LIBUSB_CALL libusb_handle_events_timeout_completed(libusb_context *ctx,
     struct timeval *timeout, int *completed)
 {
     if (completed && *completed) return 0;
-    return libusb_handle_events_timeout(ctx, timeout);
+    return pix_test_libusb_handle_events_timeout(ctx, timeout);
 }
-#endif
 
 struct libusb_transfer * LIBUSB_CALL libusb_alloc_transfer(int iso_packets)
 { (void)iso_packets; return calloc(1, sizeof(struct libusb_transfer)); }
@@ -127,7 +130,7 @@ int LIBUSB_CALL libusb_cancel_transfer(struct libusb_transfer *transfer)
     ++cancellations;
     return 0;
 }
-int LIBUSB_CALL libusb_handle_events_timeout(libusb_context *ctx, struct timeval *timeout)
+int pix_test_libusb_handle_events_timeout(libusb_context *ctx, struct timeval *timeout)
 {
     (void)ctx; (void)timeout;
     for (unsigned i = 0; i < active_count; ++i) {
@@ -152,3 +155,5 @@ int LIBUSB_CALL libusb_handle_events_timeout(libusb_context *ctx, struct timeval
     }
     return 0;
 }
+int LIBUSB_CALL libusb_handle_events_timeout(libusb_context *ctx, struct timeval *timeout)
+{ return pix_test_libusb_handle_events_timeout(ctx, timeout); }

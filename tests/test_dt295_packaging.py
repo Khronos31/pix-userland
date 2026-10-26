@@ -80,6 +80,19 @@ def source_members(commit):
         "third_party/dtv-userland-core/adapters/host_ts/COPYING": b"gpl",
         "third_party/libusb-1.0.30.tar.bz2": SYNTHETIC_LIBUSB,
     }
+    dt181 = {}
+    for name, size in verify.DT181_ASSET_SIZES.items():
+        data = bytes([len(name)]) * size
+        files["assets/" + name] = data
+        dt181[name] = {"size": size, "sha256": hashlib.sha256(data).hexdigest()}
+    dt295_bytes = synthetic_bundle()
+    files["assets/dt295.assets"] = dt295_bytes
+    asset_inputs = {
+        "dt181": {"provenance": verify.pack.DT181_PROVENANCE, "files": dt181},
+        "dt295": {"provenance": verify.pack.DT295_PROVENANCE,
+                  "file": {"name": "dt295.assets", "size": len(dt295_bytes),
+                           "sha256": hashlib.sha256(dt295_bytes).hexdigest()}},
+    }
     identity = {
         "repository_commit": commit, "repository_tree": "b" * 40,
         "dtv_userland_core_commit": verify.CORE_PIN, "dtv_userland_core_tree": "c" * 40,
@@ -88,7 +101,7 @@ def source_members(commit):
     metadata = {
         "project": "pix-userland", "version": finalize.pack.VERSION, "target": "source",
         "commit": commit, "libusb": "1.0.30", "private": False, "libusb_linkage": "static",
-        "device_assets": False, **identity,
+        "device_assets": False, "asset_inputs": asset_inputs, **identity,
     }
     files["release-info.json"] = json.dumps(metadata).encode() + b"\n"
     manifest = {"schema": 1, "kind": "corresponding-source", **identity,
@@ -305,6 +318,9 @@ class TestDT295Packaging(unittest.TestCase):
                      "tools/build-windows.sh", "core-integration/tests/windows_os_thread_proof.c",
                      "tests/test_windows_runtime.py"):
       self.assertIn(required, names)
+    for required in ("assets/fpga.bin", "assets/bootstrap.bin", "assets/validation.bin", "assets/dt295.assets"):
+      self.assertIn(required, names)
+    self.assertNotIn(".private/assets.enc", names)
 
 
 if __name__ == "__main__":

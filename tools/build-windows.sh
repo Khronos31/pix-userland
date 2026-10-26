@@ -2,6 +2,23 @@
 # Cross-build the three release commands with pinned llvm-mingw UCRT and source libusb.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
+embedded_assets=${PIX_EMBEDDED_ASSETS:-OFF}
+embedded_args=()
+case "$embedded_assets" in
+    ON|on|1|TRUE|true)
+        dt181_assets=${PIX_DT181_ASSET_DIR:-$root/assets}
+        dt295_assets=${PIX_DT295_ASSET_FILE:-$root/assets/dt295.assets}
+        [[ -d "$dt181_assets" && -f "$dt295_assets" ]] || {
+            echo 'Embedded builds require PIX_DT181_ASSET_DIR and PIX_DT295_ASSET_FILE' >&2
+            exit 2
+        }
+        embedded_args=(-DPIX_EMBEDDED_ASSETS=ON
+            "-DPIX_DT181_ASSET_DIR=$dt181_assets" "-DPIX_DT295_ASSET_FILE=$dt295_assets")
+        embedded_assets=ON
+        ;;
+    OFF|off|0|FALSE|false) embedded_assets=OFF;;
+    *) echo 'PIX_EMBEDDED_ASSETS must be ON or OFF' >&2; exit 2;;
+esac
 cache=${LLVM_MINGW_CACHE:-$root/build/deps}
 mkdir -p "$root/build" "$cache"
 cache=$(cd "$cache" && pwd)
@@ -88,7 +105,8 @@ cmake -S "$root/core-integration" -B "$build/cmake" \
     -DCMAKE_RC_COMPILER="$chain/bin/llvm-rc" \
     -DCMAKE_EXE_LINKER_FLAGS='-static -Wl,--no-insert-timestamp' \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" \
-    "${source_args[@]}"
+    "-DPIX_SOURCE_REVISION_OVERRIDE=${PIX_SOURCE_REVISION_OVERRIDE:-}" \
+    "${source_args[@]}" "${embedded_args[@]}"
 cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 cp "$build/bin/pixd.exe" "$build/bin/pixctl.exe" "$build/bin/pix-ts.exe" "$out/"
 if [[ "${PIX_WINDOWS_PROOFS:-0}" == 1 ]]; then
@@ -97,7 +115,7 @@ if [[ "${PIX_WINDOWS_PROOFS:-0}" == 1 ]]; then
     cp "$build/bin/pixd_fixture.exe" "$build/bin/pix_windows_os_thread_proof.exe" "$out/proofs/"
 fi
 {
-    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\n' "$version" "$usb_actual"
+    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\ntarget=windows-x64\nembedded_assets=%s\n' "$version" "$usb_actual" "$embedded_assets"
     printf 'dtv-userland-core %s\nllvm-mingw %s UCRT\nSHA256 %s\n' "$core_pin" "$llvm_version" "$llvm_sha"
     "$chain/bin/x86_64-w64-mingw32-clang" --version | head -n 1
     for program in pixd.exe pixctl.exe pix-ts.exe; do
@@ -105,6 +123,26 @@ fi
         "$chain/bin/llvm-objdump" -p "$out/$program" | grep 'DLL Name'
     done
 } > "$out/build-info.txt"
+if [[ "$embedded_assets" == ON ]]; then
+    cp "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
+    python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
+import hashlib
+import json
+import sys
+
+path = sys.argv[1]
+manifest_bytes = open(path, "rb").read()
+manifest = json.loads(manifest_bytes)
+print("embedded_source_revision=" + manifest["source_revision"])
+print("embedded_core_revision=" + manifest["dtv_userland_core_revision"])
+print("embedded_toolchain=" + manifest["toolchain"])
+print("embedded_manifest_sha256=" + hashlib.sha256(manifest_bytes).hexdigest())
+for model, entries in manifest["assets"].items():
+    files = entries["files"] if "files" in entries else {entries["file"]["name"]: entries["file"]}
+    for name, item in sorted(files.items()):
+        print(f"embedded_asset={model}/{name} size={item['size']} sha256={item['sha256']}")
+PY
+fi
 cp "$chain/LICENSE.TXT" "$out/licenses/llvm-mingw-LICENSE.TXT"
 for name in COPYING COPYING.MinGW-w64.txt COPYING.MinGW-w64-runtime.txt COPYING.winpthreads.txt COPYING.winstorecompat.txt; do
     cp "$chain/x86_64-w64-mingw32/share/mingw32/$name" "$out/licenses/llvm-mingw-$name"
