@@ -724,12 +724,21 @@ T07ではidle runとstream runを分ける。物理抜去直前にstatusでidle/
 ```powershell
 $CAPTURE_SECONDS = '<finite-capture-duration-seconds-from-release-matrix>'
 $OBSERVATION_LIMIT_SECONDS = '<finite-cut-observation-window-seconds>'
+$CLIENT_FINISH_LIMIT_SECONDS = [int]$CAPTURE_SECONDS + 30
 $client = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time',$CAPTURE_SECONDS,'--output',(Join-Path $LOG 'usb-cut.ts'),'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $LOG 'usb-cut.out') -RedirectStandardError (Join-Path $LOG 'usb-cut.err')
-if (-not $client.WaitForExit([int]$OBSERVATION_LIMIT_SECONDS * 1000)) { 'timeout: capture still active at observation limit' | Out-File (Join-Path $LOG 'usb-cut-observation.txt'); $client.WaitForExit() }
-$client.Refresh(); $client.ExitCode | Out-File (Join-Path $LOG 'usb-cut.rc')
+if (-not $client.WaitForExit([int]$OBSERVATION_LIMIT_SECONDS * 1000)) {
+  'timeout: capture still active at observation limit' | Out-File (Join-Path $LOG 'usb-cut-observation.txt')
+  if (-not $client.WaitForExit([int]$CLIENT_FINISH_LIMIT_SECONDS * 1000)) {
+    'client exceeded finite capture plus 30-second cleanup bound; terminate owned client and mark T07 incomplete' | Out-File (Join-Path $LOG 'usb-cut-client-timeout.txt')
+    Stop-Process -Id $client.Id -ErrorAction SilentlyContinue
+    if (-not $client.WaitForExit(5000)) { 'owned client did not exit within 5-second cleanup bound' | Out-File (Join-Path $LOG 'usb-cut-client-cleanup.txt') }
+  }
+}
+$client.Refresh()
+if ($client.HasExited) { $client.ExitCode | Out-File (Join-Path $LOG 'usb-cut.rc') } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG 'usb-cut.rc') }
 ```
 
-受信を別PowerShellで起動し、streaming中にstatusを確認してから利用者へ抜去を依頼する。観測窓が満了してもclientが動作中ならtimeout/failを記録し、有限`--time`の終了まで待って実終了値を保存する。観測窓内に自然終了したexit 7だけを切断結果として評価し、exit 0やtimeoutをpassにしない。
+受信を別PowerShellで起動し、streaming中にstatusを確認してから利用者へ抜去を依頼する。観測窓が満了してもclientが動作中ならtimeout/failを記録し、有限`--time`+30秒の終了上限まで待つ。上限超過時はowned clientだけを停止して5秒bounded waitでcleanupし、client終了値を取得できない場合も記録する。いずれも通常daemon停止へ進み、T07を未完了とする。観測窓内に自然終了したexit 7だけを切断結果として評価し、exit 0やtimeoutをpassにしない。
 
 T08ではclient終了後にdaemon consoleでCtrl+Cを入力し、daemonの終了値、process一覧、runtime内socketを保存する。daemon終了後は同じgroup modeのstatusを再実行し、endpoint不在の戻り値を確認する。T09では`Get-Command tsanalyze`と`tsanalyze --version`を保存して各TSに実行し、188-byte同期、TEI、continuityを製品SPEC基準で判定する。utilityがない場合は環境不能/未実施でありpassにしない。T10とT11は製品機能外として理由付きN/Aを記録する。T12は異なるUSB portで別consoleのdaemon A/Bとclient A/Bを起動し、A切断時のclient exit 7とBの継続・exit 0を個別記録する。T13は同じcaptureを頻度表にある各OS/ABIの指定時間で実行し、開始・5秒ごと・終了時のTS/counter/RSS/process handle countを保存する。Windowsのhandle countはPOSIX FD数と同一視せず、FD欄は取得不能として明示する。T14は全T-IDの候補/host/model/state/evidence pathを版別記録へ集約し、unsupported・未実施・失敗をpassにしない。
 
