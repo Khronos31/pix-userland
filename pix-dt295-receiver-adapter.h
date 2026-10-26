@@ -13,6 +13,7 @@ extern "C" {
 }
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <pthread.h>
@@ -44,6 +45,7 @@ public:
 
     bool ready() const noexcept { return init_error_ == dtv::userland::Error::OK; }
     dtv::userland::Error init_error() const noexcept { return init_error_; }
+    const char* init_detail() const noexcept { return init_detail_.data(); }
     bool opened() const noexcept { return opened_; }
 
     static Result configure(Engine&, ReceiverId, std::uint64_t epoch) noexcept;
@@ -119,6 +121,7 @@ private:
     dt295_stream* stream_ = nullptr;
     dt295_route_plan live_{};
     dtv::userland::Error init_error_ = dtv::userland::Error::INTERNAL;
+    std::array<char, 256U> init_detail_{};
     bool opened_ = false;
     bool recovery_failed_ = false;
     bool streaming_ = false;

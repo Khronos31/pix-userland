@@ -223,7 +223,8 @@ int dt295_assets_load(const char *path, dt295_assets **out, char *error, size_t 
     *out = NULL;
     FILE *f = fopen(path, "rb");
     if (!f) {
-        seterr(error, error_size, "cannot open DT295 asset bundle");
+        if (error && error_size)
+            snprintf(error, error_size, "cannot open DT295 asset bundle: %s", strerror(errno));
         return -1;
     }
     uint8_t *data = NULL;

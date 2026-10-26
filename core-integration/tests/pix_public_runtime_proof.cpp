@@ -286,6 +286,57 @@ int main()
         !write_zero_file(assets + "/bootstrap.bin", 16U) ||
         !write_zero_file(assets + "/validation.bin", 64U) ||
         ::chmod(root.c_str(), 0770) != 0) return 2;
+    const auto asset_failure = [&](const std::string& asset_root,
+                                   const std::string& log_path,
+                                   const char* detail) {
+        const pid_t child = launch(PIXD_PATH,
+            {"--device", "serial:PIXDT18101", "--assets", asset_root,
+             "--runtime-dir", root}, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        return log.find(detail) != std::string::npos &&
+               log.find("--assets entry fpga.bin") != std::string::npos &&
+               log.find(root) == std::string::npos;
+    };
+    if (!asset_failure(root + "/missing-assets", root + "/pixd-missing-asset.log",
+                       "not found")) return 42;
+    const std::string short_assets = root + "/short-assets";
+    const std::uint8_t short_asset[] = {1U, 2U, 3U};
+    if (::mkdir(short_assets.c_str(), 0700) != 0 ||
+        !write_file(short_assets + "/fpga.bin", short_asset, sizeof(short_asset)) ||
+        !asset_failure(short_assets, root + "/pixd-short-asset.log",
+                       "expected 699673 bytes, found 3")) return 43;
+    const auto pixd_failure = [&](const std::vector<std::string>& arguments,
+                                  const std::string& log_path,
+                                  const std::vector<std::string>& details) {
+        const pid_t child = launch(PIXD_PATH, arguments, log_path);
+        int status = 0;
+        if (child <= 0 || ::waitpid(child, &status, 0) != child ||
+            !WIFEXITED(status) || WEXITSTATUS(status) != 2) return false;
+        const auto bytes = read_file(log_path);
+        const std::string log(bytes.begin(), bytes.end());
+        for (const std::string& detail : details)
+            if (log.find(detail) == std::string::npos) return false;
+        return log.find(root) == std::string::npos;
+    };
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", root, "--instance", "bad/"},
+                      root + "/pixd-invalid-instance.log",
+                      {"invalid --instance", "1..64 ASCII bytes",
+                       "Windows reserved device names"})) return 45;
+    const std::string long_runtime = root + "/" + std::string(180U, 'x');
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", long_runtime},
+                      root + "/pixd-long-endpoint.log",
+                      {"endpoint path is too long", "path bytes", "including NUL",
+                       "native capacity", "Shorten --runtime-dir or --instance"})) return 46;
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+                       "--runtime-dir", "relative"},
+                      root + "/pixd-relative-runtime.log",
+                      {"--runtime-dir must be a non-empty absolute local path"})) return 47;
     const std::string expected_path = root + "/expected.ts";
     const std::string output_path = root + "/client.ts";
     const std::string off_grid_path = root + "/off-grid.ts";
