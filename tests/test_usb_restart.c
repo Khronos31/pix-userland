@@ -2,6 +2,7 @@
 /* Exercise the real backend lifetime logic with deterministic USB completions.
  * Device discovery/claiming are never invoked. */
 #include <assert.h>
+#include <fcntl.h>
 #include <libusb.h>
 #include <stdlib.h>
 #include <string.h>
@@ -331,9 +332,15 @@ static void open_tests(void) {
     malloc_failure = 1;
     assert(usb_open(&b, &selector, -1, 0) == 70 && !b);
     malloc_failure = 0;
+    int fd[2];
+    assert(pipe(fd) == 0);
     wrong_model = 1;
-    assert(usb_open(&b, NULL, 9, 0) == 3 && !b);
+    assert(usb_open(&b, NULL, fd[0], 0) == 3 && !b);
+    assert(wrapped_fd != fd[0] && fcntl(fd[0], F_GETFD) >= 0);
+    assert(fcntl((int)wrapped_fd, F_GETFD) < 0);
     wrong_model = 0;
+    close(fd[0]); close(fd[1]);
+    assert(usb_open(&b, NULL, 9, 0) == 7 && !b);
     descriptor_result = LIBUSB_ERROR_IO;
     assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
     descriptor_result = 0;
@@ -482,9 +489,14 @@ static void dt295_model_selection(void) {
     /* The borrowed-fd path remains model checked, with the fd passed through. */
     fake_devices[0] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
     fake_devices[1] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
-    assert(!usb_open(&b, NULL, 42, 0));
-    assert(wrapped_fd == 42 && usb_model(b) == USB_MODEL_DT181);
+    int fd[2];
+    assert(pipe(fd) == 0);
+    assert(!usb_open(&b, NULL, fd[0], 0));
+    assert(wrapped_fd != fd[0] && usb_model(b) == USB_MODEL_DT181);
     usb_close(b);
+    assert(fcntl(fd[0], F_GETFD) >= 0);
+    assert(fcntl((int)wrapped_fd, F_GETFD) < 0);
+    close(fd[0]); close(fd[1]);
 
     fake_device_count = 1;
     list_result = 1;

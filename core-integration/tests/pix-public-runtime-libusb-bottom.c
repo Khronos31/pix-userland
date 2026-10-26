@@ -4,8 +4,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 int pix_test_libusb_handle_events_timeout(libusb_context *, struct timeval *);
 
@@ -55,9 +57,13 @@ int LIBUSB_CALL libusb_wrap_sys_device(libusb_context *ctx, intptr_t fd,
     if (path != NULL) {
         FILE *file = fopen(path, "a");
         if (file != NULL) {
+#ifdef _WIN32
+            fprintf(file, "wrap fd=%lld cloexec=not-applicable\n", (long long)fd);
+#else
             const int flags = fcntl((int)fd, F_GETFD);
             fprintf(file, "wrap fd=%ld cloexec=%d\n", (long)fd,
                     flags >= 0 && (flags & FD_CLOEXEC) != 0);
+#endif
             fclose(file);
         }
     }
