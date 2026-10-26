@@ -269,7 +269,10 @@ ha addons restart "$ADDON_SLUG"
 ```sh
 set -eu
 gh run list --repo Khronos31/pix-userland --workflow release.yml --limit 20
-RUN_ID='<successful-candidate-run-id>'; TARGET='<linux-x86_64|linux-aarch64|darwin-arm64|android-aarch64|android-armv7a|android-x86_64|windows-x64>'
+: "${RUN_ID:?export the exact successful candidate run ID from the version record}"
+: "${TARGET:?export the target artifact name from the version matrix}"
+case "$RUN_ID" in ''|*[!0-9]*) echo 'RUN_ID must be a decimal workflow run ID' >&2; exit 2 ;; esac
+case "$TARGET" in linux-x86_64|linux-aarch64|darwin-arm64|android-aarch64|android-armv7a|android-x86_64|windows-x64) ;; *) echo 'TARGET is not a published artifact name' >&2; exit 2 ;; esac
 RUN_JSON=$(gh run view "$RUN_ID" --repo Khronos31/pix-userland --json headSha,attempt,conclusion)
 SOURCE_SHA=$(printf '%s\n' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headSha"])')
 printf '%s\n' "$RUN_JSON" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conclusion"] == "success" and r["headSha"] and r["attempt"] > 0'
@@ -563,16 +566,46 @@ N/Aは製品機能上該当しない項目だけに使う。OS/ABI候補のunsup
 
 毎release、代表Linux x86_64機で2時間連続受信し、全配布archiveをnative OS/ABIで短時間回帰します。初回/major追加確認ではmacOS/Windowsは各30分、残るOS/ABIは各10分連続受信し、全無料channel各10秒は代表機だけで行います。CIのみで実機認定とはしません。
 
-候補archive rootで作業します。USB位置とchannel値は現地の実値へ置き換えます。model dataの実現方法はその版の候補内容を記録し、外部assets pathを共通手順の必須入力にしません。
+POSIXでは上記T00のrun固有artifact取得、GitHub digest照合、内側archive SHA-256記録、`tar -xzf "$ARCHIVE" -C "$WORK/candidate"`、`release-info.json` commit照合を先に完了し、その結果の`D`/`LOG`/`RT`をこの手順へ引き継ぎます。T00で取得した候補以外を使いません。USB位置とchannel値は引用符付きの変数へ設定し、`pixd --list-json`の実在位置と照合します。空または未置換値は起動前に拒否します。model dataの実現方法はその版の候補内容を記録し、外部assets pathを共通手順の必須入力にしません。
 
 ```sh
-./pixd --models
-./pixd --list-json
-RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
-./pixd --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group & P=$!
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
-./pix-ts --instance rc --channel T27 --system isdb-t --time <SECONDS> --output t27.ts --runtime-dir "$RT" --group
+set -eu
+PIX_PORT='1-2.3'; RECEIVER='0'; CAPTURE_SECONDS='10'; INSTANCE='rc'
+require_value() { name=$1 value=$2; case "$value" in ''|*'<'*|*'>'*) echo "invalid or unreplaced $name" >&2; return 1 ;; esac; }
+: "${D:?complete T00 candidate extraction first}"; : "${LOG:?complete T00 log directory first}"; : "${RT:?complete T00 runtime directory first}"
+test -x "$D/pixd"; test -x "$D/pixctl"; test -x "$D/pix-ts"; test -d "$LOG"; test -d "$RT"
+require_value PIX_PORT "$PIX_PORT"; require_value RECEIVER "$RECEIVER"; require_value CAPTURE_SECONDS "$CAPTURE_SECONDS"
+case "$RECEIVER:$CAPTURE_SECONDS" in *[!0-9:]*|:*) echo 'receiver/duration must be numeric' >&2; exit 1 ;; esac
+ID="usb:$PIX_PORT"; "$D/pixd" --models > "$LOG/models.txt"; "$D/pixd" --list-json > "$LOG/discovery.json"
+python3 - "$LOG/discovery.json" "$PIX_PORT" <<'PY'
+import json,sys
+root=json.load(open(sys.argv[1],encoding='utf-8'))
+def has_port(value):
+    if isinstance(value,dict): return value.get('port') == sys.argv[2] or any(has_port(v) for v in value.values())
+    if isinstance(value,list): return any(has_port(v) for v in value)
+    return False
+if not has_port(root): raise SystemExit('selected USB port absent from discovery JSON')
+PY
+"$D/pixd" --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group > "$LOG/daemon.out" 2> "$LOG/daemon.err" & P=$!
+cleanup_pixd() {
+  original=$?; trap - EXIT
+  if kill -0 "$P" 2>/dev/null; then kill -TERM "$P"; fi
+  if wait "$P"; then daemon_rc=0; else daemon_rc=$?; fi
+  echo "$daemon_rc" > "$LOG/daemon.rc"
+  if [ "$original" -eq 0 ] && [ "$daemon_rc" -ne 0 ]; then original=$daemon_rc; fi
+  exit "$original"
+}
+trap cleanup_pixd EXIT
+i=0; READY=0
+while [ "$i" -lt 60 ]; do
+  if "$D/pixctl" --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group status > "$LOG/status.txt" 2> "$LOG/status.err" && grep -q ready "$LOG/status.txt"; then READY=1; break; fi
+  kill -0 "$P" || { echo 'pixd exited before ready' >&2; exit 1; }
+  i=$((i + 1)); sleep 1
+done
+test "$READY" -eq 1 || { echo 'daemon did not become ready' >&2; exit 1; }
+"$D/pixctl" --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group list > "$LOG/list.txt" 2> "$LOG/list.err"
+"$D/pix-ts" --device "$ID" --instance "$INSTANCE" --receiver "$RECEIVER" --channel T27 --system isdb-t --time "$CAPTURE_SECONDS" --output "$LOG/t27.ts" --runtime-dir "$RT" --group > "$LOG/ts.out" 2> "$LOG/ts.err" || { RC=$?; echo "$RC" > "$LOG/ts.rc"; exit "$RC"; }
+echo 0 > "$LOG/ts.rc"
 ```
 
 `--models`と`--list-json`でcandidateのmodelとUSB位置を記録し、statusがfree/readyでreceiverが1基あることを確認します。最大同時受信数の1 streamを正常終了させ、client終了値、daemon packet/byte/USB counters、TS品質を確認します。DT181-PU0は利用可能な地上波・BS・CSから3波を選び、最大受信試験で未確認の波を短時間取得します。DT295は各archive/OS/ABIで同じcapture手順を実行し、unsupportedまたはnonzero終了は候補の未達/失敗として記録します。channel/TSID/slot/周波数は実値を記録します。出力非空だけで合格にせず、TS parser/独立検査と記録済みcounterで評価します。
@@ -580,8 +613,8 @@ RT=$(mktemp -d "${TMPDIR:-/tmp}/pix-release.XXXXXX")
 受信中は別端末で状態を反復観測し、clientを通常終了して同じdaemon/runtimeから再取得します。
 
 ```sh
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group list
+./pixctl --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group status
+./pixctl --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group list
 ```
 
 USB抜去/再挿入はidle時と受信中で別々に行い、実際のclient/daemon表示と終了値を記録します。抜去後はdaemonを通常終了し、挿し直した後に`pixd --list-json`で再列挙し、新daemon/runtimeからstatus/listと短時間TSを取り直します。期待されるexit値はREADMEとcandidate実測に照合し、自動hotplug再取得は仮定しません。
@@ -589,7 +622,7 @@ USB抜去/再挿入はidle時と受信中で別々に行い、実際のclient/da
 PIX内部カードは以下の `card-status` による挿入状態だけを確認します。外部ATR/reset/APDUやPC/SC/WinSCardは製品機能外です。captureを通常停止しdaemonを起動したまま行います。各物理操作の直前にHAOS/SCS上でCodexは`beep`、Claude Codeは`vibe`を実行し、「カードを抜いてください」または「同じカードを再挿入してください」と依頼します。各依頼から最大5分待ち、応答がない場合は工程を未完了として中断します。抜去後にstatus不在、再挿入後にpresent復帰を確認します。
 
 ```sh
-./pixctl --runtime-dir "$RT" --device usb:<BUS-PORT> --instance rc --group card-status
+./pixctl --runtime-dir "$RT" --device "$ID" --instance "$INSTANCE" --group card-status
 ```
 
 <a id="pix-os-t07-recipes"></a>
@@ -861,10 +894,29 @@ Get-ChildItem -LiteralPath $RT -Force
 E05/E06/E07ごとに対応するABI archiveを展開し、Termux:APIと`termux-api`を使う。`termux-usb -l`で実nodeを記録する。`pixd --list-json`や`--device`は`--fd`と併用できないため、Androidは`termux-usb -r -e`でdaemon自身を起動し、渡されたFDでUSBを開く。以下をdaemon起動に使い、clientは別Termux sessionから同じruntime/instance/groupを指定する。
 
 ```sh
-RT="$PREFIX/tmp/pix-<run-id>"
+RUN_ID='rc-20261026-e05'; RT="$PREFIX/tmp/pix-${RUN_ID}"; LOG="$PREFIX/tmp/pix-${RUN_ID}-log"
+mkdir -p "$LOG"; chmod 700 "$LOG"
 mkdir -p "$RT" && chmod 700 "$RT"
-termux-usb -l
-termux-usb -r -e "./pixd --instance rc --runtime-dir $RT --group" /dev/bus/usb/BBB/AAA
+termux-usb -l > "$LOG/termux-usb-paths.json"
+TARGET_USB='06b8:102b'; EXPECTED_NODES='1'
+python3 - "$LOG/termux-usb-paths.json" "$TARGET_USB" "$EXPECTED_NODES" "$LOG/termux-usb-map.json" <<'PY'
+import glob,json,os,re,sys
+paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); expected=int(sys.argv[3])
+if not isinstance(paths,list) or any(not isinstance(p,str) for p in paths): raise SystemExit('termux-usb -l must return USB path strings')
+selected=[]
+for path in paths:
+ m=re.fullmatch(r'/dev/bus/usb/(\d{3})/(\d{3})',path)
+ if not m: continue
+ bus,dev=(str(int(v)) for v in m.groups())
+ for node in glob.glob('/sys/bus/usb/devices/*'):
+  try:
+   if open(node+'/busnum').read().strip()==bus and open(node+'/devnum').read().strip()==dev and (open(node+'/idVendor').read().strip()+':'+open(node+'/idProduct').read().strip()).lower()==target: selected.append(path)
+  except OSError: pass
+json.dump({'api_paths':paths,'target':target,'selected':selected},open(sys.argv[4],'w',encoding='utf-8'),indent=2)
+if len(selected)!=expected: raise SystemExit(f'expected {expected} matching USB path(s), found {len(selected)}')
+PY
+USB_NODE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selected"][0])' "$LOG/termux-usb-map.json")
+termux-usb -r -e "./pixd --instance rc --runtime-dir $RT --group" "$USB_NODE" > "$LOG/daemon.out" 2> "$LOG/daemon.err"
 ```
 
 再接続後は`termux-usb -l`で新nodeを確認し、新しいruntimeを作成して同じlaunchを行う。古いFDを再利用しない。T00–T14は各Android ABI archiveごとに同じ期待値・終了値・cleanup・記録を適用する。`--models`/archive model data情報はdevice-free candidate inspectionとして行い、USB FDでの列挙可否を代用しない。
@@ -874,12 +926,13 @@ USB idleとstream中にユーザーがdeviceを抜き、client/daemonの実際�
 stream runでは、物理抜去依頼の前にstatusでstreamingを確認し、candidateに対する有限captureを開始します。観測窓の値は各実施記録へ明記します。
 
 ```sh
-CAPTURE_SECONDS=<finite-capture-duration>
-OBSERVATION_LIMIT_SECONDS=<finite-cut-observation-window>
-./pix-ts --device usb:<BUS-PORT> --instance rc --channel T27 --system isdb-t \
+CAPTURE_SECONDS='600'; OBSERVATION_LIMIT_SECONDS='120'
+for value in "$CAPTURE_SECONDS" "$OBSERVATION_LIMIT_SECONDS"; do case "$value" in ''|*'<'*|*'>'*|*[!0-9]*|0) echo 'capture and observation durations must be positive integer seconds' >&2; exit 2 ;; esac; done
+ID='usb:1-2.3'; INSTANCE='rc'
+./pix-ts --device "$ID" --instance "$INSTANCE" --channel T27 --system isdb-t \
   --time "$CAPTURE_SECONDS" --output cut.ts --runtime-dir "$RT" --group \
   >"$LOG/cut.stdout" 2>"$LOG/cut.stderr" & C=$!
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT" --instance rc --group status
+./pixctl --device "$ID" --runtime-dir "$RT" --instance "$INSTANCE" --group status
 # streaming確認後、残りcapture時間が観測窓より長い間に利用者へ抜去を依頼
 ```
 
@@ -902,20 +955,40 @@ cat "$LOG/cut.stderr" > "$LOG/cut.stderr.saved"
 
 ```sh
 RT2=$(mktemp -d "${TMPDIR:-/tmp}/pix-reconnect.XXXXXX")
-./pixd --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group & P2=$!
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group status
-./pixctl --device usb:<BUS-PORT> --runtime-dir "$RT2" --instance rc --group list
-./pix-ts --device usb:<BUS-PORT> --instance rc --channel T27 --system isdb-t \
-  --time <SECONDS> --output t27.ts --runtime-dir "$RT2" --group
+ID='usb:1-2.3'; CAPTURE_SECONDS='10'; INSTANCE='rc'
+case "$ID:$CAPTURE_SECONDS" in *'<'*|*'>'*|*[!A-Za-z0-9:/.-]*) echo 'set a discovered USB selector and positive duration before launch' >&2; exit 2 ;; esac
+./pixd --device "$ID" --runtime-dir "$RT2" --instance "$INSTANCE" --group > "$LOG/reconnect-daemon.out" 2> "$LOG/reconnect-daemon.err" & P2=$!
+./pixctl --device "$ID" --runtime-dir "$RT2" --instance "$INSTANCE" --group status > "$LOG/reconnect-status.txt" 2> "$LOG/reconnect-status.err"
+./pixctl --device "$ID" --runtime-dir "$RT2" --instance "$INSTANCE" --group list > "$LOG/reconnect-list.txt" 2> "$LOG/reconnect-list.err"
+./pix-ts --device "$ID" --instance "$INSTANCE" --channel T27 --system isdb-t \
+  --time "$CAPTURE_SECONDS" --output "$LOG/t27.ts" --runtime-dir "$RT2" --group > "$LOG/t27.out" 2> "$LOG/t27.err" || { RC=$?; echo "$RC" > "$LOG/t27.rc"; exit "$RC"; }
+echo 0 > "$LOG/t27.rc"
 ```
 
 Androidでは上の`RT2`を新しいrun固有pathへ置き換え、再接続後のTermux USB nodeを使ってdaemonだけを次のように起動します。client consoleでは同じ`RT2`/`rc`/`--group`を指定して上の`pixctl`と`pix-ts`を実行します。
 
 ```sh
-RT2="$PREFIX/tmp/pix-reconnect-<run-id>"
+RUN_ID='rc-20261026-reconnect'; RT2="$PREFIX/tmp/pix-reconnect-${RUN_ID}"; LOG="$PREFIX/tmp/pix-reconnect-${RUN_ID}-log"
+mkdir -p "$LOG"; chmod 700 "$LOG"
 mkdir -p "$RT2" && chmod 700 "$RT2"
-termux-usb -l
-termux-usb -r -e "./pixd --instance rc --runtime-dir $RT2 --group" /dev/bus/usb/BBB/AAA
+termux-usb -l > "$LOG/termux-usb-paths.json"
+# 上記のsysfs照合を再実行し、再接続後の新しい実nodeだけを選ぶ。
+python3 - "$LOG/termux-usb-paths.json" '06b8:102b' '1' "$LOG/termux-usb-map.json" <<'PY'
+import glob,json,re,sys
+paths=json.load(open(sys.argv[1],encoding='utf-8')); target=sys.argv[2].lower(); selected=[]
+for path in paths:
+ m=re.fullmatch(r'/dev/bus/usb/(\d{3})/(\d{3})',path)
+ if not m: continue
+ bus,dev=(str(int(v)) for v in m.groups())
+ for node in glob.glob('/sys/bus/usb/devices/*'):
+  try:
+   if open(node+'/busnum').read().strip()==bus and open(node+'/devnum').read().strip()==dev and (open(node+'/idVendor').read().strip()+':'+open(node+'/idProduct').read().strip()).lower()==target: selected.append(path)
+  except OSError: pass
+json.dump({'api_paths':paths,'target':target,'selected':selected},open(sys.argv[4],'w',encoding='utf-8'),indent=2)
+if len(selected)!=int(sys.argv[3]): raise SystemExit(f'expected {sys.argv[3]} matching node(s), found {len(selected)}')
+PY
+USB_NODE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selected"][0])' "$LOG/termux-usb-map.json")
+termux-usb -r -e "./pixd --instance rc --runtime-dir $RT2 --group" "$USB_NODE"
 ```
 
 再接続後は`pix-ts` exit 0に加えてTS sync/parser品質合格、daemon counters、通常daemon exit 0とprocess/FD/socket cleanupを記録します。AndroidはTermux USB許可/再取得、WindowsはREADMEのWinUSB構成を使います。BUSYなら別processを奪わず理由を記録します。
