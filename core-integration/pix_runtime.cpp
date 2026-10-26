@@ -63,7 +63,8 @@ void set_asset_diagnostic(RuntimeFailureDiagnostic* diagnostic, const char* asse
 {
     if (diagnostic == nullptr) return;
     std::snprintf(diagnostic->asset.data(), diagnostic->asset.size(), "%s", asset);
-    std::snprintf(diagnostic->detail.data(), diagnostic->detail.size(), "%s", detail);
+    std::snprintf(diagnostic->detail.data(), diagnostic->detail.size(), "%.*s",
+                  static_cast<int>(diagnostic->detail.size() - 1U), detail);
     diagnostic->expected_bytes = expected;
     diagnostic->actual_bytes = actual;
     diagnostic->byte_counts_valid = counts_valid;
