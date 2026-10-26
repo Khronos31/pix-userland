@@ -106,9 +106,9 @@ PIXはsingle-device runで`TARGET_USB=06b8:102b`（DT181-PU0）または`06b8:10
 
 結果が期待数と完全一致した場合だけ、JSONの`selected`に記録された各pathへ`termux-usb -r <path>`（または製品固有の`-r -e`）を実行する。USB permission後にdaemonを開始する。再接続時は古いpath/FDを使わず、同じ列挙・sysfs照合を再実行する。sysfs未読・node未対応・無許可候補複数は合格ではなく未達として記録する。
 
-環境依存状態を変える前に、承認済みの試験用account/add-on、保護されたrun専用LOG、復元可能な退避を用意する。次は手順を記載したものであり、今回の作業では実行しない。
+正式検証でE02/E03/E07等により環境状態を変更する場合は、ユーザー承認済みの対象・値・影響範囲を確定し、保護されたrun専用LOGと復元可能な状態保存を準備してから実行する。適用後に必要な試験を行い、終了時に保存値へ戻してreadback/比較する。承認範囲を超える変更やHA Core/mirakcの再起動は行わない。
 
-- **E02 HAOS/Supervisor options:** `/addons/self/info`の`options`は対象addon自身のapp recordに保存されたraw optionsで、`/options/config`のdefaults・secret解決後の値とは異なる。Supervisor APIの実装は[apps.py](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/apps.py#L1620-L1700)および[options endpoints](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/apps.py#L1832-L2015)を参照。対象addon内で認可済みtokenを使い、raw表現はmode 600のprivate backupにだけ保存する。値を画面・共有log・evidenceへ出さない。validateの`valid`がtrue以外、または読み出し/HTTP/JSON処理が失敗した場合はoptions POST前に終了する。Supervisorは本試験で操作しない。
+- **E02 HAOS/Supervisor options:** `/addons/self/info`の`options`は対象addon自身のapp recordに保存されたraw optionsで、`/options/config`のdefaults・secret解決後の値とは異なる。Supervisor APIの実装は[apps.py](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/apps.py#L1620-L1700)および[options endpoints](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/apps.py#L1832-L2015)を参照。対象addon内で認可済みtokenを使い、raw表現はmode 600のprivate backupにだけ保存する。値を画面・共有log・evidenceへ出さない。validateの`valid`がtrue以外、または読み出し/HTTP/JSON処理が失敗した場合はoptions POST前に終了する。承認済み範囲内で対象addonの起動・停止とoptions復元/比較を行い、HA Core/mirakcは再起動しない。
   ```sh
   set -eu
   umask 077
@@ -239,7 +239,7 @@ ha addons restart "$ADDON_SLUG"
   if [ "$RESTORE_RC" -ne 0 ]; then echo 'access state restoration incomplete; retain evidence and stop' >&2; exit "$RESTORE_RC"; fi
   ```
 
-- **E07 Android stay-awake:**初回ADB readが非0/空/不正値なら書込み前に停止する。`null`は未設定、十進整数は保存値として区別する。権限・readback失敗を無視しない。次は端末設定に触れないsynthetic確認用の状態遷移であり、実Androidへは実行しない。
+- **E07 Android stay-awake:**初回ADB readが非0/空/不正値なら書込み前に停止する。`null`は未設定、十進整数は保存値として区別する。権限・readback失敗を無視しない。正式検証では承認済み端末で設定を適用し、試験後に保存値へ戻してreadback/比較する。synthetic fixtureは局所確認に限り、実端末での検証を代替しない。
   ```sh
   set -eu
   LOG='<private-run-log>'
