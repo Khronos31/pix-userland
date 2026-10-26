@@ -688,8 +688,16 @@ $CHANNEL_PLAN = @('<channel-1>','<channel-2>')
 foreach ($channel in $CHANNEL_PLAN) {
   $system = if ($channel -match '^T\d+$') { 'isdb-t' } elseif ($channel -match '^(BS|CS)\d+') { 'isdb-s' } else { throw "Unsupported channel format: $channel" }
   $out = Join-Path $LOG ($channel + '.ts')
-  $p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel',$channel,'--system',$system,'--time','10','--output',$out,'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow -Wait
-  [pscustomobject]@{ Channel=$channel; System=$system; ExitCode=$p.ExitCode; File=$out }
+  $p = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel',$channel,'--system',$system,'--time','10','--output',$out,'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow
+  if (-not $p.WaitForExit(90000)) {
+    $p.Id | Out-File (Join-Path $LOG "t04-$channel-timeout.txt")
+    Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+    if (-not $p.WaitForExit(5000)) { $p.Id | Out-File (Join-Path $LOG "t04-$channel-cleanup-timeout.txt") }
+  }
+  $p.Refresh()
+  if ($p.HasExited) { $p.ExitCode | Out-File (Join-Path $LOG "t04-$channel.rc") } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG "t04-$channel.rc") }
+  if ($p.HasExited -and $p.ExitCode -eq 0 -and (Test-Path $out) -and -not (Test-Path (Join-Path $LOG "t04-$channel-timeout.txt"))) { 'complete: client exited 0' | Set-Content (Join-Path $LOG "t04-$channel.state") } else { 'incomplete: client timeout/exit/output failure' | Set-Content (Join-Path $LOG "t04-$channel.state") }
+  if (Test-Path $out) { Get-FileHash -Algorithm SHA256 $out } else { "$channel output unavailable" | Out-File (Join-Path $LOG 't04-ts-missing.txt') }
 }
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group status
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group list
