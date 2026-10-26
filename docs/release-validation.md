@@ -677,6 +677,7 @@ $p.Refresh()
 if (-not $p.HasExited -or $p.ExitCode -ne 0 -or (Test-Path (Join-Path $LOG 't03-client-timeout.txt'))) { 'incomplete: client timeout/exit failure' | Set-Content (Join-Path $LOG 't03-state.txt') } else { 'complete: client exited 0' | Set-Content (Join-Path $LOG 't03-state.txt') }
 if ($p.HasExited) { $p.ExitCode | Out-File (Join-Path $LOG 't03-client.rc') } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG 't03-client.rc') }
 if (Test-Path (Join-Path $LOG 'capture.ts')) { Get-FileHash -Algorithm SHA256 (Join-Path $LOG 'capture.ts') } else { 'capture.ts unavailable' | Out-File (Join-Path $LOG 't03-ts-missing.txt') }
+if (Test-Path (Join-Path $LOG 't03-client-timeout.txt')) { throw 'T03 client timeout; stop the owned daemon normally, verify cleanup, and record T03 incomplete; do not start T04 captures.' }
 ```
 
 T04は`$CHANNEL_PLAN`に対象channelを並べ、各channel/modelを独立captureとして実行する。T05は別consoleのstatus/listを受信中にも実行する。T06はcaptureを止めdaemonを維持し、利用者の抜去前後に`card-status`を記録する。外部ATR/APDUは本製品の対象外であり、内部CARDがないOSを理由に試験を省略しない。
@@ -698,6 +699,7 @@ foreach ($channel in $CHANNEL_PLAN) {
   if ($p.HasExited) { $p.ExitCode | Out-File (Join-Path $LOG "t04-$channel.rc") } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG "t04-$channel.rc") }
   if ($p.HasExited -and $p.ExitCode -eq 0 -and (Test-Path $out) -and -not (Test-Path (Join-Path $LOG "t04-$channel-timeout.txt"))) { 'complete: client exited 0' | Set-Content (Join-Path $LOG "t04-$channel.state") } else { 'incomplete: client timeout/exit/output failure' | Set-Content (Join-Path $LOG "t04-$channel.state") }
   if (Test-Path $out) { Get-FileHash -Algorithm SHA256 $out } else { "$channel output unavailable" | Out-File (Join-Path $LOG 't04-ts-missing.txt') }
+  if (Test-Path (Join-Path $LOG "t04-$channel-timeout.txt")) { throw "T04 client timeout for $channel; stop the owned daemon normally, verify cleanup, record T04 incomplete, and do not start the next channel." }
 }
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group status
 & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group list
@@ -708,14 +710,26 @@ T05はcaptureを別PowerShellで実行し、status/listをcapture中に反復す
 
 ```powershell
 $CONTROL_CAPTURE_SECONDS = '<finite-seconds-from-release-matrix>'
+$CONTROL_FINISH_LIMIT_SECONDS = [int]$CONTROL_CAPTURE_SECONDS + 90
 $monitor = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time',$CONTROL_CAPTURE_SECONDS,'--output',(Join-Path $LOG 't05-monitor.ts'),'--runtime-dir',$RT,'--group') -PassThru -NoNewWindow
-while (-not $monitor.HasExited) {
+$controlDeadline = [DateTime]::UtcNow.AddSeconds($CONTROL_FINISH_LIMIT_SECONDS)
+while (-not $monitor.HasExited -and [DateTime]::UtcNow -lt $controlDeadline) {
   & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group status 2>&1 | Tee-Object -Append (Join-Path $LOG 't05-status.txt')
   & (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT --instance rc --group list 2>&1 | Tee-Object -Append (Join-Path $LOG 't05-list.txt')
   Start-Sleep -Seconds 5
   $monitor.Refresh()
 }
-$monitor.Refresh(); $monitor.ExitCode | Out-File (Join-Path $LOG 't05-client.rc')
+$monitor.Refresh()
+if (-not $monitor.HasExited) {
+  $monitor.Id | Out-File (Join-Path $LOG 't05-client-timeout.txt')
+  Stop-Process -Id $monitor.Id -ErrorAction SilentlyContinue
+  if (-not $monitor.WaitForExit(5000)) { $monitor.Id | Out-File (Join-Path $LOG 't05-client-cleanup-timeout.txt') }
+}
+$monitor.Refresh()
+if ($monitor.HasExited) { $monitor.ExitCode | Out-File (Join-Path $LOG 't05-client.rc') } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG 't05-client.rc') }
+if (-not $monitor.HasExited -or $monitor.ExitCode -ne 0 -or (Test-Path (Join-Path $LOG 't05-client-timeout.txt'))) { 'incomplete: monitor timeout/exit failure' | Set-Content (Join-Path $LOG 't05-state.txt') } else { 'complete: monitor exited 0' | Set-Content (Join-Path $LOG 't05-state.txt') }
+if (Test-Path (Join-Path $LOG 't05-monitor.ts')) { Get-FileHash -Algorithm SHA256 (Join-Path $LOG 't05-monitor.ts') } else { 'monitor TS unavailable' | Out-File (Join-Path $LOG 't05-ts-missing.txt') }
+if (Test-Path (Join-Path $LOG 't05-client-timeout.txt')) { throw 'T05 monitor timeout; stop the owned daemon normally, verify cleanup, and record T05 incomplete before any later capture.' }
 ```
 
 T06は別runでclientを起動せずdaemonだけreadyにし、各照会のresponseと終了値を保存する。利用者へカード抜去・再挿入を依頼し、各操作後に同じ`card-status`を実行する。各依頼の完了待ちは最大5分とし、応答なしは未完了とする。
@@ -753,6 +767,29 @@ if ($client.HasExited) { $client.ExitCode | Out-File (Join-Path $LOG 'usb-cut.rc
 
 受信を別PowerShellで起動し、streaming中にstatusを確認してから利用者へ抜去を依頼する。観測窓が満了してもclientが動作中ならtimeout/failを記録し、有限`--time`+30秒の終了上限まで待つ。上限超過時はowned clientだけを停止して5秒bounded waitでcleanupし、client終了値を取得できない場合も記録する。いずれも通常daemon停止へ進み、T07を未完了とする。観測窓内に自然終了したexit 7だけを切断結果として評価し、exit 0やtimeoutをpassにしない。
 
+Windows再接続後はT03と同じcandidateの`pix-ts.exe`を使うが、新path/new runtimeのdaemonを別consoleで起動し、以下のbounded short-capture recipeを実行する。
+
+```powershell
+$RT_RECOVERY = Join-Path $D 'runtime-t07-recovery'; $recoveryTs = Join-Path $LOG 't07-recovery.ts'
+if (Test-Path $RT_RECOVERY) { throw 'refusing to reuse existing recovery runtime' }
+New-Item -ItemType Directory -Path $RT_RECOVERY | Out-Null
+# 別daemon console: & (Join-Path $D 'pixd.exe') --device $selector --runtime-dir $RT_RECOVERY --instance rc --group
+& (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT_RECOVERY --instance rc --group status
+& (Join-Path $D 'pixctl.exe') --device $selector --runtime-dir $RT_RECOVERY --instance rc --group list
+$recovery = Start-Process -FilePath (Join-Path $D 'pix-ts.exe') -ArgumentList @('--device',$selector,'--instance','rc','--channel','T27','--system','isdb-t','--time','30','--output',$recoveryTs,'--runtime-dir',$RT_RECOVERY,'--group') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $LOG 't07-recovery.out') -RedirectStandardError (Join-Path $LOG 't07-recovery.err')
+if (-not $recovery.WaitForExit(90000)) {
+  $recovery.Id | Out-File (Join-Path $LOG 't07-recovery-timeout.txt')
+  Stop-Process -Id $recovery.Id -ErrorAction SilentlyContinue
+  if (-not $recovery.WaitForExit(5000)) { $recovery.Id | Out-File (Join-Path $LOG 't07-recovery-cleanup-timeout.txt') }
+}
+$recovery.Refresh()
+if ($recovery.HasExited) { $recovery.ExitCode | Out-File (Join-Path $LOG 't07-recovery.rc') } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $LOG 't07-recovery.rc') }
+if ($recovery.HasExited -and $recovery.ExitCode -eq 0 -and (Test-Path $recoveryTs) -and -not (Test-Path (Join-Path $LOG 't07-recovery-timeout.txt'))) { 'complete: recovery capture exited 0' | Set-Content (Join-Path $LOG 't07-recovery.state') } else { 'incomplete: recovery capture timeout/exit/output failure' | Set-Content (Join-Path $LOG 't07-recovery.state') }
+if (Test-Path $recoveryTs) { Get-FileHash -Algorithm SHA256 $recoveryTs } else { 'recovery TS unavailable' | Out-File (Join-Path $LOG 't07-recovery-ts-missing.txt') }
+if (Test-Path (Join-Path $LOG 't07-recovery-timeout.txt')) { throw 'T07 recovery client timeout; stop the owned daemon normally, verify cleanup, record T07 incomplete, and do not start another capture.' }
+if (-not $recovery.HasExited -or $recovery.ExitCode -ne 0) { throw 'T07 recovery client exit unavailable or nonzero; stop the owned daemon normally and record T07 incomplete.' }
+```
+
 T08ではclient終了後にdaemon consoleでCtrl+Cを入力し、daemonの終了値、process一覧、runtime内socketを保存する。daemon終了後は同じgroup modeのstatusを再実行し、endpoint不在の戻り値を確認する。T09では`Get-Command tsanalyze`と`tsanalyze --version`を保存して各TSに実行し、188-byte同期、TEI、continuityを製品SPEC基準で判定する。utilityがない場合は環境不能/未実施でありpassにしない。T10とT11は製品機能外として理由付きN/Aを記録する。T12は異なるUSB portで別consoleのdaemon A/Bとclient A/Bを起動し、A切断時のclient exit 7とBの継続・exit 0を個別記録する。T13は同じcaptureを頻度表にある各OS/ABIの指定時間で実行し、開始・5秒ごと・終了時のTS/counter/RSS/process handle countを保存する。Windowsのhandle countはPOSIX FD数と同一視せず、FD欄は取得不能として明示する。T14は全T-IDの候補/host/model/state/evidence pathを版別記録へ集約し、unsupported・未実施・失敗をpassにしない。
 
 ```powershell
@@ -784,8 +821,19 @@ $S = '<finite-seconds-from-release-matrix>'
 $b = Start-Process -FilePath $B -ArgumentList @('--device',"usb:$PORT_B",'--instance','b','--channel','T27','--system','isdb-t','--time',$S,'--output',(Join-Path $D 'b.ts'),'--runtime-dir',(Join-Path $D 'runtime-b'),'--group') -PassThru -NoNewWindow
 $a = Start-Process -FilePath $B -ArgumentList @('--device',"usb:$PORT_A",'--instance','a','--channel','T27','--system','isdb-t','--time',$S,'--output',(Join-Path $D 'a.ts'),'--runtime-dir',(Join-Path $D 'runtime-a'),'--group') -PassThru -NoNewWindow
 # Aがstreaming中であることをstatusで確認し、利用者へA側deviceの抜去を依頼する。
-$a.WaitForExit(); $a.Refresh(); $a.ExitCode | Out-File (Join-Path $D 'a.rc')
-$b.WaitForExit(); $b.Refresh(); $b.ExitCode | Out-File (Join-Path $D 'b.rc')
+$clientTimeouts = @(); $clientFailures = @()
+foreach ($entry in @([pscustomobject]@{ Name='a'; Process=$a; Expected=7 }, [pscustomobject]@{ Name='b'; Process=$b; Expected=0 })) {
+  $client = $entry.Process
+  if (-not $client.WaitForExit(([int]$S + 90) * 1000)) {
+    $client.Id | Out-File (Join-Path $D "$($entry.Name)-timeout.txt")
+    $clientTimeouts += $entry.Name
+    Stop-Process -Id $client.Id -ErrorAction SilentlyContinue
+    if (-not $client.WaitForExit(5000)) { $client.Id | Out-File (Join-Path $D "$($entry.Name)-cleanup-timeout.txt") }
+  }
+  $client.Refresh()
+  if ($client.HasExited) { $client.ExitCode | Out-File (Join-Path $D "$($entry.Name).rc"); if ($client.ExitCode -ne $entry.Expected) { $clientFailures += $entry.Name } } else { 'unavailable: owned client did not exit' | Out-File (Join-Path $D "$($entry.Name).rc"); $clientFailures += $entry.Name }
+}
+if ($clientTimeouts.Count -gt 0 -or $clientFailures.Count -gt 0) { 'incomplete: client timeout/exit failure' | Set-Content (Join-Path $D 't12-state.txt'); throw 'T12 client timeout/exit failure; stop both owned daemons normally, verify cleanup, and record T12 incomplete.' } else { 'complete: both clients exited with expected values' | Set-Content (Join-Path $D 't12-state.txt') }
 ```
 
 T13は上のdaemon/client起動方法で`$S`を頻度表の対象秒数にし、5秒間隔でTS/counter/process/RSS/handle countを採る。Windows handle countはPOSIX FD数の代替合格条件ではなく、FD欄は取得不能として記録する。
