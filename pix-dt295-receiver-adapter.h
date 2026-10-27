@@ -80,10 +80,22 @@ public:
     Result release_final(const Attachment&) noexcept;
 
 private:
+    struct BootControlFailure final {
+        bool recorded = false;
+        std::uint8_t request_type = 0U;
+        std::uint8_t request = 0U;
+        std::uint16_t value = 0U;
+        std::uint16_t index = 0U;
+        std::uint16_t length = 0U;
+        unsigned timeout_ms = 0U;
+        int result = 0;
+    };
+
     struct Io final {
         ReceiverAdapter* owner = nullptr;
         std::uint64_t last_sequence = 0U;
         std::uint64_t last_completed_ns = 0U;
+        BootControlFailure boot_control_failure{};
     };
 
     static int control(void*, std::uint8_t, std::uint8_t, std::uint16_t, std::uint16_t,
@@ -109,9 +121,12 @@ private:
     void pump() noexcept;
     static void* pump_entry(void*) noexcept;
     Result stop_attached(const Attachment&) noexcept;
+    int boot_unlocked(char*, std::size_t) noexcept;
     void usb_stage(const char* stage) noexcept;
     void usb_failure(const char* operation, unsigned endpoint, int result,
-                     dtv::userland::Error mapped) noexcept;
+                     dtv::userland::Error mapped,
+                     const BootControlFailure* boot_control = nullptr,
+                     const char* boot_error = nullptr) noexcept;
 
     Clock& clock_;
     ReceiverId receiver_;
@@ -151,6 +166,18 @@ public:
     void test_usb_stage(const char* stage) noexcept { usb_stage(stage); }
     void test_usb_failure(const char* operation, unsigned endpoint, int result) noexcept
     { usb_failure(operation, endpoint, result, dtv::userland::Error::USB_IO); }
+    int test_boot(const char* assets_path) noexcept
+    {
+        char error[256]{};
+        if (dt295_assets_load(assets_path, &assets_, error, sizeof(error)) != 0)
+            return -1;
+        const dt295_io io{&io_, &ReceiverAdapter::control, &ReceiverAdapter::bulk,
+                          &ReceiverAdapter::interrupt, &ReceiverAdapter::now_ms,
+                          &ReceiverAdapter::sleep_ms};
+        if (dt295_create(&device_, &io, assets_, error, sizeof(error)) != 0)
+            return -1;
+        return boot_unlocked(error, sizeof(error));
+    }
 #endif
 };
 

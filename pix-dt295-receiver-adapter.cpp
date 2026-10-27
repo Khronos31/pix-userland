@@ -171,8 +171,7 @@ ReceiverAdapter::Result ReceiverAdapter::open(ReceiverId receiver) noexcept
     dt295_card_invalidate_observation(device_);
     char error[256]{};
     if (!dt295_has_session(device_)) {
-        usb_stage("open.boot");
-        if (dt295_boot(device_, error, sizeof(error)) != 0) {
+        if (boot_unlocked(error, sizeof(error)) != 0) {
             dt295_card_invalidate_observation(device_);
             return Result::failure(Error::USB_IO);
         }
@@ -863,6 +862,18 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
     return outcome;
 }
 
+int ReceiverAdapter::boot_unlocked(char* error, std::size_t error_size) noexcept
+{
+    io_.boot_control_failure = {};
+    usb_stage("open.boot");
+    const int result = dt295_boot(device_, error, error_size);
+    const auto& failure = io_.boot_control_failure;
+    if (failure.recorded)
+        usb_failure("control", 0U, failure.result, Error::USB_IO, &failure,
+                    result == 0 ? "none" : error);
+    return result;
+}
+
 void ReceiverAdapter::usb_stage(const char* stage) noexcept
 {
     if (usb_diag_enabled_)
@@ -870,17 +881,34 @@ void ReceiverAdapter::usb_stage(const char* stage) noexcept
 }
 
 void ReceiverAdapter::usb_failure(const char* operation, unsigned endpoint, int result,
-                                  Error mapped) noexcept
+                                  Error mapped, const BootControlFailure* boot_control,
+                                  const char* boot_error) noexcept
 {
     if (!usb_diag_enabled_ || usb_diag_recorded_.exchange(true, std::memory_order_acq_rel))
         return;
     const char* stage = usb_diag_stage;
-    std::fprintf(stderr,
-                 "PIX_USB_DIAG stage=%s receiver=%u op=%s endpoint=0x%02x libusb=%d"
-                 " (libusb_error_name=%s) error=%u\n",
-                 stage != nullptr ? stage : "unknown", static_cast<unsigned>(receiver_),
-                 operation, endpoint, result, libusb_error_name(result),
-                 static_cast<unsigned>(mapped));
+    if (boot_control != nullptr) {
+        std::fprintf(stderr,
+                     "PIX_USB_DIAG stage=%s receiver=%u op=%s endpoint=0x%02x libusb=%d"
+                     " (libusb_error_name=%s) error=%u boot_error=\"%s\""
+                     " request_type=0x%02x request=0x%02x value=0x%04x index=0x%04x"
+                     " length=%u timeout_ms=%u\n",
+                     stage != nullptr ? stage : "unknown", static_cast<unsigned>(receiver_),
+                     operation, endpoint, result, libusb_error_name(result),
+                     static_cast<unsigned>(mapped), boot_error != nullptr ? boot_error : "unknown",
+                     static_cast<unsigned>(boot_control->request_type),
+                     static_cast<unsigned>(boot_control->request),
+                     static_cast<unsigned>(boot_control->value),
+                     static_cast<unsigned>(boot_control->index),
+                     static_cast<unsigned>(boot_control->length), boot_control->timeout_ms);
+    } else {
+        std::fprintf(stderr,
+                     "PIX_USB_DIAG stage=%s receiver=%u op=%s endpoint=0x%02x libusb=%d"
+                     " (libusb_error_name=%s) error=%u\n",
+                     stage != nullptr ? stage : "unknown", static_cast<unsigned>(receiver_),
+                     operation, endpoint, result, libusb_error_name(result),
+                     static_cast<unsigned>(mapped));
+    }
 }
 
 int ReceiverAdapter::control(void* opaque, std::uint8_t request_type, std::uint8_t request,
@@ -897,8 +925,25 @@ int ReceiverAdapter::control(void* opaque, std::uint8_t request_type, std::uint8
         request_type, request, value, index, data, static_cast<std::uint16_t>(length),
         timeout_ms);
     *actual = result < 0 ? 0U : static_cast<std::size_t>(result);
-    if (result < 0)
-        io->owner->usb_failure("control", 0U, result, Error::USB_IO);
+    if (result < 0) {
+        const char* stage = usb_diag_stage;
+        if (io->owner->usb_diag_enabled_ && stage != nullptr &&
+            std::strcmp(stage, "open.boot") == 0) {
+            auto& failure = io->boot_control_failure;
+            if (!failure.recorded) {
+                failure.recorded = true;
+                failure.request_type = request_type;
+                failure.request = request;
+                failure.value = value;
+                failure.index = index;
+                failure.length = static_cast<std::uint16_t>(length);
+                failure.timeout_ms = timeout_ms;
+                failure.result = result;
+            }
+        } else {
+            io->owner->usb_failure("control", 0U, result, Error::USB_IO);
+        }
+    }
     return result < 0 ? result : 0;
 }
 
