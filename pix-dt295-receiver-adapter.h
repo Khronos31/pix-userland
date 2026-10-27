@@ -145,7 +145,13 @@ private:
     bool pump_joinable_ = false;
     bool usb_diag_enabled_ = false;
     std::atomic<bool> usb_diag_recorded_{false};
-    std::atomic<const char*> usb_diag_stage_{nullptr};
+
+#ifdef PIX_DT295_DIAG_TESTING
+public:
+    void test_usb_stage(const char* stage) noexcept { usb_stage(stage); }
+    void test_usb_failure(const char* operation, unsigned endpoint, int result) noexcept
+    { usb_failure(operation, endpoint, result, dtv::userland::Error::USB_IO); }
+#endif
 };
 
 }  // namespace pix::capture::dt295

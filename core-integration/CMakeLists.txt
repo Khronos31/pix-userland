@@ -147,6 +147,22 @@ target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
     -Wl,--wrap=random_bytes)
 add_test(NAME pix_dt295_adapter_lifecycle_proof
     COMMAND pix_dt295_adapter_lifecycle_proof)
+
+add_executable(pix_dt295_usb_diag_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_usb_diag_proof.cpp"
+    "${PIX_SOURCE_DIR}/pix-dt295-receiver-adapter.cpp")
+target_include_directories(pix_dt295_usb_diag_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pix_dt295_usb_diag_proof PRIVATE
+    _POSIX_C_SOURCE=200809L PIX_DT295_DIAG_TESTING)
+target_compile_features(pix_dt295_usb_diag_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_usb_diag_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+target_link_libraries(pix_dt295_usb_diag_proof PRIVATE
+    dtv::receiver dtv::capture pix_dt295_c_backend Threads::Threads)
+add_test(NAME pix_dt295_usb_diag_proof
+    COMMAND pix_dt295_usb_diag_proof)
 endif()
 
 set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")

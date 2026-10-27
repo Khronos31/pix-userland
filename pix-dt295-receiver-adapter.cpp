@@ -57,6 +57,8 @@ bool usb_diag_requested() noexcept
     return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
 }
 
+thread_local const char* usb_diag_stage = nullptr;
+
 }  // namespace
 
 ReceiverAdapter::ReceiverAdapter(const char* assets_directory, const usb_selector& selector,
@@ -864,7 +866,7 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
 void ReceiverAdapter::usb_stage(const char* stage) noexcept
 {
     if (usb_diag_enabled_)
-        usb_diag_stage_.store(stage, std::memory_order_release);
+        usb_diag_stage = stage;
 }
 
 void ReceiverAdapter::usb_failure(const char* operation, unsigned endpoint, int result,
@@ -872,7 +874,7 @@ void ReceiverAdapter::usb_failure(const char* operation, unsigned endpoint, int 
 {
     if (!usb_diag_enabled_ || usb_diag_recorded_.exchange(true, std::memory_order_acq_rel))
         return;
-    const char* stage = usb_diag_stage_.load(std::memory_order_acquire);
+    const char* stage = usb_diag_stage;
     std::fprintf(stderr,
                  "PIX_USB_DIAG stage=%s receiver=%u op=%s endpoint=0x%02x libusb=%d"
                  " (libusb_error_name=%s) error=%u\n",
