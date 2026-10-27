@@ -108,6 +108,9 @@ add_library(pix_dt295_c_backend STATIC
     "${PIX_SOURCE_DIR}/src/dt295_capture.c")
 target_compile_definitions(pix_dt295_c_backend PRIVATE
     _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+if(WIN32)
+    target_compile_definitions(pix_dt295_c_backend PRIVATE DT295_STREAM_WINDOWS_ENABLE)
+endif()
 target_include_directories(pix_dt295_c_backend PUBLIC
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_link_libraries(pix_dt295_c_backend PUBLIC
