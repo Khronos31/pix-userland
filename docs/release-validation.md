@@ -430,10 +430,10 @@ OS/ABI別の具体操作は [USB切断・LNBの環境別手順](#pix-os-t07-reci
 
 ### 共通helperの固定取得（T09前提）
 
-T09を実行する前に、候補sourceとは独立した共通runbook helperをSiano runbookのimmutable commit `c2378ea3c52b3e415ec6c7acfea4b8f758b46eda`から取得する。candidate checkout/archive内のhelper有無に依存しない。POSIX/Termuxでは次を一度実行し、以後の全captureで`$TOOL/ts-check.py`を使う。
+T09を実行する前に、候補sourceとは独立した共通runbook helperをSiano runbookのimmutable commit `571491777d93cfbfb9b7f6238f2ab6c368b4e46d`から取得する。candidate checkout/archive内のhelper有無に依存しない。POSIX/Termuxでは次を一度実行し、以後の全captureで`$TOOL/ts-check.py`を使う。
 
 ```sh
-RUNBOOK_REF='c2378ea3c52b3e415ec6c7acfea4b8f758b46eda'; HELPER_SHA256='dbb4826e3eb4f0cb13850b59864c7219b8929822976c9e213d3948edbe450f05'
+RUNBOOK_REF='571491777d93cfbfb9b7f6238f2ab6c368b4e46d'; HELPER_SHA256='22d06db9833b7bfd74f6da76e6e229fba5a005913630c37bd601626fac47b566'
 TOOL="$WORK/tooling"; mkdir -m 700 -p "$TOOL"
 gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-check.py?ref=$RUNBOOK_REF" > "$TOOL/ts-check.py"
 if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | sha256sum -c -; else printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | shasum -a 256 -c -; fi
@@ -443,7 +443,7 @@ printf '%s\n' "$RUNBOOK_REF $HELPER_SHA256" > "$LOG/ts-helper-version.txt"
 Windows PowerShell 5.1でも同じ固定版を新しいtooling directoryへ取得し、hash一致後にのみ使う。
 
 ```powershell
-$RunbookRef = 'c2378ea3c52b3e415ec6c7acfea4b8f758b46eda'; $HelperSha256 = 'dbb4826e3eb4f0cb13850b59864c7219b8929822976c9e213d3948edbe450f05'
+$RunbookRef = '571491777d93cfbfb9b7f6238f2ab6c368b4e46d'; $HelperSha256 = '22d06db9833b7bfd74f6da76e6e229fba5a005913630c37bd601626fac47b566'
 $Tool = Join-Path $Work 'tooling'; New-Item -ItemType Directory -Path $Tool | Out-Null
 $Helper = Join-Path $Tool 'ts-check.py'
 Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khronos31/siano-userland/$RunbookRef/docs/release-validation/ts-check.py" -OutFile $Helper
@@ -459,9 +459,9 @@ helperのversionはrunbook Git commitとSHA-256の組で固定する。candidate
 - **適用対象/頻度:** 全capture/soak。
 - **準備:** Python 3.11以上を`python3 --version`で確認し、固定取得した`$TOOL/ts-check.py`（Windowsは`$Helper`）を使う。候補ごとに新規作成した`$LOG`を使う。
 - **実操作/利用者への依頼:** POSIXでは各TSに`python3 $TOOL/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`python $Helper "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
-- **期待値/終了値:** null PIDはcontinuity判定から除外する。同一PIDの隣接payload duplicate pairはPCR timestamp以外の全byte一致時だけ1組を許容し、duplicate indexをJSONへ記録する。3個目、内容差、非連続再送はcontinuity error。retune境界を確認できるrunはzero-basedの最初の出力packet indexを`--retune-boundary-at`へ渡し、境界後の各PID初回packetだけCC比較を除外する。TEI、sync、framing、invalid adaptationは除外しない。PCR reserved bits/extension違反とinvalid adaptationはfail。全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
+- **期待値/終了値:** helperは固定4096 packet chunkでTSを走査し、null PIDはcontinuity判定から除外して`null_packet_count`をJSONへ出す。詳細indexが必要なrunだけ`--null-indices "$LOG/<capture>.null-indices.txt"`を追加し、zero-based indexを別fileへ1行ずつ出力する。出力先とTSを同じpathにしない。同一PIDの隣接payload duplicate pairはPCR timestamp以外の全byte一致時だけ1組を許容し、duplicate indexをJSONへ記録する。3個目、内容差、非連続再送はcontinuity error。retune境界を確認できるrunはzero-basedの最初の出力packet indexを`--retune-boundary-at`へ渡し、境界後の各PID初回packetだけCC比較を除外する。TEI、sync、framing、invalid adaptationは除外しない。PCR reserved bits/extension違反とinvalid adaptationはfail。全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
 - **停止/cleanup:** 元TS/hash/logを残してT08 cleanup。
-- **記録:** Python version、helperのGit SHA/hash、TS hash、helperのJSON/終了値、duplicate/null/invalid packet index、sync/TEI/continuity/drop/counter、client exit。
+- **記録:** Python version、helperのGit SHA/hash、TS hash、helperのJSON/終了値、duplicate/invalid packet index、null packet countと必要時の別index file、sync/TEI/continuity/drop/counter、client exit。
 
 Windows PowerShellでの固定helper呼出し:
 

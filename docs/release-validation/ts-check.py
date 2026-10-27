@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 
@@ -16,104 +17,117 @@ def equivalent_duplicate(previous, packet, has_pcr):
     )
 
 
-def inspect(path, excluded_cc, retune_boundaries):
-    data = Path(path).read_bytes()
-    sync_errors = sum(data[offset] != 0x47 for offset in range(0, len(data) - 187, 188))
-    remainder = len(data) % 188
+def inspect(path, excluded_cc, retune_boundaries, null_indices_path=None):
+    sync_errors = 0
     tei = 0
     invalid_packets = 0
     continuity_error_indices = []
     duplicate_packet_indices = []
-    null_packet_indices = []
     invalid_packet_indices = []
     excluded_seen = []
     previous = {}
-    packets = len(data) // 188
+    packets = 0
+    total_bytes = 0
+    null_packet_count = 0
     untrusted_epoch = 0
     retune_boundary_index = 0
     retune_segment = 0
     retune_segment_pids = set()
     retune_excluded_cc = set()
 
-    for index, offset in enumerate(range(0, len(data) - 187, 188)):
-        if retune_boundary_index < len(retune_boundaries) and index >= retune_boundaries[retune_boundary_index]:
-            retune_segment += 1
-            retune_segment_pids.clear()
-            retune_boundary_index += 1
-        packet = data[offset:offset + 188]
-        if packet[0] != 0x47:
-            untrusted_epoch += 1
-            continue
-        pid = ((packet[1] & 0x1F) << 8) | packet[2]
-        retune_first_pid_packet = pid != 0x1FFF and pid not in retune_segment_pids
-        if pid != 0x1FFF:
-            retune_segment_pids.add(pid)
-        if retune_segment > 0 and retune_first_pid_packet:
-            retune_excluded_cc.add(index)
-        if packet[1] & 0x80:
-            tei += 1
-            untrusted_epoch += 1
-            continue
-        if pid == 0x1FFF:
-            null_packet_indices.append(index)
-            continue
-        adaptation = (packet[3] >> 4) & 0x03
-        if adaptation == 0:
-            invalid_packets += 1
-            invalid_packet_indices.append(index)
-            untrusted_epoch += 1
-            continue
-        has_payload = adaptation in (1, 3)
-        discontinuity = adaptation in (2, 3) and packet[4] > 0 and bool(packet[5] & 0x80)
-        has_pcr = False
-        if adaptation in (2, 3):
-            length = packet[4]
-            if (adaptation == 2 and length != 183) or (adaptation == 3 and length > 182):
-                invalid_packets += 1
-                invalid_packet_indices.append(index)
-                untrusted_epoch += 1
-                continue
-            if length > 0:
-                has_pcr = bool(packet[5] & 0x10)
-                if has_pcr:
-                    extension = ((packet[10] & 1) << 8) | packet[11]
-                    if length < 7 or (packet[10] & 0x7e) != 0x7e or extension >= 300:
+    with open(path, "rb") as source, (open(null_indices_path, "w", encoding="ascii") if null_indices_path else nullcontext()) as null_indices:
+        pending = b""
+        while chunk := source.read(188 * 4096):
+            total_bytes += len(chunk)
+            data = pending + chunk
+            complete_bytes = len(data) - (len(data) % 188)
+            for offset in range(0, complete_bytes, 188):
+                index = packets
+                packet = data[offset:offset + 188]
+                packets += 1
+                if packet[0] != 0x47:
+                    sync_errors += 1
+                if retune_boundary_index < len(retune_boundaries) and index >= retune_boundaries[retune_boundary_index]:
+                    retune_segment += 1
+                    retune_segment_pids.clear()
+                    retune_boundary_index += 1
+                if packet[0] != 0x47:
+                    untrusted_epoch += 1
+                    continue
+                pid = ((packet[1] & 0x1F) << 8) | packet[2]
+                retune_first_pid_packet = pid != 0x1FFF and pid not in retune_segment_pids
+                if pid != 0x1FFF:
+                    retune_segment_pids.add(pid)
+                if retune_segment > 0 and retune_first_pid_packet:
+                    retune_excluded_cc.add(index)
+                if packet[1] & 0x80:
+                    tei += 1
+                    untrusted_epoch += 1
+                    continue
+                if pid == 0x1FFF:
+                    null_packet_count += 1
+                    if null_indices_path:
+                        null_indices.write(f"{index}\n")
+                    continue
+                adaptation = (packet[3] >> 4) & 0x03
+                if adaptation == 0:
+                    invalid_packets += 1
+                    invalid_packet_indices.append(index)
+                    untrusted_epoch += 1
+                    continue
+                has_payload = adaptation in (1, 3)
+                discontinuity = adaptation in (2, 3) and packet[4] > 0 and bool(packet[5] & 0x80)
+                has_pcr = False
+                if adaptation in (2, 3):
+                    length = packet[4]
+                    if (adaptation == 2 and length != 183) or (adaptation == 3 and length > 182):
                         invalid_packets += 1
                         invalid_packet_indices.append(index)
                         untrusted_epoch += 1
                         continue
+                    if length > 0:
+                        has_pcr = bool(packet[5] & 0x10)
+                        if has_pcr:
+                            extension = ((packet[10] & 1) << 8) | packet[11]
+                            if length < 7 or (packet[10] & 0x7e) != 0x7e or extension >= 300:
+                                invalid_packets += 1
+                                invalid_packet_indices.append(index)
+                                untrusted_epoch += 1
+                                continue
 
-        state = previous.get(pid)
-        if not discontinuity and state is not None:
-            counter = packet[3] & 0x0F
-            expected = (state["counter"] + (1 if has_payload else 0)) & 0x0F
-            repeated = has_payload and counter == state["counter"]
-            if repeated and state["has_payload"] and not state["repeated"] and state["epoch"] == untrusted_epoch and equivalent_duplicate(state["packet"], packet, has_pcr):
-                duplicate_packet_indices.append(index)
-            elif counter != expected:
-                if index in excluded_cc or index in retune_excluded_cc:
-                    excluded_seen.append(index)
-                else:
-                    continuity_error_indices.append(index)
-        repeated = state is not None and has_payload and (packet[3] & 0x0F) == state["counter"]
-        previous[pid] = {
-            "counter": packet[3] & 0x0F,
-            "has_payload": has_payload,
-            "repeated": repeated,
-            "epoch": untrusted_epoch,
-            "packet": packet,
-        }
+                state = previous.get(pid)
+                if not discontinuity and state is not None:
+                    counter = packet[3] & 0x0F
+                    expected = (state["counter"] + (1 if has_payload else 0)) & 0x0F
+                    repeated = has_payload and counter == state["counter"]
+                    if repeated and state["has_payload"] and not state["repeated"] and state["epoch"] == untrusted_epoch and equivalent_duplicate(state["packet"], packet, has_pcr):
+                        duplicate_packet_indices.append(index)
+                    elif counter != expected:
+                        if index in excluded_cc or index in retune_excluded_cc:
+                            excluded_seen.append(index)
+                        else:
+                            continuity_error_indices.append(index)
+                repeated = state is not None and has_payload and (packet[3] & 0x0F) == state["counter"]
+                previous[pid] = {
+                    "counter": packet[3] & 0x0F,
+                    "has_payload": has_payload,
+                    "repeated": repeated,
+                    "epoch": untrusted_epoch,
+                    "packet": packet,
+                }
+            pending = data[complete_bytes:]
 
     return {
         "file": str(path),
-        "bytes": len(data),
+        "bytes": total_bytes,
         "packets": packets,
-        "remainder": remainder,
+        "remainder": total_bytes % 188,
         "sync_errors": sync_errors,
         "tei": tei,
         "invalid_packets": invalid_packets,
         "invalid_packet_indices": invalid_packet_indices,
-        "null_packet_indices": null_packet_indices,
+        "null_packet_count": null_packet_count,
+        "null_packet_indices_file": str(null_indices_path) if null_indices_path else None,
         "duplicate_packet_indices": duplicate_packet_indices,
         "continuity_errors": len(continuity_error_indices),
         "continuity_error_indices": continuity_error_indices,
@@ -133,12 +147,15 @@ def main():
         "--retune-boundary-at", type=int, action="append", default=[], metavar="PACKET_INDEX",
         help="start a new tune segment here and exclude CC comparison only at each PID's first packet in that segment",
     )
+    parser.add_argument("--null-indices", metavar="PATH", help="write zero-based null packet indices one per line to this file")
     args = parser.parse_args()
     if len(set(args.exclude_cc_at)) != len(args.exclude_cc_at) or any(i < 0 for i in args.exclude_cc_at):
         parser.error("CC exclusion indices must be unique and nonnegative")
     if any(i <= 0 for i in args.retune_boundary_at) or args.retune_boundary_at != sorted(set(args.retune_boundary_at)):
         parser.error("retune boundaries must be unique, positive, and increasing")
-    result = inspect(args.ts_file, set(args.exclude_cc_at), args.retune_boundary_at)
+    if args.null_indices and Path(args.ts_file).resolve() == Path(args.null_indices).resolve():
+        parser.error("null index output must not overwrite the TS input")
+    result = inspect(args.ts_file, set(args.exclude_cc_at), args.retune_boundary_at, args.null_indices)
     if any(i >= result["packets"] for i in args.exclude_cc_at):
         parser.error("CC exclusion index is outside the TS packet range")
     if any(i >= result["packets"] for i in args.retune_boundary_at):
