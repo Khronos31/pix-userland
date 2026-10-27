@@ -5,10 +5,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #define TRANSFERS 16
 struct usb_backend {
     libusb_context *ctx;
     libusb_device_handle *handle;
+#ifndef _WIN32
+    int wrapped_fd;
+#endif
     struct libusb_transfer *transfers[TRANSFERS];
     uint8_t buffers[TRANSFERS][32768];
     int pending, stopping, error, failure_exit, claimed, detached;
@@ -157,6 +164,9 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
     usb_backend *b = calloc(1, sizeof(*b));
     if (!b)
         return 70;
+#ifndef _WIN32
+    b->wrapped_fd = -1;
+#endif
     int r = init(&b->ctx, fd);
     if (r < 0) {
         int code = open_failure(r);
@@ -164,7 +174,19 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
         return code;
     }
     if (fd >= 0) {
-        if (open_usb_error(b, libusb_wrap_sys_device(b->ctx, (intptr_t)fd, &b->handle), "wrap USB fd"))
+#ifndef _WIN32
+        b->wrapped_fd = dup(fd);
+        if (b->wrapped_fd < 0 || fcntl(b->wrapped_fd, F_SETFD, FD_CLOEXEC) < 0) {
+            if (b->wrapped_fd >= 0) close(b->wrapped_fd);
+            b->wrapped_fd = -1;
+            backend_fail(b, 7);
+            goto error;
+        }
+        const intptr_t device_fd = (intptr_t)b->wrapped_fd;
+#else
+        const intptr_t device_fd = (intptr_t)fd;
+#endif
+        if (open_usb_error(b, libusb_wrap_sys_device(b->ctx, device_fd, &b->handle), "wrap USB fd"))
             goto error;
         r = model_state(libusb_get_device(b->handle));
         if (r < 0) {
@@ -479,6 +501,10 @@ void usb_close(usb_backend *b) {
             libusb_attach_kernel_driver(b->handle, 0);
         libusb_close(b->handle);
     }
+#ifndef _WIN32
+    if (b->wrapped_fd >= 0)
+        close(b->wrapped_fd);
+#endif
     if (b->ctx)
         libusb_exit(b->ctx);
     free(b);

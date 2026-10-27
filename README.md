@@ -58,6 +58,7 @@ r8 の7ターゲット確認では、native macOS と Linux x64 でテストを�
   - 既存 DT181 の長時間受信確認は Linux x86_64・地上波 T25 の5時間録画2回です（詳細は[検証記録](docs/validation.md)）。DT295 r8 の macOS arm64・T27・ターゲット0の5時間録画は上記の別試験です。受信中の USB ケーブル抜去、スリープからの復帰処理はいずれも未検証です。
   - Linux 向けの udev / mdev 設定例を用意していますが、新規権限ルールによる実機でのホットプラグ動作は未検証です。
   - Android 向けは Termux の端末環境で動かす CLI バイナリであり、Android アプリ（APK）ではありません。実行には Termux 上で `Termux:API` アプリと `termux-api` パッケージ（`termux-usb` コマンドを含む）が必要です。
+  - 現行 `pixd` / `pixctl` / `pix-ts` のTermux FD起動手順は[Android / Termux](docs/android-termux.md)を参照してください。旧standalone `pix-ts-legacy` の受信例は現行3コマンド経路ではありません。
 
 ## 必要条件
 

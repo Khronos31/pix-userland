@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# < 2)); then
+    printf 'usage: termux-usb -r -e "%s [pix-ts options...]" USB_DEVICE\n' "$0" >&2
+    exit 2
+fi
+
+arguments=("$@")
+fd=${arguments[$((${#arguments[@]} - 1))]}
+if [[ ! $fd =~ ^[0-9]+$ ]] || ((10#$fd < 3 || 10#$fd > 2147483647)); then
+    echo 'pix-termux: expected the USB file descriptor appended by termux-usb' >&2
+    exit 2
+fi
+fd=$((10#$fd))
+client_arguments=("${arguments[@]:0:$((${#arguments[@]} - 1))}")
+
+for argument in "${client_arguments[@]}"; do
+    if [[ $argument == --instance || $argument == --runtime-dir || $argument == --group ]]; then
+        echo 'pix-termux: instance and runtime options are managed by the launcher' >&2
+        exit 2
+    fi
+done
+
+run_without_usb_fd()
+{
+    local descriptor=$fd
+    exec {descriptor}>&-
+    exec "$@"
+}
+
+root=$(CDPATH= cd -- "$(run_without_usb_fd dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+tmp_root=${TMPDIR:-${PREFIX:-/data/data/com.termux/files/usr}/tmp}
+runtime_directory=$(run_without_usb_fd mktemp -d "$tmp_root/pix-termux.XXXXXX")
+run_without_usb_fd chmod 700 "$runtime_directory" &
+helper_pid=$!
+wait "$helper_pid"
+daemon_pid=
+client_pid=
+stop_signal=
+daemon_status=0
+show_daemon_log=0
+
+cleanup()
+{
+    result=$?
+    trap - EXIT
+    trap '' INT TERM
+    local cleanup_status=0
+    if [[ -n $daemon_pid ]]; then
+        if [[ -n $client_pid ]]; then
+            if kill -TERM "$client_pid" 2>/dev/null; then :; fi
+            wait_for_client
+            if ((result == 0)); then result=$client_status; fi
+        fi
+        if kill -0 "$daemon_pid" 2>/dev/null; then
+            if ! kill -TERM "$daemon_pid" 2>/dev/null; then
+                :
+            fi
+        fi
+        if wait "$daemon_pid"; then
+            daemon_status=0
+        else
+            daemon_status=$?
+        fi
+        daemon_pid=
+        if ((daemon_status != 0)); then show_daemon_log=1; fi
+        if ((result == 0 && daemon_status != 0)); then result=$daemon_status; fi
+    fi
+    if ((show_daemon_log != 0)) && [[ -f $runtime_directory/pixd.log ]]; then
+        run_without_usb_fd cat "$runtime_directory/pixd.log" >&2 &
+        helper_pid=$!
+        if wait "$helper_pid"; then
+            :
+        else
+            cleanup_status=1
+        fi
+    fi
+    local descriptor=$fd
+    if ! exec {descriptor}>&- 2>/dev/null; then cleanup_status=1; fi
+    if ! rm -rf -- "$runtime_directory"; then cleanup_status=1; fi
+    if ((result == 0 && cleanup_status != 0)); then result=1; fi
+    exit "$result"
+}
+
+handle_signal()
+{
+    local signal_name=$1
+    if [[ -z $stop_signal ]]; then stop_signal=$signal_name; fi
+    if [[ -n $client_pid ]]; then
+        if ! kill -s "$signal_name" "$client_pid" 2>/dev/null; then :; fi
+    fi
+}
+
+wait_for_client()
+{
+    while :; do
+        if wait "$client_pid"; then
+            client_status=0
+        else
+            client_status=$?
+        fi
+        if ((client_status > 128)) && kill -0 "$client_pid" 2>/dev/null; then
+            continue
+        fi
+        client_pid=
+        return 0
+    done
+}
+
+trap cleanup EXIT
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+
+cd "$root"
+"$root/pixd" --fd "$fd" --runtime-dir "$runtime_directory" \
+    --instance pix-fd >"$runtime_directory/pixd.log" 2>&1 &
+daemon_pid=$!
+
+ready=false
+for ((attempt = 0; attempt < 100; ++attempt)); do
+    if [[ -n $stop_signal ]]; then exit 0; fi
+    run_without_usb_fd "$root/pixctl" --runtime-dir "$runtime_directory" \
+        --instance pix-fd status >/dev/null 2>&1 &
+    helper_pid=$!
+    if wait "$helper_pid"; then
+        ready=true
+        break
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+        show_daemon_log=1
+        exit 7
+    fi
+    run_without_usb_fd sleep 0.1 &
+    helper_pid=$!
+    wait "$helper_pid"
+done
+if [[ $ready != true ]]; then
+    show_daemon_log=1
+    echo 'pix-termux: pixd did not become ready' >&2
+    exit 7
+fi
+
+if [[ -n $stop_signal ]]; then exit 0; fi
+run_without_usb_fd "$root/pix-ts" --runtime-dir "$runtime_directory" \
+    --instance pix-fd "${client_arguments[@]}" &
+client_pid=$!
+if [[ -n $stop_signal ]]; then
+    if ! kill -s "$stop_signal" "$client_pid" 2>/dev/null; then :; fi
+fi
+wait_for_client
+exit "$client_status"

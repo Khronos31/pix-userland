@@ -13,8 +13,10 @@ extern "C" {
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <pthread.h>
 #include <thread>
+#include <unistd.h>
 
 extern "C" void pix_test_usb_queue(const std::uint8_t*, std::size_t);
 
@@ -141,7 +143,9 @@ int main()
     constexpr std::uint64_t client = 11U;
     const ReceiverId receivers[] = {receiver};
     dt181_session session{};
-    assert(dt181_session_open(&session, nullptr, 42, 0) == 0);
+    const int usb_fd = ::open("/dev/null", O_RDWR);
+    assert(usb_fd >= 0);
+    assert(dt181_session_open(&session, nullptr, usb_fd, 0) == 0);
     const std::array<std::uint8_t, 1> firmware{{0U}};
     const std::array<std::uint8_t, 16> bootstrap{};
     const std::array<std::uint8_t, 64> validation{};
@@ -363,5 +367,7 @@ int main()
 
     assert(dt181_session_shutdown(&session) == 0);
     dt181_session_close(&session);
+    assert(::fcntl(usb_fd, F_GETFD) >= 0);
+    (void)::close(usb_fd);
     return 0;
 }

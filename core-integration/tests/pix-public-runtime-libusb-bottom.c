@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 int pix_test_libusb_handle_events_timeout(libusb_context *, struct timeval *);
 
@@ -22,6 +26,7 @@ static unsigned frees;
 static int fail_cancel;
 unsigned pix_test_usb_device_index(libusb_device *device);
 unsigned pix_test_usb_opened_device(void);
+void pix_test_usb_select_fd_model(unsigned);
 
 void pix_test_usb_queue(const uint8_t *bytes, size_t length)
 {
@@ -43,15 +48,40 @@ int LIBUSB_CALL libusb_set_option(libusb_context *ctx, enum libusb_option option
 { (void)ctx; (void)option; return 0; }
 int LIBUSB_CALL libusb_wrap_sys_device(libusb_context *ctx, intptr_t fd,
                                        libusb_device_handle **handle)
-{ (void)ctx; (void)fd; *handle = (libusb_device_handle *)&fake_handle_storage; return 0; }
+{
+    (void)ctx;
+    const char *model = getenv("PIX_TEST_USB_FD_MODEL");
+    const unsigned index = model != NULL && strcmp(model, "dt295") == 0 ? 1U : 0U;
+    pix_test_usb_select_fd_model(index);
+    const char *path = getenv("PIX_TEST_USB_FD_LOG");
+    if (path != NULL) {
+        FILE *file = fopen(path, "a");
+        if (file != NULL) {
+#ifdef _WIN32
+            fprintf(file, "wrap fd=%lld cloexec=not-applicable\n", (long long)fd);
+#else
+            const int flags = fcntl((int)fd, F_GETFD);
+            fprintf(file, "wrap fd=%ld cloexec=%d\n", (long)fd,
+                    flags >= 0 && (flags & FD_CLOEXEC) != 0);
+#endif
+            fclose(file);
+        }
+    }
+    *handle = (libusb_device_handle *)&fake_handle_storage;
+    return 0;
+}
 libusb_device * LIBUSB_CALL libusb_get_device(libusb_device_handle *handle)
 { (void)handle; return (libusb_device *)&fake_device_storage[pix_test_usb_opened_device()]; }
 int LIBUSB_CALL libusb_get_device_descriptor(libusb_device *device,
                                               struct libusb_device_descriptor *desc)
 {
-    const unsigned index = pix_test_usb_device_index(device);
+    const unsigned index = device == (libusb_device *)&fake_device_storage[0] ||
+        device == (libusb_device *)&fake_device_storage[1]
+            ? pix_test_usb_opened_device() : pix_test_usb_device_index(device);
     memset(desc, 0, sizeof(*desc));
-    desc->idVendor = 0x06b8;
+    const char *model = getenv("PIX_TEST_USB_FD_MODEL");
+    if (model != NULL && strcmp(model, "invalid") == 0) return LIBUSB_ERROR_IO;
+    desc->idVendor = model != NULL && strcmp(model, "wrong-vid") == 0 ? 0x1234 : 0x06b8;
     desc->idProduct = index == 0U ? 0x102b : 0x103b;
     desc->iSerialNumber = 1U;
     return 0;

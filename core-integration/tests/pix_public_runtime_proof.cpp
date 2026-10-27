@@ -779,6 +779,82 @@ int main()
     std::printf("PROOF held callback close deadline retained owner; release then quiesced once root=%s\n",
                 root.c_str());
 
+    const std::string fd_runtime = root + "/fd-runtime";
+    const std::string fd295_runtime = root + "/fd295-runtime";
+    const std::string fd_log = root + "/fd.log";
+    if (::mkdir(fd_runtime.c_str(), 0700) != 0 ||
+        ::mkdir(fd295_runtime.c_str(), 0700) != 0) return 54;
+    const int usb_fd = ::open("/dev/null", O_RDWR);
+    if (usb_fd < 3 || ::fcntl(usb_fd, F_SETFD, 0) < 0) return 55;
+    if (::setenv("PIX_TEST_USB_FD_LOG", fd_log.c_str(), 1) != 0 ||
+        ::setenv("PIX_TEST_USB_FD_MODEL", "dt181", 1) != 0) return 56;
+    const auto fd_exit = [&](const std::vector<std::string>& arguments,
+                             const std::string& log_path, int expected) {
+        const pid_t child = launch(PIXD_PATH, arguments, log_path);
+        int status = 0;
+        return child > 0 && ::waitpid(child, &status, 0) == child &&
+            WIFEXITED(status) && WEXITSTATUS(status) == expected;
+    };
+    const std::string fd_value = std::to_string(usb_fd);
+    const pid_t fd_daemon = launch(PIXD_PATH,
+        {"--fd", fd_value, "--assets", assets, "--runtime-dir", fd_runtime,
+         "--instance", "pixfd"}, root + "/pixd-fd.log");
+    if (fd_daemon <= 0 || !wait_ready(root + "/pixd-fd.log", fd_daemon)) {
+        if (fd_daemon > 0) {
+            (void)::kill(fd_daemon, SIGTERM);
+            (void)::waitpid(fd_daemon, nullptr, 0);
+        }
+        return 57;
+    }
+    (void)::kill(fd_daemon, SIGTERM);
+    int fd_daemon_status = 0;
+    if (::waitpid(fd_daemon, &fd_daemon_status, 0) != fd_daemon ||
+        !WIFEXITED(fd_daemon_status) || WEXITSTATUS(fd_daemon_status) != 0 ||
+        ::fcntl(usb_fd, F_GETFD) < 0) return 58;
+    std::ifstream fd_log_file(fd_log);
+    const std::string fd_log_text((std::istreambuf_iterator<char>(fd_log_file)), {});
+    if (fd_log_text.find("wrap fd=") == std::string::npos ||
+        fd_log_text.find("cloexec=1") == std::string::npos) return 59;
+    if (!fd_exit({"--fd", "0"}, root + "/pixd-fd-zero.log", 2) ||
+        !fd_exit({"--fd", "0x3"}, root + "/pixd-fd-hex.log", 2) ||
+        !fd_exit({"--fd", fd_value, "--fd", fd_value},
+                 root + "/pixd-fd-repeat.log", 2) ||
+        !fd_exit({"--fd", "99999999"}, root + "/pixd-fd-closed.log", 2) ||
+        !fd_exit({}, root + "/pixd-fd-missing.log", 2)) return 60;
+    if (!fd_exit({"--fd", fd_value, "--device", "serial:PIXDT29501"},
+                 root + "/pixd-fd-selector-mismatch.log", 3)) return 61;
+    if (!fd_exit({"--fd", fd_value, "--device", "usb:1-3"},
+                 root + "/pixd-fd-topology-mismatch.log", 3)) return 61;
+    if (::setenv("PIX_TEST_USB_FD_MODEL", "wrong-vid", 1) != 0 ||
+        !fd_exit({"--fd", fd_value}, root + "/pixd-fd-wrong-vid.log", 3)) return 62;
+    if (::setenv("PIX_TEST_USB_FD_MODEL", "invalid", 1) != 0 ||
+        !fd_exit({"--fd", fd_value}, root + "/pixd-fd-non-usb.log", 2)) return 63;
+    if (::setenv("PIX_TEST_USB_FD_MODEL", "dt295", 1) != 0 ||
+        ::setenv("PIX_TEST_DT295_FAKE", "1", 1) != 0) return 64;
+    const pid_t fd295_daemon = launch(PIXD_PATH,
+        {"--fd", fd_value, "--assets", assets, "--runtime-dir", fd295_runtime,
+         "--instance", "pixfd295"}, root + "/pixd-fd295.log");
+    if (fd295_daemon <= 0 || !wait_ready(root + "/pixd-fd295.log", fd295_daemon)) {
+        if (fd295_daemon > 0) {
+            (void)::kill(fd295_daemon, SIGTERM);
+            (void)::waitpid(fd295_daemon, nullptr, 0);
+        }
+        return 65;
+    }
+    (void)::kill(fd295_daemon, SIGTERM);
+    int fd295_status = 0;
+    if (::waitpid(fd295_daemon, &fd295_status, 0) != fd295_daemon ||
+        !WIFEXITED(fd295_status) || WEXITSTATUS(fd295_status) != 0 ||
+        ::fcntl(usb_fd, F_GETFD) < 0) return 66;
+    std::ifstream fd295_log_file(fd_log);
+    const std::string fd295_log_text((std::istreambuf_iterator<char>(fd295_log_file)), {});
+    if (fd295_log_text.find("usb_open_model model=295 fd=") == std::string::npos) return 67;
+    (void)::close(usb_fd);
+    (void)::unsetenv("PIX_TEST_USB_FD_MODEL");
+    (void)::unsetenv("PIX_TEST_DT295_FAKE");
+    (void)::unsetenv("PIX_TEST_USB_FD_LOG");
+    std::printf("PROOF Android USB fd model detection, selector assertion and borrowed-fd cleanup passed\n");
+
     const auto located = pix::runtime::locate_dt181("usb:1-2");
     if (!located) return 8;
     auto family_result = pix::runtime::Family::create(located.value(), assets.c_str());
