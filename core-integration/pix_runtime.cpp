@@ -237,7 +237,7 @@ private:
     {
         return TunerStreamCounters{value.packets, value.bytes, value.sync_errors,
             value.tei_packets, value.continuity_errors, value.queue_drops,
-            value.usb_errors, value.empty_intervals};
+            value.usb_errors, value.empty_intervals, value.availability};
     }
     Adapter& adapter_;
 };
