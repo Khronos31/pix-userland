@@ -2,7 +2,12 @@
 /* Exercise the real backend lifetime logic with deterministic USB completions.
  * Device discovery/claiming are never invoked. */
 #include <assert.h>
+#ifdef _WIN32
+#include <limits.h>
+#include <windows.h>
+#else
 #include <fcntl.h>
+#endif
 #include <libusb.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,6 +116,35 @@ static libusb_device *last_opened_device;
 static const char *opened_serial;
 static int string_result;
 static intptr_t wrapped_fd;
+#ifdef _WIN32
+typedef HANDLE test_fd;
+static int test_pipe_create(test_fd fd[2]) {
+    return CreatePipe(&fd[0], &fd[1], NULL, 0) ? 0 : -1;
+}
+static int test_fd_number(test_fd fd) {
+    const uintptr_t value = (uintptr_t)fd;
+    assert(value > 0 && value <= INT_MAX);
+    return (int)value;
+}
+static int test_fd_is_open(test_fd fd) {
+    DWORD flags;
+    return GetHandleInformation(fd, &flags) != 0;
+}
+static void test_fd_close(test_fd fd) { assert(CloseHandle(fd)); }
+static int test_fd_ownership_ok(test_fd original, int passed) {
+    return wrapped_fd == (intptr_t)passed && test_fd_is_open(original);
+}
+#else
+typedef int test_fd;
+static int test_pipe_create(test_fd fd[2]) { return pipe(fd); }
+static int test_fd_number(test_fd fd) { return fd; }
+static int test_fd_is_open(test_fd fd) { return fcntl(fd, F_GETFD) >= 0; }
+static void test_fd_close(test_fd fd) { close(fd); }
+static int test_fd_ownership_ok(test_fd original, int passed) {
+    return wrapped_fd != passed && test_fd_is_open(original) &&
+           !test_fd_is_open((int)wrapped_fd);
+}
+#endif
 static int LIBUSB_CALL test_init(libusb_context **ctx) {
     *ctx = init_result ? NULL : (libusb_context *)&fake_context;
     return init_result;
@@ -332,14 +366,14 @@ static void open_tests(void) {
     malloc_failure = 1;
     assert(usb_open(&b, &selector, -1, 0) == 70 && !b);
     malloc_failure = 0;
-    int fd[2];
-    assert(pipe(fd) == 0);
+    test_fd fd[2];
+    assert(test_pipe_create(fd) == 0);
+    const int borrowed_fd = test_fd_number(fd[0]);
     wrong_model = 1;
-    assert(usb_open(&b, NULL, fd[0], 0) == 3 && !b);
-    assert(wrapped_fd != fd[0] && fcntl(fd[0], F_GETFD) >= 0);
-    assert(fcntl((int)wrapped_fd, F_GETFD) < 0);
+    assert(usb_open(&b, NULL, borrowed_fd, 0) == 3 && !b);
+    assert(test_fd_ownership_ok(fd[0], borrowed_fd));
     wrong_model = 0;
-    close(fd[0]); close(fd[1]);
+    test_fd_close(fd[0]); test_fd_close(fd[1]);
     assert(usb_open(&b, NULL, 9, 0) == 7 && !b);
     descriptor_result = LIBUSB_ERROR_IO;
     assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
@@ -486,17 +520,17 @@ static void dt295_model_selection(void) {
     assert(strstr(text, "\"index\":0,\"serial\":null,\"model\":\"PIX-DT295\""));
     assert(!strstr(text, "PIX-DT181-PU0"));
 
-    /* The borrowed-fd path remains model checked, with the fd passed through. */
+    /* The borrowed-fd path remains model checked and preserves caller ownership. */
     fake_devices[0] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
     fake_devices[1] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
-    int fd[2];
-    assert(pipe(fd) == 0);
-    assert(!usb_open(&b, NULL, fd[0], 0));
-    assert(wrapped_fd != fd[0] && usb_model(b) == USB_MODEL_DT181);
+    test_fd fd[2];
+    assert(test_pipe_create(fd) == 0);
+    const int borrowed_fd = test_fd_number(fd[0]);
+    assert(!usb_open(&b, NULL, borrowed_fd, 0));
+    assert(usb_model(b) == USB_MODEL_DT181);
     usb_close(b);
-    assert(fcntl(fd[0], F_GETFD) >= 0);
-    assert(fcntl((int)wrapped_fd, F_GETFD) < 0);
-    close(fd[0]); close(fd[1]);
+    assert(test_fd_ownership_ok(fd[0], borrowed_fd));
+    test_fd_close(fd[0]); test_fd_close(fd[1]);
 
     fake_device_count = 1;
     list_result = 1;
