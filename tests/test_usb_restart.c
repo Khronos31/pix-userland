@@ -134,6 +134,14 @@ static void test_fd_close(test_fd fd) { assert(CloseHandle(fd)); }
 static int test_fd_ownership_ok(test_fd original, int passed) {
     return wrapped_fd == (intptr_t)passed && test_fd_is_open(original);
 }
+static int test_invalid_fd_number(void) {
+    HANDLE handle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    assert(handle);
+    const int invalid_fd = test_fd_number(handle);
+    assert(CloseHandle(handle));
+    assert(!test_fd_is_open(handle));
+    return invalid_fd;
+}
 #else
 typedef int test_fd;
 static int test_pipe_create(test_fd fd[2]) { return pipe(fd); }
@@ -195,7 +203,12 @@ static int LIBUSB_CALL test_string_ascii(libusb_device_handle *h, uint8_t index,
     return (int)n;
 }
 static int LIBUSB_CALL test_wrap(libusb_context *ctx, intptr_t fd, libusb_device_handle **h) {
-    (void)ctx; wrapped_fd = fd; return test_open((libusb_device *)&fake_devices[0], h);
+    (void)ctx; wrapped_fd = fd;
+#ifdef _WIN32
+    if (!test_fd_is_open((HANDLE)(uintptr_t)fd))
+        return LIBUSB_ERROR_NO_DEVICE;
+#endif
+    return test_open((libusb_device *)&fake_devices[0], h);
 }
 static libusb_device *LIBUSB_CALL test_device(libusb_device_handle *h) {
     (void)h; return (libusb_device *)&fake_devices[0];
@@ -374,7 +387,11 @@ static void open_tests(void) {
     assert(test_fd_ownership_ok(fd[0], borrowed_fd));
     wrong_model = 0;
     test_fd_close(fd[0]); test_fd_close(fd[1]);
+#ifdef _WIN32
+    assert(usb_open(&b, NULL, test_invalid_fd_number(), 0) == 7 && !b);
+#else
     assert(usb_open(&b, NULL, 9, 0) == 7 && !b);
+#endif
     descriptor_result = LIBUSB_ERROR_IO;
     assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
     descriptor_result = 0;
