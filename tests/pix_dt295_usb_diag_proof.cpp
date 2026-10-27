@@ -224,6 +224,10 @@ int main()
         CHECK(contains(output, "request_type=0xc0 request=0xbc value=0x0800 index=0x2008"));
         CHECK(contains(output, "length=2 timeout_ms=1000"));
         CHECK(!contains(output, "payload"));
+        CHECK(!contains(output, "CARD"));
+        CHECK(!contains(output, "APDU"));
+        CHECK(!contains(output, "ATR"));
+        CHECK(!contains(output, "serial"));
     }
 
     {
