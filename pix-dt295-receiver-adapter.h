@@ -109,6 +109,9 @@ private:
     void pump() noexcept;
     static void* pump_entry(void*) noexcept;
     Result stop_attached(const Attachment&) noexcept;
+    void usb_stage(const char* stage) noexcept;
+    void usb_failure(const char* operation, unsigned endpoint, int result,
+                     dtv::userland::Error mapped) noexcept;
 
     Clock& clock_;
     ReceiverId receiver_;
@@ -140,6 +143,9 @@ private:
     std::atomic<int> pump_error_{0};
     pthread_t pump_thread_{};
     bool pump_joinable_ = false;
+    bool usb_diag_enabled_ = false;
+    std::atomic<bool> usb_diag_recorded_{false};
+    std::atomic<const char*> usb_diag_stage_{nullptr};
 };
 
 }  // namespace pix::capture::dt295
