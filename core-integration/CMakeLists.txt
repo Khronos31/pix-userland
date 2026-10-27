@@ -168,6 +168,9 @@ target_compile_options(pix_dt295_usb_diag_proof PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 target_link_libraries(pix_dt295_usb_diag_proof PRIVATE
     dtv::receiver dtv::capture pix_dt295_c_backend Threads::Threads)
+if(WIN32)
+    target_link_libraries(pix_dt295_usb_diag_proof PRIVATE bcrypt)
+endif()
 add_test(NAME pix_dt295_usb_diag_proof
     COMMAND pix_dt295_usb_diag_proof)
 
