@@ -61,6 +61,10 @@ thread_local const char* usb_diag_stage = nullptr;
 
 }  // namespace
 
+#ifdef PIX_DT295_DIAG_TESTING
+ReceiverAdapter::TestControlTransfer ReceiverAdapter::test_control_transfer_ = nullptr;
+#endif
+
 ReceiverAdapter::ReceiverAdapter(const char* assets_directory, const usb_selector& selector,
                                  Clock& clock, ReceiverId receiver,
                                  std::size_t queue_packets, int device_fd) noexcept
@@ -920,7 +924,14 @@ int ReceiverAdapter::control(void* opaque, std::uint8_t request_type, std::uint8
     if (io == nullptr || io->owner == nullptr || actual == nullptr ||
         length > std::numeric_limits<std::uint16_t>::max())
         return LIBUSB_ERROR_INVALID_PARAM;
-    const int result = libusb_control_transfer(
+#ifdef PIX_DT295_DIAG_TESTING
+    const auto transfer = io->owner->test_control_transfer_ != nullptr
+                              ? io->owner->test_control_transfer_
+                              : &libusb_control_transfer;
+#else
+    const auto transfer = &libusb_control_transfer;
+#endif
+    const int result = transfer(
         static_cast<libusb_device_handle*>(usb_native_handle(io->owner->usb_)),
         request_type, request, value, index, data, static_cast<std::uint16_t>(length),
         timeout_ms);

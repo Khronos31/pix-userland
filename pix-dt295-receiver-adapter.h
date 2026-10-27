@@ -166,6 +166,9 @@ public:
     void test_usb_stage(const char* stage) noexcept { usb_stage(stage); }
     void test_usb_failure(const char* operation, unsigned endpoint, int result) noexcept
     { usb_failure(operation, endpoint, result, dtv::userland::Error::USB_IO); }
+    using TestControlTransfer = decltype(&libusb_control_transfer);
+    static void test_set_control_transfer(TestControlTransfer callback) noexcept
+    { test_control_transfer_ = callback; }
     int test_boot(const char* assets_path) noexcept
     {
         char error[256]{};
@@ -178,6 +181,8 @@ public:
             return -1;
         return boot_unlocked(error, sizeof(error));
     }
+private:
+    static TestControlTransfer test_control_transfer_;
 #endif
 };
 

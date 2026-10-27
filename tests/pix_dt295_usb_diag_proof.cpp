@@ -163,7 +163,7 @@ bool contains(const std::string& text, const char* needle)
 
 }  // namespace
 
-extern "C" int LIBUSB_CALL libusb_control_transfer(
+int LIBUSB_CALL fake_control_transfer(
     libusb_device_handle*, std::uint8_t request_type, std::uint8_t request,
     std::uint16_t value, std::uint16_t index, unsigned char*, std::uint16_t length,
     unsigned int timeout_ms)
@@ -180,6 +180,7 @@ extern "C" int LIBUSB_CALL libusb_control_transfer(
 
 int main()
 {
+    pix::capture::dt295::ReceiverAdapter::test_set_control_transfer(&fake_control_transfer);
     usb_selector selector{};
     const auto directory = fixture_directory();
     const auto assets_path = directory / "dt295.assets";
