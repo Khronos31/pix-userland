@@ -15,4 +15,4 @@
 
 ## 共通の未達
 
-両機種のLinux x86_64 2時間連続TS、毎release回帰項目、必要時項目、final candidate archiveによる各OS/ABI回帰は未実施。初回機種チェックは両機種とも未認定とする。1.0.0問題発見試験は[`1.0.0.md`](1.0.0.md)に記録する。
+両機種のLinux x86_64 2時間連続TS、毎release回帰項目、必要時項目、final candidate archiveによる各OS/ABI回帰は未実施。初回機種チェックは両機種とも未認定とする。
