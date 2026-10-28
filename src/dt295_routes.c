@@ -69,6 +69,19 @@ static uint16_t be16(const uint8_t *p) {
 static uint16_t pid13(const uint8_t *p) {
     return (uint16_t)(((p[0] & 0x1fu) << 8) | p[1]);
 }
+
+/* DT295 already descrambles internally for our setup, so a PID shared by
+ * several programs with different ECM bindings is not a decoding hazard.
+ * Allow it only when explicitly requested (CS multiplexes do this). */
+static int allow_ecm_conflict(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("DT295_ALLOW_ECM_CONFLICT");
+        cached = v && *v && *v != '0';
+    }
+    return cached;
+}
+
 static void errset(char dst[DT295_ROUTE_ERROR], const char *s) {
     if (dst) {
         (void)snprintf(dst, DT295_ROUTE_ERROR, "%s", s);
@@ -425,6 +438,18 @@ static void section_bytes(dt295_routes *r, uint16_t pid, const uint8_t *b, size_
         section_set *c = &t->committed;
         if (number > c->last || c->length[number] != n || memcmp(c->data[number], b, n)) {
             r->invalid_sections++;
+            /* The receiver can rewrite a section without bumping the version
+             * (the on-board transcoder does this when its output stream type
+             * changes at startup). The newer bytes are authoritative: adopt
+             * them and re-parse instead of failing closed, otherwise every
+             * later copy mismatches and the session never recovers.
+             * Only PMT, whose parser updates the existing entry in place. */
+            if (t->tid == 2 && number <= c->last && n <= SECTION_MAX) {
+                memcpy(c->data[number], b, n);
+                c->length[number] = (uint16_t)n;
+                if (!parse_pmt(r, t->pid, t->ext, c))
+                    return;
+            }
             /* Same-version content changes make the committed route map stale. */
             r->unsupported_tables++;
         }
@@ -968,10 +993,13 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
                         return -1;
                     }
                     if (binding && binding != (uint16_t)es) {
-                        errset(error, "shared PID has conflicting ECM bindings");
-                        return -1;
+                        if (!allow_ecm_conflict()) {
+                            errset(error, "shared PID has conflicting ECM bindings");
+                            return -1;
+                        }
+                    } else {
+                        binding = (uint16_t)es;
                     }
-                    binding = (uint16_t)es;
                 }
         if (add_general(&p, pid, binding, 0)) {
             errset(error, "PID slot capacity exceeded or conflicting ECM binding");
@@ -988,12 +1016,18 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
             if (r->pmts[j].stream[k].ecm_pid)
                 binding = (uint16_t)plan_find_pid(&p, r->pmts[j].stream[k].ecm_pid);
             dt295_route *existing = &p.routes[s];
-            if (existing->is_ecm || (existing->ecm_slot && existing->ecm_slot != binding)) {
+            if (existing->is_ecm) {
                 errset(error, "live PID ECM rebind is unverified");
                 return -1;
             }
-            if (!existing->ecm_slot && binding)
+            if (existing->ecm_slot && existing->ecm_slot != binding) {
+                if (!allow_ecm_conflict()) {
+                    errset(error, "live PID ECM rebind is unverified");
+                    return -1;
+                }
+            } else if (!existing->ecm_slot && binding) {
                 existing->ecm_slot = binding;
+            }
         }
     p.ready = (r->satellite || r->have_cat) && p.missing_pmts == 0;
     if (error)

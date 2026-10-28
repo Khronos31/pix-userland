@@ -1549,6 +1549,57 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
         if (field(d, f->address, f->shift, f->width, f->value))
             return fail(d, e, en, "private receive profile apply failed");
     }
+
+    /* test hook: copy the primary output mux configuration onto TS_OUT2 */
+    if (getenv("DT295_MIRROR_TSOUT2")) {
+        static const uint16_t pairs[][2] = {
+            {0x1102, 0x1242}, {0x1104, 0x1244}, {0x1106, 0x1246},
+            {0x1108, 0x1248}, {0x110a, 0x124a},
+            {0x1126, 0x1266}, {0x1128, 0x1268}, {0x1130, 0x1270},
+            {0x1132, 0x1272}, {0x1136, 0x1276},
+        };
+        uint16_t v = 0;
+        int dump = getenv("DT295_DUMP_REGS") != NULL;
+        for (unsigned i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++) {
+            if (word(d, pairs[i][0], &v) || putword(d, pairs[i][1], v))
+                return fail(d, e, en, "TS_OUT2 mirror failed");
+            if (dump)
+                fprintf(stderr, "XREG src 0x%04x = 0x%04x -> 0x%04x\n",
+                        pairs[i][0], v, pairs[i][1]);
+        }
+        if (word(d, 0x101c, &v))
+            return fail(d, e, en, "TS_OUT2 mirror read failed");
+        if (putword(d, 0x127a, (uint16_t)((v & 0x00ffu) | (0x1bu << 8))))
+            return fail(d, e, en, "TS_OUT2 stream type failed");
+        if (word(d, 0x100c, &v))
+            return fail(d, e, en, "TS_OUT2 mirror read failed");
+        if (putword(d, 0x100c, (uint16_t)((v & ~0x000fu) | ((v >> 4) & 0x0fu))))
+            return fail(d, e, en, "TS_OUT2 audio mode failed");
+        if (word(d, 0x100a, &v))
+            return fail(d, e, en, "TS_OUT2 mirror read failed");
+        if (putword(d, 0x100a, (uint16_t)((v & ~0x0f00u) | (((v >> 4) & 0x0fu) << 8))))
+            return fail(d, e, en, "TS_OUT2 system mode failed");
+    }
+
+    /* test hook: DT295_XREG="addr:shift:width:value[,addr:...]" (hex) */
+    {
+        const char *xr = getenv("DT295_XREG");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
     /* Replace every route register so stale private channel PIDs cannot survive. */
     dt295_route_op blank = {0};
     for (unsigned slot = 0; slot < 64; slot++) {
@@ -1566,6 +1617,26 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
     if (putword(d, 0x1018, program) || field(d, 0x101c, 8, 8, video_type) ||
         field(d, 0x101c, 0, 8, audio_type))
         return fail(d, e, en, "program metadata apply failed");
+    /* >>> DT295_XREG2 test hook (patch-xreg2.py) */
+    {
+        const char *xr = getenv("DT295_XREG2");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
+    /* <<< DT295_XREG2 test hook */
     if (putword(d, 0x82028, 0) || command(d, 4, 0x20, 0, 0, NULL) || wait_state(d, 1, 30000))
         return fail(d, e, en, "receive acquisition did not reach configured state");
     uint16_t dma = 0;
