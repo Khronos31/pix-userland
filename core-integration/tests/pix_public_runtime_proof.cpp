@@ -276,8 +276,12 @@ std::size_t occurrence_count(std::string_view text, std::string_view needle)
 
 int main()
 {
-    char root_template[] = "/tmp/pix-public-runtime-proof-XXXXXX";
-    char* root_value = ::mkdtemp(root_template);
+    const char* temp_parent = ::geteuid() == 0 ? "/run" : std::getenv("HOME");
+    if (temp_parent == nullptr || temp_parent[0] != '/') return 1;
+    const std::string root_template = std::string(temp_parent) + "/p-XXXXXX";
+    std::vector<char> root_storage(root_template.begin(), root_template.end());
+    root_storage.push_back('\0');
+    char* root_value = ::mkdtemp(root_storage.data());
     if (root_value == nullptr) return 1;
     const std::string root(root_value);
     const std::string assets = root + "/assets";
@@ -352,12 +356,13 @@ int main()
     const std::string nested_runtime = root + "/nested-runtime";
     const std::string product_directory = nested_runtime + "/pix-userland";
     if (::mkdir(nested_runtime.c_str(), 0700) != 0 ||
-        ::chmod(nested_runtime.c_str(), 0770) != 0 ||
-        ::mkdir(product_directory.c_str(), 0700) != 0) return 53;
+        ::chmod(nested_runtime.c_str(), 0700) != 0 ||
+        ::mkdir(product_directory.c_str(), 0700) != 0 ||
+        ::chmod(product_directory.c_str(), 0770) != 0) return 53;
     const std::string nested_mode_log = root + "/pixd-product-mode.log";
     const pid_t nested_mode_process = launch(PIXD_PATH,
         {"--device", "serial:PIXDT18101", "--assets", assets,
-         "--runtime-dir", nested_runtime, "--instance", "pix", "--group"}, nested_mode_log);
+         "--runtime-dir", nested_runtime, "--instance", "pix"}, nested_mode_log);
     int nested_mode_status = 0;
     if (nested_mode_process <= 0 ||
         ::waitpid(nested_mode_process, &nested_mode_status, 0) != nested_mode_process ||
@@ -450,6 +455,7 @@ int main()
         ::waitpid(missing_group_root, &missing_group_root_status, 0) != missing_group_root ||
         !WIFEXITED(missing_group_root_status) ||
         WEXITSTATUS(missing_group_root_status) != 2) return 34;
+    if (::chmod(root.c_str(), 0750) != 0) return 34;
 
     const pid_t daemon = launch(PIXD_PATH,
         {"--device", "serial:PIXDT18101", "--assets", assets,
