@@ -47,21 +47,11 @@
 
 ### 機器用データ（assets）
 
-実機チューナーを動作させるには、機種に応じたファームウェアおよび認証データが必要です。
+実機チューナーを動作させるには、機種に応じたファームウェアおよび認証データ（DT181 用の `fpga.bin`, `bootstrap.bin`, `validation.bin`、および DT295 用の `dt295.assets`）が必要です。
 
-- **PIX-DT181-PU0 用**:
-  - `fpga.bin`
-  - `bootstrap.bin`
-  - `validation.bin`
-- **PIX-DT295 用**:
-  - `dt295.assets`
+**配布バイナリにはこれらの必要な機器用データがあらかじめ組み込まれています（埋め込み方式）。** 一般の利用者が別途ファームウェアファイルを入手・配置したり、外部ディレクトリを指定したりする必要はありません。
 
-バイナリ配布アーカイブには、アーカイブ内の `assets/` ディレクトリに必要なファイルを同梱しています。
-ソースアーカイブからビルドした場合は、正規に所有するソフトウェアから抽出スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて生成してください。
-
-> [!IMPORTANT]
-> `pixd` は実行ファイルの配置場所を基準にした自動探索を行いません。既定ではカレントディレクトリ直下の `./assets` を参照します。
-> 展開したアーカイブルートを作業ディレクトリにして起動するか、別ディレクトリから起動する場合は `--assets /path/to/assets` でディレクトリの絶対パスを指定してください。`pixctl` と `pix-ts` は assets を直接読み込みません。
+ソースから自身でビルドする場合、または開発・診断目的で埋め込みを無効にする場合（`PIX_EMBEDDED_ASSETS=OFF`）は、正規に所有するソフトウェアから抽出スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて生成したファイルを準備してください。
 
 ### 実行時ライブラリ
 
@@ -79,9 +69,10 @@
 
 配布アーカイブの構成:
 - `pixd`, `pixctl`, `pix-ts`（Windows 向けは `.exe`）
-- `assets/`（機種に応じたファームウェア・認証データ）
 - `build-info.txt`
 - `README.md`, `docs/`, `packaging/`, `licenses/`
+
+機器用データは実行ファイルに組み込まれているため、外部 assets ディレクトリの配置や展開作業は不要です。展開した実行ファイルをそのまま実行できます。
 
 ### Linux: USB デバイスのアクセス権限設定
 
@@ -132,8 +123,6 @@ runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/pix-userland.XXXXXX")
 ./pixd --device usb:1-2 --instance tuner --runtime-dir "$runtime_dir" &
 pixd_pid=$!
 ```
-
-※ assets がカレントディレクトリの `./assets` にない場合は、`--assets /path/to/assets` を追加してください。
 
 ### 3. デーモンの状態確認
 
@@ -219,12 +208,13 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 - `--device <SPEC>`: 保持する USB デバイスを指定します（`usb:BUS-PORT`、インデックス、`serial:TEXT` 等）。
 - `--instance <TOKEN>`: デーモンのインスタンス識別名を指定します。
 - `--runtime-dir <DIR>`: UNIX ドメインソケット等のランタイムディレクトリを指定します。
-- `--assets <DIR>`: 機器用データの格納ディレクトリを指定します（既定値: `./assets`）。
 - `--group`: 共有グループアクセスを有効にします。
 - `--exit-on-stdin-eof`: 標準入力が閉じた（EOF）際に自動停止します（親プロセス監視用）。
 - `--fd <FD>`: オープン済みの USB ファイルディスクリプタを渡します（Android / Termux 用）。
 - `--models`: 静的な対応機種一覧を表示します。
 - `--list-json`: 接続中の機器を JSON 形式で一覧表示します。
+
+※ 配布バイナリは機器用データを内蔵しているため、通常利用で `--assets` オプションは不要です（診断・開発目的で埋め込みを無効にしてビルドした場合のみ `--assets <DIR>` が使用されます）。
 
 #### `pixctl`（制御・状態照会ツール）
 - サブコマンド:
@@ -293,27 +283,30 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 
 C++17 対応コンパイラ、CMake 3.16 以上、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
 
+配布バイナリと同様に機器用データを埋め込んでビルドする場合は、あらかじめ `assets/` に必要なファイル（DT181 用および DT295 用）を配置した上で、`-DPIX_EMBEDDED_ASSETS=ON` を指定します。
+
 ```sh
-cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release
+cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release -DPIX_EMBEDDED_ASSETS=ON
 cmake --build build/cmake --parallel 4
 ctest --test-dir build/cmake --output-on-failure
 ```
 
 ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。
+埋め込みを行わない診断ビルド（`PIX_EMBEDDED_ASSETS=OFF`、既定値）では、`pixd` の起動時に `--assets <DIR>` で外部ファイルの格納ディレクトリを指定します。
 
 ### ポータブルビルド（静的リンクスクリプト）
 
-各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。
+各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。環境変数 `PIX_EMBEDDED_ASSETS=ON` を設定することで埋め込みバイナリをビルドできます。
 
 ```sh
 # ネイティブ環境（Linux: glibc 動的 + libusb 静的、macOS: システムライブラリ動的 + libusb 静的）
-./tools/build-portable.sh native
+PIX_EMBEDDED_ASSETS=ON ./tools/build-portable.sh native
 
 # musl Linux 環境（Alpine Linux 等の musl 環境で完全静的バイナリを作成）
-./tools/build-portable.sh musl
+PIX_EMBEDDED_ASSETS=ON ./tools/build-portable.sh musl
 
 # Android (Termux) 向けクロスビルド
-ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-portable.sh android
+PIX_EMBEDDED_ASSETS=ON ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-portable.sh android
 ```
 
 ### Windows 向けクロスビルド
@@ -321,7 +314,7 @@ ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-por
 Linux x86_64 環境にて、llvm-mingw UCRT ツールチェーンを用いてクロスビルドを行います。
 
 ```sh
-./tools/build-windows.sh
+PIX_EMBEDDED_ASSETS=ON ./tools/build-windows.sh
 ```
 
 libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe`, `pixctl.exe`, `pix-ts.exe`）が生成されます。
@@ -344,4 +337,4 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
-- 機器用データ（`assets/` 内の `fpga.bin`, `bootstrap.bin`, `validation.bin`, `dt295.assets`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、本プロジェクトの MIT License は適用されません。ソースアーカイブにも含まれません。
+- 配布バイナリに組み込まれる機器用データ（`fpga.bin`, `bootstrap.bin`, `validation.bin`, `dt295.assets`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、バイナリへの埋め込みによってその由来や権利関係が変更されることはありません。本プロジェクトの MIT License は適用されず、ソースアーカイブにも含まれません。
