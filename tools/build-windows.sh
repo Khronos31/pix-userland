@@ -114,6 +114,16 @@ if [[ "${PIX_WINDOWS_PROOFS:-0}" == 1 ]]; then
     mkdir -p "$out/proofs"
     cp "$build/bin/pixd_fixture.exe" "$build/bin/pix_windows_os_thread_proof.exe" "$out/proofs/"
 fi
+if [[ "${PIX_WINDOWS_STREAM_I1:-0}" == 1 ]]; then
+    cmake --build "$build/cmake" --target pix_dt295_stream_windows_i1 --parallel "${JOBS:-4}"
+    mkdir -p "$out/proofs"
+    cp "$build/bin/pix_dt295_stream_windows_i1.exe" "$out/proofs/"
+fi
+if [[ "${PIX_WINDOWS_STREAM_I2:-0}" == 1 ]]; then
+    cmake --build "$build/cmake" --target pix_dt295_stream_windows_i2 --parallel "${JOBS:-4}"
+    mkdir -p "$out/proofs"
+    cp "$build/bin/pix_dt295_stream_windows_i2.exe" "$out/proofs/"
+fi
 {
     printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\ntarget=windows-x64\nembedded_assets=%s\n' "$version" "$usb_actual" "$embedded_assets"
     printf 'dtv-userland-core %s\nllvm-mingw %s UCRT\nSHA256 %s\n' "$core_pin" "$llvm_version" "$llvm_sha"

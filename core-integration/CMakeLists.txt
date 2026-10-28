@@ -108,6 +108,9 @@ add_library(pix_dt295_c_backend STATIC
     "${PIX_SOURCE_DIR}/src/dt295_capture.c")
 target_compile_definitions(pix_dt295_c_backend PRIVATE
     _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+if(WIN32)
+    target_compile_definitions(pix_dt295_c_backend PRIVATE DT295_STREAM_WINDOWS_ENABLE)
+endif()
 target_include_directories(pix_dt295_c_backend PUBLIC
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_link_libraries(pix_dt295_c_backend PUBLIC
@@ -300,6 +303,26 @@ if(WIN32)
     add_executable(pix_windows_os_thread_proof tests/windows_os_thread_proof.c)
     target_include_directories(pix_windows_os_thread_proof PRIVATE "${PIX_SOURCE_DIR}/include")
     add_test(NAME pix_windows_os_thread_proof COMMAND pix_windows_os_thread_proof)
+
+    add_executable(pix_dt295_stream_windows_i1
+        "${PIX_SOURCE_DIR}/tests/test_dt295_stream_i1.c"
+        "${PIX_SOURCE_DIR}/src/dt295_stream.c")
+    target_include_directories(pix_dt295_stream_windows_i1 PRIVATE
+        "${PIX_SOURCE_DIR}/include")
+    target_compile_definitions(pix_dt295_stream_windows_i1 PRIVATE
+        DT295_STREAM_WINDOWS_ENABLE DT295_STREAM_TESTING)
+    target_compile_options(pix_dt295_stream_windows_i1 PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(pix_dt295_stream_windows_i1 PRIVATE PkgConfig::LIBUSB Threads::Threads)
+
+    add_executable(pix_dt295_stream_windows_i2
+        "${PIX_SOURCE_DIR}/tests/test_dt295_stream_windows_i2.c"
+        "${PIX_SOURCE_DIR}/src/dt295_stream.c")
+    target_include_directories(pix_dt295_stream_windows_i2 PRIVATE
+        "${PIX_SOURCE_DIR}/include")
+    target_compile_definitions(pix_dt295_stream_windows_i2 PRIVATE
+        DT295_STREAM_WINDOWS_ENABLE)
+    target_compile_options(pix_dt295_stream_windows_i2 PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(pix_dt295_stream_windows_i2 PRIVATE PkgConfig::LIBUSB Threads::Threads)
 else()
     target_link_options(pixd_fixture PRIVATE
         -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
