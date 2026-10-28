@@ -105,30 +105,59 @@ bool prove_model(const std::string& root, const char* serial, const char* model,
     return clean;
 }
 
+struct RemoveTree {
+    std::string path;
+
+    bool remove() const
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+        return !error;
+    }
+
+    ~RemoveTree()
+    {
+        (void)remove();
+    }
+};
+
 }  // namespace
 
 int main()
 {
-    char root_template[] = "/tmp/pix-embedded-runtime-proof-XXXXXX";
-    char* root_value = ::mkdtemp(root_template);
+    const char* temp_parent = ::geteuid() == 0 ? "/run" : std::getenv("HOME");
+    if (temp_parent == nullptr || temp_parent[0] != '/') return 1;
+    const std::string root_template = std::string(temp_parent) + "/p-XXXXXX";
+    std::vector<char> root_storage(root_template.begin(), root_template.end());
+    root_storage.push_back('\0');
+    char* root_value = ::mkdtemp(root_storage.data());
     if (root_value == nullptr) return 1;
     const std::string root(root_value);
-    if (::chmod(root.c_str(), 0770) != 0) return 1;
-    if (!prove_model(root, "PIXDT18101", "PIX-DT181-PU0", 0U)) return 2;
-    if (!prove_model(root, "PIXDT29501", "PIX-DT295", 1U)) return 2;
+    const RemoveTree cleanup{root};
+    const int result = [&]() {
+        if (::chmod(root.c_str(), 0750) != 0) return 1;
+        if (!prove_model(root, "PIXDT18101", "PIX-DT181-PU0", 0U)) return 2;
+        if (!prove_model(root, "PIXDT29501", "PIX-DT295", 1U)) return 2;
 
-    const std::string empty = root + "/empty-cli";
-    const std::string help_log = root + "/help.log";
-    if (::mkdir(empty.c_str(), 0700) != 0) return 3;
-    const pid_t help = launch({"--help"}, empty, help_log);
-    int status = 0;
-    if (help <= 0 || !wait_exit(help, status) || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0 || read_log(help_log).find("--assets") != std::string::npos)
-        return 4;
-    const pid_t override = launch({"--assets", "/unused", "--device", "usb:1-1"},
-                                 empty, root + "/override.log");
-    if (override <= 0 || !wait_exit(override, status) || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 2) return 5;
+        const std::string empty = root + "/empty-cli";
+        const std::string help_log = root + "/help.log";
+        if (::mkdir(empty.c_str(), 0700) != 0) return 3;
+        const pid_t help = launch({"--help"}, empty, help_log);
+        int status = 0;
+        if (help <= 0 || !wait_exit(help, status) || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0 || read_log(help_log).find("--assets") != std::string::npos)
+            return 4;
+        const pid_t override = launch({"--assets", "/unused", "--device", "usb:1-1"},
+                                     empty, root + "/override.log");
+        if (override <= 0 || !wait_exit(override, status) || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 2) return 5;
+        return 0;
+    }();
+    if (!cleanup.remove()) {
+        std::fprintf(stderr, "embedded pixd proof failed to clean its temporary root\n");
+        return 6;
+    }
+    if (result != 0) return result;
     std::puts("embedded pixd: both models reached ready from empty cwd/environment; --assets absent");
     return 0;
 }
