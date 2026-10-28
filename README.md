@@ -1,323 +1,297 @@
-# pix-userland / pix-ts
+# pix-userland
 
-> [!CAUTION]
-> 本プロジェクトは非公開の個人用リポジトリです。リポジトリやリリースを外部へ公開しないでください。
+`pix-userland` は、ピクセラ製 USB チューナーに対応した、ユーザー空間で動作するドライバおよびツール群です。カーネルモジュールを使用せず、ユーザー空間から選局、MPEG-TS ストリームの取得、および機器の状態照会を行います。
 
-## 概要
+公開コマンドは、USB 機器を所有・管理するデーモン `pixd`、デーモンの状態や機器・内部カード状態を調べる `pixctl`、MPEG-TS を受信・出力するクライアント `pix-ts` の 3 つです。共通基盤 `dtv-userland-core` を静的リンクし、統一された IPC アーキテクチャで動作します。
 
-pix-userland は、ピクセラ製 USB チューナー向けのユーザー空間ソフトウェアです。公開コマンドは、USB 機器を所有する `pixd`、daemon の状態や機器・内部カード状態を調べる `pixctl`、TS を受信する `pix-ts` の3つです。
-
-`pix-ts` は選択した伝送ストリームを 188 バイトの MPEG-TS パケットとして出力します。PIX CARD 機能は内部カードの挿入状態照会に限られ、内蔵 IC カードリーダー／PC/SC API の制御や、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。特定サービスの分離、予約録画、GUI、ブラウザからの WebUSB 制御も未実装です。
-
-## 配布コマンド（pixd / pixctl / pix-ts）
-
-配布アーカイブに入る公開コマンドは次の3つです（Windows 向けパッケージは `.exe`）。
-
-| コマンド | 役割 |
-|---|---|
-| `pixd` | USB 機器を所有する常駐 daemon です。`--models` で対応機種、`--list-json` で接続中の機器を表示します。 |
-| `pixctl` | daemon の状態・機器構成・内部カード挿入状態を調べる制御 CLI です（`list` / `status` / `card-status`）。 |
-| `pix-ts` | daemon から TS を受け取り、標準出力またはファイルへ出力するクライアントです。 |
-
-引数は各コマンドの `--help`、版は `--version` で確認できます。3コマンドは `core-integration/` の CMake でビルドし、固定した [dtv-userland-core](https://github.com/Khronos31/dtv-userland-core) のソース（`core-integration/dtv-userland-core.revision`）から静的リンクします。
-
-従来の standalone C 実装（`make` が生成する `pix-ts-legacy`）は内部診断と既存テスト用で、配布アーカイブには含めません。公開 `pix-ts` とは引数も出力も異なります。以下の「最短の使用例」「CLI 仕様」は従来 standalone CLI の記録であり、コマンド名を `pix-ts-legacy` に読み替えています。
-
-## 対応機器・動作環境
+## 対応機種・動作環境
 
 ### 対応機種
 
-- **CaptyTV Hi-Vision PIX-DT181-PU0**
-  - USB VID:PID: `06b8:102b`
-  - 対応放送波: 地上デジタル放送、BS デジタル放送、110 度 CS デジタル放送
-  - 既存のリリースで実機対応を確認しているモデルです。
+本ソフトウェアがプロファイルとして識別する機種は以下のとおりです。
 
-> [!NOTE]
-> PIX-DT141、PIX-DT195 など、他の CaptyTV や StationTV シリーズは未対応かつ未検証です。PIX-DT295 の C 経路は開発中で、macOS arm64・地上波 T27・ターゲット0では 15 秒、5 分、5 時間の受信と保存 TS 検査を確認しました。5 時間の TS は 194,054,187 パケット（36,482,187,156 バイト）で、CC、TEI、scramble、invalid、section CRC の各異常は 0 件でした。PID 273 の追加イベントも実機診断で確認しました（機器レジスター readback は未実施）。追加音声の出現・消失境界における部分 PES の Issue #2 は未解決です。DT295 はまだ RC や配布パッケージに含まれません。各 OS の検証範囲と制限は[DT295 の状況](docs/dt295.md)を参照してください。
+| 機種 | USB ID | 対応放送波 | 受信部 | 状況と検証範囲 |
+|---|---|---|---|---|
+| CaptyTV Hi-Vision PIX-DT181-PU0 | `06b8:102b` | 地上デジタル、BS デジタル、110 度 CS デジタル | 1 系統（排他受信） | 実機検証済み（地上・BS・110度CS）。同時受信は 1 ストリームのみ。 |
+| PIX-DT295 | `06b8:103b` | 地上デジタル、BS デジタル、110 度 CS デジタル | 1 系統（排他受信） | プロファイルおよび stream バックエンド対応。OS 別の検証範囲や制約は [DT295 の状況](docs/dt295.md) を参照。 |
 
-### 配布ターゲットと検証状況
+- **PIX-DT181-PU0**: 実機検証済みの主対象モデルです。地上波端子と BS/CS 端子を備え、1 系統の受信部で地上・BS・110度CSのいずれかを受信できます（同時受信は 1 ストリームのみ）。
+- **PIX-DT295**: プロファイルおよび stream バックエンド（Linux, macOS, Windows）に対応しています。実機での長時間検証範囲や動的 PMT 追従などの制約事項については [DT295 の状況](docs/dt295.md) を参照してください。
+- その他の CaptyTV や StationTV シリーズ（PIX-DT141、PIX-DT195 など）は未対応・未検証です。
 
-> [!NOTE]
-> 下の表と r8 の記述は、従来 standalone CLI を配布した既存 Release の記録です。`pixd` / `pixctl` / `pix-ts` の3コマンド配布は、この表の検証済みという意味にはなりません。3コマンドの配布接続の状況は [docs/releases.md](docs/releases.md) の「3コマンド配布の検証状況」を参照してください。
+`pixd --models` を実行すると、USB へのアクセスを行わずに静的な対応機種名と VID:PID の一覧を表示します。
 
-バイナリは 7 種類のターゲット向けに配布しています。すべて tar.gz 形式で、libusb 1.0.30 を静的リンクしています。Linux 向けバイナリは musl による完全静的リンクとなっており、glibc 環境と musl 環境の両方でそのまま動作します。一般のバイナリ利用者がコンパイラやビルドツールを準備する必要はありません。
+### 動作環境（配布ターゲット）
 
-| ターゲット | リンク方式・依存関係 | 検証状況 |
+バイナリパッケージは以下の 7 種類のターゲット向けに提供しています。libusb 1.0.30 を静的リンクしており、一般の利用環境でコンパイラや開発用ライブラリを準備する必要はありません。
+
+| 対象 OS / 環境 | リンク方式・依存関係 | 構成と備考 |
 |---|---|---|
-| **darwin-arm64** (macOS) | OS 標準ライブラリに動的依存 | DT181 実機にて C 版による地上・BS・110 度 CS の選局・受信・TS 復元を確認済み。CI 単体テストを通過。 |
-| **linux-x86_64** | musl 完全静的（glibc / musl 両対応） | Latitude上で実機受信を確認。v0.1.3採用コードで地上波25ch・5時間2回を合格。詳細は[検証記録](docs/validation.md)。 |
-| **linux-aarch64** | musl 完全静的（glibc / musl 両対応） | r8 はクロスビルドと ELF 形式・依存関係検査のみ。実行・実機未検証。 |
-| **android-aarch64** | Android NDK r27d / API 24（Bionic 動的依存） | Termux 向け CLI。r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
-| **android-armv7a** | Android NDK r27d / API 24（Bionic 動的依存） | r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
-| **android-x86_64** | Android NDK r27d / API 24（Bionic 動的依存） | r8 はクロスビルドと ELF 検査のみ。実行・実機未検証。 |
-| **windows-x64** | OS 標準 DLL（Win32 API）に動的依存 | r8 はクロスビルドと PE 形式・依存関係検査のみ。実行・実機未検証。別途 libusb DLL は不要ですが機器への WinUSB ドライバ設定が必須。 |
+| **Linux x86_64** | musl 完全静的リンク | glibc 環境および musl 環境の両方でそのまま動作します。 |
+| **Linux aarch64** | musl 完全静的リンク | 同上 |
+| **macOS arm64** | OS 標準ライブラリに動的依存 | libusb 静的リンク。Homebrew 等の追加ライブラリは不要です。 |
+| **Android aarch64** | Bionic 動的依存 / libc++ 静的リンク | Termux 環境用 CLI バイナリ（API 24、16KiB ページ対応）。 |
+| **Android armv7a** | Bionic 動的依存 / libc++ 静的リンク | 同上 |
+| **Android x86_64** | Bionic 動的依存 / libc++ 静的リンク | 同上 |
+| **Windows x64** | OS 標準 DLL に動的依存 | libusb 静的リンク。別途 WinUSB ドライバの割り当てが必要です。 |
 
-r8 の7ターゲット確認では、native macOS と Linux x64 でテストを実行しました。Linux ARM64、Windows x64、Android の3 ABI はクロスビルドと形式・依存関係検査のみで、各バイナリは実行していません。これは既存 Release の対応範囲を変更するものではありません。
-
-- **注意事項・未検証項目**:
-  - 既存 DT181 の長時間受信確認は Linux x86_64・地上波 T25 の5時間録画2回です（詳細は[検証記録](docs/validation.md)）。DT295 r8 の macOS arm64・T27・ターゲット0の5時間録画は上記の別試験です。受信中の USB ケーブル抜去、スリープからの復帰処理はいずれも未検証です。
-  - Linux 向けの udev / mdev 設定例を用意していますが、新規権限ルールによる実機でのホットプラグ動作は未検証です。
-  - Android 向けは Termux の端末環境で動かす CLI バイナリであり、Android アプリ（APK）ではありません。実行には Termux 上で `Termux:API` アプリと `termux-api` パッケージ（`termux-usb` コマンドを含む）が必要です。
-  - 現行 `pixd` / `pixctl` / `pix-ts` のTermux FD起動手順は[Android / Termux](docs/android-termux.md)を参照してください。旧standalone `pix-ts-legacy` の受信例は現行3コマンド経路ではありません。
+各プラットフォームのビルドおよび検証状況の詳細は [検証記録](docs/validation.md) および [リリース検証手順](docs/release-validation.md) を参照してください。
 
 ## 必要条件
 
 ### 機器・受信環境
 
-- **B-CAS カード**: チューナー本体に有効な B-CAS カードを挿入してください。
-- **アンテナ線**: 地上波端子と BS/CS 端子が独立しています。受信する放送波の端子へ正しく接続してください。
-- **LNB 電源**: PIX-DT181-PU0 はアンテナ給電（LNB 電源供給）に対応していません。共同受信設備や他の機器（テレビ・レコーダー等）、ブースターからすでにアンテナへ給電されている場合はそのまま受信できます。給電されていない単独アンテナ等の環境では、別途給電機器が必要です。なお、外部から給電されている環境であれば、本機側で給電をオフにする設定や操作は不要です。
-  - ※ `--lna` オプションはチューナー内部の受信増幅器（LNA）の切り替え設定であり、アンテナへの LNB 電源ではありません（既定値: 地上波は off、BS/CS は on）。
+- **B-CAS カード**: チューナー本体のカードスロットに有効な B-CAS カードを挿入してください。
+- **アンテナ接続**: 地上波端子と BS/CS 端子が独立しています。受信する放送波に合わせた端子へ同軸ケーブルを接続してください。
+- **LNB 電源（アンテナ給電）**: PIX-DT181-PU0 はアンテナ給電（LNB 15V 電源供給）に対応していません。共同受信設備やブースター、他のテレビ・レコーダー等からアンテナへ給電されている環境ではそのまま受信できます。給電されていない単独アンテナ等の環境では、別途給電機器が必要です。なお、外部から給電されている環境において、本機側で給電を無効化する特別な設定は不要です。
 
 ### 機器用データ（assets）
 
-実機チューナーを動作させるには、FPGA ファームウェアおよび認証データの計 3 ファイルが必要です。
+実機チューナーを動作させるには、機種に応じたファームウェアおよび認証データが必要です。
 
-- `fpga.bin`（DT181 用、699,673 バイト）
-- `bootstrap.bin`（16 バイト）
-- `validation.bin`（64 バイト）
+- **PIX-DT181-PU0 用**:
+  - `fpga.bin`
+  - `bootstrap.bin`
+  - `validation.bin`
+- **PIX-DT295 用**:
+  - `dt295.assets`
 
-バイナリ配布パッケージには、アーカイブ内の `assets/` ディレクトリに上記 3 ファイルを同梱しています。
-ソースアーカイブにはこれらの実機用データを含んでいません。自身で準備する場合は、正規に所有する StationTV LE 2.3.3.1 を対象に、補助ツール `tools/prepare-assets.py` を用いて生成します。このツールは StationTV LE 2.3.3.1 のバイナリを SHA-256 で照合して認証データを抽出しますが、旧アプリ単体から FPGA を抽出するわけではないため、別途入手した既存の FPGA ファイルを `--fpga` オプションで渡す必要があります。
+バイナリ配布アーカイブには、アーカイブ内の `assets/` ディレクトリに必要なファイルを同梱しています。
+ソースアーカイブからビルドした場合は、正規に所有するソフトウェアから抽出スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて生成してください。
 
-```sh
-python3 tools/prepare-assets.py --app '/path/to/StationTV LE.app' --fpga '/path/to/pixy_fpga_102b.bin'
-```
-
-DT295用C経路は専用の `dt295.assets` を使います。DT181の3ファイルとは互換性がありません。DT295の構成、必要入力、実機確認範囲と制約については[DT295 の状況](docs/dt295.md)を参照してください。
+> [!IMPORTANT]
+> `pixd` は実行ファイルの配置場所を基準にした自動探索を行いません。既定ではカレントディレクトリ直下の `./assets` を参照します。
+> 展開したアーカイブルートを作業ディレクトリにして起動するか、別ディレクトリから起動する場合は `--assets /path/to/assets` でディレクトリの絶対パスを指定してください。`pixctl` と `pix-ts` は assets を直接読み込みません。
 
 ### 実行時ライブラリ
 
-配布バイナリは libusb 1.0.30 を静的リンクしているため、システムへの libusb や pkg-config の導入は不要です。コンパイラ等のビルド環境を用意する必要もありません。
-- **Linux**: musl で完全静的リンクしているため、追加の共有ライブラリなしで glibc / musl のどちらの環境でも起動します。
-- **Windows**: libusb を静的リンクしているため別途 libusb DLL は不要ですが、OS 標準の DLL には動的依存します。また、デバイスドライバとして WinUSB の関連付けが必要です。
+配布バイナリは libusb 1.0.30 を静的リンクしているため、システムへの libusb インストールは不要です。
+- **Linux**: musl による完全静的リンクのため、追加パッケージなしで glibc / musl 双方の環境で動作します。
+- **macOS**: libusb を静的リンクしており、実行時に読み込むのは macOS 標準のシステムライブラリのみです。
+- **Android (Termux)**: Termux 用のコマンドライン実行ファイルです（Android 向け APK アプリケーションではありません）。USB デバイスへのアクセスには `Termux:API` アプリおよび `termux-api` パッケージが必要です。
+- **Windows**: libusb を静的リンクしているため `libusb-1.0.dll` は不要ですが、対象チューナーに WinUSB ドライバを割り当てる必要があります。
 
 ## 導入方法
 
-### 配布アーカイブの構成
+### 配布アーカイブの展開
 
-非公開リポジトリの Release（非 Draft）から、利用環境に合わせたバイナリパッケージ（`pix-userland-*-<target>.tar.gz`）を取得して展開します。ソースアーカイブ（`pix-userland-*-source.tar.gz`）および `SHA256SUMS` も同リリースに配置しています。
+利用環境に合わせた配布アーカイブ（`pix-userland-*-<target>.tar.gz`）を取得し、任意のディレクトリに展開します。
 
-配布アーカイブの同梱内容:
-- `pixd`, `pixctl`, `pix-ts`（Windows 向けパッケージは `.exe`）
-- `build-info.txt`（固定した Core のコミットとビルド環境）
-- `assets/`（`fpga.bin`, `bootstrap.bin`, `validation.bin`）
+配布アーカイブの構成:
+- `pixd`, `pixctl`, `pix-ts`（Windows 向けは `.exe`）
+- `assets/`（機種に応じたファームウェア・認証データ）
+- `build-info.txt`
 - `README.md`, `docs/`, `packaging/`, `licenses/`
-
-> [!IMPORTANT]
-> `pixd` は実行ファイルの配置場所を基準にした assets の自動探索をしません。既定では**カレントディレクトリ相対**の `./assets` を参照します。
-> 展開したアーカイブルートを作業ディレクトリにして `pixd` を起動するか、別ディレクトリから起動する場合は `--assets /path/to/assets` で assets ディレクトリの絶対パスを必ず指定してください。`pixctl` と `pix-ts` は assets を読みません。
 
 ### Linux: USB デバイスのアクセス権限設定
 
-Linux で一般ユーザーが USB チューナーを直接操作するには、デバイスノードへのアクセス権限（`video` グループなど）が必要です。また、カーネルドライバが既にインターフェースを掴んでいる場合は、起動時に `--detach-kernel-driver` を指定して明示的に解放します。
+Linux で一般ユーザーが USB チューナーにアクセスするには、USB デバイスノードへのアクセス権限が必要です。
 
-#### udev の場合
-1. `packaging/70-pix-userland.rules` を `/etc/udev/rules.d/` に配置します。
-2. チューナーを利用するユーザーを `video` グループに追加します。
-3. udev ルールを再読み込みするかマシンを再起動し、チューナーを再接続します。
+#### udev の設定例
+`/etc/udev/rules.d/70-pix-userland.rules` を作成し、以下のルールを記述します（`packaging/70-pix-userland.rules` に同等のファイルを用意しています）。
+
+```udev
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="06b8", ATTR{idProduct}=="102b", MODE="0660", GROUP="video"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="06b8", ATTR{idProduct}=="103b", MODE="0660", GROUP="video"
+```
+
+実行ユーザーを `video` グループに追加し、udev ルールを再読み込みしたあと、チューナーを再接続してください。
+
+```sh
+sudo usermod -aG video "$USER"
+sudo udevadm control --reload-rules
+```
 
 #### BusyBox mdev / Alpine Linux の場合
-1. `packaging/mdev.conf` に記載のルールを、既存の汎用 USB ルールより前に追加します。
-2. 起動時に接続済みの機器に対しては、root 権限で以下を実行して権限を設定します。
-   ```sh
-   packaging/pix-usb-permissions --scan
-   ```
-   sysfs を走査し、VID:PID が `06b8:102b` と一致する USB デバイスノードのみに `root:video` / `0660` を設定します。
+`packaging/mdev.conf` の設定を mdev 設定に追加するか、起動時に `packaging/pix-usb-permissions --scan` を実行して権限を設定します。
 
 ### Windows: WinUSB ドライバの割り当て
 
-Windows で使用する場合は、Zadig などのユーティリティを使い、接続した PIX-DT181-PU0 のドライバを WinUSB に設定してください。
+Windows で使用する場合は、Zadig などのユーティリティを使い、接続したチューナーのドライバを WinUSB に設定してください。
 
-## 最短の使用例（従来 standalone CLI）
+## 最短の使用例
 
-> [!NOTE]
-> この節と「CLI 仕様」は従来 standalone C CLI の記録です。`make` で生成する `pix-ts-legacy` を使い、配布される `pix-ts`（`--device` / `--instance` を取るクライアント）とは別のコマンドです。
+製品コマンドは、デバイスを保持・管理するデーモン `pixd`、状態確認などを行う `pixctl`、MPEG-TS ストリームを受信する `pix-ts` で構成されます。
 
-展開したアーカイブルートに移動した状態で実行します。
+### 1. 接続機器の確認
 
-### 認識されている対応機器の確認
+接続中の機器を一覧表示します。
+
 ```sh
-./pix-ts-legacy --list
-```
-Windows (PowerShell) の場合:
-```powershell
-.\pix-ts-legacy.exe --list
+./pixd --list-json
 ```
 
-### 地上デジタル放送の受信
-物理チャンネル 27ch を 15 秒間受信し、`terrestrial.ts` に保存します。
+出力される JSON から、対象機器の USB ポートパス（`usb:BUS-PORT`）を確認します。
+
+### 2. デーモンの起動
+
+USB ポートパスとインスタンス名を指定してデーモンを起動します。
+
 ```sh
-./pix-ts-legacy -c 27 -t 15 -o terrestrial.ts
-```
-- `-c` にはリモコンの番号やサービス番号ではなく、物理チャンネル（13〜62）を指定します。
-- 物理チャンネル 27ch は今回の東京地域での受信確認例です。お住まいの地域に合わせて適切な物理チャンネル番号を指定してください。
-- `-o` で指定した出力先ファイルは上書きします。同名のファイルが既に存在する場合は上書きします。
-
-Windows (PowerShell) での保存例:
-```powershell
-.\pix-ts-legacy.exe -c 27 -t 15 -o terrestrial.ts
+runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/pix-userland.XXXXXX")
+./pixd --device usb:1-2 --instance tuner --runtime-dir "$runtime_dir" &
+pixd_pid=$!
 ```
 
-### BS デジタル放送の受信
-BS 15ch（TSID: `0x40f1`）を 15 秒間受信し、`bs.ts` に保存します。
+※ assets がカレントディレクトリの `./assets` にない場合は、`--assets /path/to/assets` を追加してください。
+
+### 3. デーモンの状態確認
+
+別の端末またはバックグラウンド起動後に、デーモンの稼働状態や内部カードの挿入状態を確認します。
+
 ```sh
-./pix-ts-legacy -s bs -c 15 --tsid 0x40f1 -t 15 -o bs.ts
-```
-- BS 15ch および TSID `0x40f1` は実際に受信を確認した例です。衛星放送の物理チャンネルや TSID は衛星のトランスポンダ編成等で変化し得るため、最新の放送編成等を確認して指定してください。
-- `--tsid` を省略した場合は、該当のトランスポンダで最初に検出した TS を受信します。
+# 機器および受信部の一覧照会
+./pixctl --runtime-dir "$runtime_dir" --instance tuner list
 
-### 110 度 CS デジタル放送の受信
-CS 22ch（TSID: `0x7160`）を 15 秒間受信し、`cs.ts` に保存します。
+# デーモンの稼働状態照会
+./pixctl --runtime-dir "$runtime_dir" --instance tuner status
+
+# 内部 B-CAS カードの挿入状態照会
+./pixctl --runtime-dir "$runtime_dir" --instance tuner card-status
+```
+
+### 4. MPEG-TS の受信
+
+`pix-ts` クライアントを使い、指定したチャンネルの MPEG-TS ストリームを受信します。
+
 ```sh
-./pix-ts-legacy -s cs -c 22 --tsid 0x7160 -t 15 -o cs.ts
-```
-- CS 22ch および TSID `0x7160` も実際に受信を確認した例です。BS と同様に放送編成等を確認して指定してください。
+# 地上波 27ch を 15 秒間受信し、terrestrial.ts に保存
+./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
+  --channel T27 --time 15 --output terrestrial.ts
 
-### 別のディレクトリから実行する場合
-作業ディレクトリがアーカイブルート以外の場合は、`--assets` でディレクトリのパスを明示します。
+# BS 15ch（スロット0）を 15 秒間受信し、bs.ts に保存
+./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
+  --channel BS15_0 --time 15 --output bs.ts
+
+# CS 22ch を 15 秒間受信し、cs.ts に保存
+./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
+  --channel CS22 --time 15 --output cs.ts
+```
+
+- `--output -` を指定するか `--output` を省略すると、MPEG-TS パケットを標準出力へ出力します（診断メッセージやログは標準エラー出力へ送られます）。
+- `--time` を省略した場合は継続して受信し、SIGINT（Ctrl+C）または SIGTERM で停止します。
+
+### 5. デーモンの停止
+
+受信が完了したら、デーモンプロセスへ SIGINT または SIGTERM を送信して正常停止させます。
+
 ```sh
-/path/to/pix-ts-legacy --assets /path/to/assets -c 27 -t 15 -o terrestrial.ts
+kill "$pixd_pid"
+wait "$pixd_pid"
+rm -rf "$runtime_dir"
 ```
 
-### 標準出力と標準エラー出力
-`-o` を省略するか `-o -` を指定すると、標準出力へ TS パケットを出力します。診断メッセージや終了時の統計情報はすべて標準エラー出力へ送られます。
+### Android (Termux) での実行
+
+Termux 環境では、Termux:API の `termux-usb` コマンドで USB のファイルディスクリプタを取得し、同梱のランチャー `packaging/pix-termux` を介して実行します。
+
 ```sh
-./pix-ts-legacy -s bs -c 15 --tsid 0x40f1 -t 30 > capture.ts 2> capture.log
-```
-- `-t` を省略した場合は継続して受信し、SIGINT（Ctrl+C）または SIGTERM で停止します。
-- Windows の PowerShell ではバージョンによってリダイレクト時にバイナリデータが破損することがあるため、ファイル保存には `-o` オプションを使用してください。
-
-### Android (Termux) での受信例
-Termux 環境では `termux-usb` でデバイスのファイルディスクリプタを取得し、引数として渡して受信します。実行には `Termux:API` アプリおよび `termux-api` パッケージが必要です。
-```sh
-# /dev/bus/usb/001/002 は実際の USB デバイスノードに合わせて変更してください
-termux-usb -r -e './pix-ts-legacy --assets ./assets -c 27 -t 15 -o terrestrial.ts' /dev/bus/usb/001/002
+# termux-usb -l でデバイスパスを確認
+termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
 ```
 
-### 取得した TS の検査
-取得した TS ファイル（188 バイトパケット）の構造やパケット整合性を検査します（チューナーの接続や assets は不要です）。
-```sh
-./pix-ts-legacy --inspect capture.ts
-```
+ランチャーがデーモン（`pixd --fd`）の起動、状態確認、`pix-ts` による受信、および終了時の後始末を一括して行います。詳細は [Android / Termux](docs/android-termux.md) を参照してください。
 
-## CLI 仕様（従来 standalone CLI）
+## 受信部とチャンネル・CLI 仕様
 
-### mirakc / siano-ts 互換の使用方法
+### 受信部（Receiver）
 
-`--channel T25`、`--channel BS01_0`、`--channel CS02` に対応します。
-数値と従来の `--system bs|cs` も使用できます。BSの末尾は受信機から取得した
-TSID配列のスロット番号（0〜7）で、空スロットはエラーになります。
-`--tsid` の明示指定は名前のスロットに優先します。
+各機種の受信部番号は `0` です（地デジ・BS・CS で共用）。
+`pix-ts --receiver` の指定を省略した場合は既定値 `0` が使用されます。未搭載の受信部番号を指定した場合はエラー（終了コード `3`）となります。
 
-`-f/--freq HZ`（衛星では中間周波数）、`-p/--pid PID`（繰り返し可、8192は全PID）、
-`-v/--verbose`、`--list-json`、`--control`、`--fail-on-drop` を追加しました。
-`--device` はインデックス、`BUS:ADDRESS`、`BUS-PORT[.PORT...]`、`serial:TEXT`、
-`usb:BUS-PORT[.PORT...]` を受け付けます。`serial:` は接続中の機器のserialと完全一致
-（大文字小文字を保持）で照合し、一致なし・重複時は先頭へfallbackせず失敗します。
-`--list-json` は `enclosures` / `ungrouped_usb_devices` 形式で、1台につき
-`systems: ["ISDB-T","ISDB-S"]` の受信機1基を列挙します（DT181・DT295ともT/S両対応。
-現在の受信経路の検証・対応OS範囲は別で、DT295のC経路はmacOS地上波のみ確認済みです）。
-`serial` はdescriptorの文字列またはnull、`serial_unique` は現在の列挙内での
-一意性（true/false、判定不能はnull）です。
+### チャンネル指定
 
-mirakc設定例（展開先とUSB位置は実際の環境に置換）:
+`px4-userland` や `siano-userland` と共通のチャンネル表記に対応しています。
 
-```yaml
-tuners:
-  - name: pix-dt181
-    types: [GR, BS, CS]
-    command: /opt/pix-userland/pix-ts-legacy --assets /opt/pix-userland/assets --device 1-2 --channel {{{channel}}} --time {{{duration}}} {{{extra_args}}}
-    decoded: true
-```
+- **地上デジタル放送（ISDB-T）**: `T13`〜`T62`、または `13`〜`62`
+- **BS デジタル放送（ISDB-S）**: `BS<nn>[_<slot>]`（例: `BS15_0`）
+  - スロット番号は 0〜7 を指定できます。
+  - `--tsid <N>` を明示指定した場合は、スロット番号より TSID 指定を優先します。
+- **110 度 CS デジタル放送（ISDB-S）**: `CS<nn>`（例: `CS22`）
+  - `--tsid <N>` で TSID を指定できます。
 
-channelsには `channel: T25`、`channel: BS01_0`、`channel: CS02` のように設定します。
-service IDによる分離はmirakc側で行います。本機内のB-CAS処理後のTSを出力するため
-`decoded: true` とします。`--time -` は無期限受信で、SIGTERMに対応します。
-受信時のstdoutは188バイトTSのみ、ログはstderrです。実際のmirakcとの結合運用は未検証です。
+放送波種別を明示する場合は `--system isdb-t` または `--system isdb-s`（あるいは `-s terrestrial|bs|cs`）を指定します。
+また、周波数を直接指定する `-f, --freq <HZ>`（衛星の場合は中間周波数）にも対応しています。
 
-`--control` は改行区切りの `channel T25`、`channel BS01_0`、`tune 545142857`、
-`quit` を受け付け、EOFでも終了します。初期選局を省略すると最初のコマンドを待ちます。
-時間指定・診断保存との併用はできません。
+### 主要オプション一覧
 
-機器固有の差異:
+#### `pixd`（デバイス管理デーモン）
+- `--device <SPEC>`: 保持する USB デバイスを指定します（`usb:BUS-PORT`、インデックス、`serial:TEXT` 等）。
+- `--instance <TOKEN>`: デーモンのインスタンス識別名を指定します。
+- `--runtime-dir <DIR>`: UNIX ドメインソケット等のランタイムディレクトリを指定します。
+- `--assets <DIR>`: 機器用データの格納ディレクトリを指定します（既定値: `./assets`）。
+- `--group`: 共有グループアクセスを有効にします。
+- `--exit-on-stdin-eof`: 標準入力が閉じた（EOF）際に自動停止します（親プロセス監視用）。
+- `--fd <FD>`: オープン済みの USB ファイルディスクリプタを渡します（Android / Termux 用）。
+- `--models`: 静的な対応機種一覧を表示します。
+- `--list-json`: 接続中の機器を JSON 形式で一覧表示します。
 
-- `-F/--firmware` はPIX用FPGAファイルで、siano用rioファームウェアは使用できません。
-  bootstrap/validationは引き続き `--assets` から読みます。配布assetsの暗号化・復号手順はありません。
-- 地上波は13〜62ch、LNB電源とソフトB25復号は非対応です。
-- ログ文言・統計JSONはPIX固有です。終了コードはsiano/px4の共通分類に合わせています。
-- PIDフィルターは復号・全入力検査後に適用し、統計のpacketsはフィルター前の数です。
-- `--fail-on-drop` は互換引数です。pix-ts-legacyは常にキュー欠落をエラー終了させます。
+#### `pixctl`（制御・状態照会ツール）
+- サブコマンド:
+  - `list`: デバイス構成および公開受信部の一覧を表示します。
+  - `status`: デーモンの稼働状態やストリーム状態を表示します。
+  - `card-status`: 内部 B-CAS カードの挿入状態を表示します。
+- 接続先指定: `--instance <TOKEN>`、`--runtime-dir <DIR>`、`--device <SPEC>`
 
-
-### 書式
-```text
-pix-ts-legacy --system terrestrial|bs|cs --channel N [options]
-```
-
-### オプション一覧
-
-| オプション | 引数 | 説明 |
-|---|---|---|
-| `-c, --channel` | `TOKEN` | `T27` / `BS01_0` / `CS02` または物理チャンネル番号を指定します（地上波: 13〜62、BS: 奇数 1〜23、CS: 偶数 2〜24）。リモコン番号やサービス番号ではありません。 |
-| `-s, --system` | `TYPE` | 放送波の種別を指定します（`terrestrial`（既定値）、`bs`、`cs`）。 |
-| `--tsid` | `N` | 衛星放送の TSID を 10 進数または 16 進数（`0x...`）で指定します。省略時は最初に検出した TS を選択します。 |
-| `-t, --time` | `SECONDS` | 受信時間を秒単位で指定します。`-` または省略時は SIGINT / SIGTERM で停止するまで継続受信します。 |
-| `-o, --output` | `PATH` | 出力先ファイルパスを指定します。既存ファイルは上書きします。省略時または `-` の場合は標準出力に出力します。 |
-| `--model` | `dt181 / dt295` | 機種を指定します（既定値: `dt181`）。実験的 DT295 は macOS・地上波・ターゲット0のみです。 |
-| `-a, --assets` | `DIR` | 機器データのあるディレクトリを指定します（既定値: `./assets`）。DT181 は3ファイル、実験的 DT295 は `dt295.assets` を読み込みます。 |
-| `-d, --device` | `SPEC` | インデックス（既定値: `0`）、`BUS:ADDRESS`、`BUS-PORT[.PORT...]`、`serial:TEXT`、`usb:BUS-PORT[.PORT...]` を指定します。 |
-| `--fd` | `FD` | Android / Termux から渡された借用 USB ファイルディスクリプタを指定します（引数末尾の整数でも指定可能）。Windows では未対応です。`--list` や 0 以外の `--device` とは併用できません。 |
-| `--lna` | `on / off` | 内部受信増幅器（LNA）を設定します（既定値: 地上波は `off`、BS/CS は `on`）。LNB 電源ではありません。 |
-| `--detach-kernel-driver` | なし | カーネルドライバが対象インターフェースにアタッチされている場合、明示的にデタッチします。 |
-| `--list` | なし | 機器を初期化せずに、認識されている対応 USB デバイスの一覧を表示します。 |
-| `--inspect` | `FILE` | 既存の 188 バイト TS ファイルの整合性を検証します（USB 機器や assets は不要）。 |
-| `--decode RAW --context FILE` | `RAW`, `FILE` | USB 転送の生キャプチャデータとコンテキストファイルからオフラインで TS を復元します（出力先は `-o` で指定）。※ 暗号化放送 TS 一般を復号する機能ではありません。 |
-| `--version` | なし | バージョン情報を表示します。 |
-| `-h, --help` | なし | ヘルプを表示します。 |
+#### `pix-ts`（MPEG-TS 受信ツール）
+- `-c, --channel <TOKEN>`: 受信チャンネルを指定します。
+- `-s, --system <SYSTEM>`: 放送波種別を指定します（`isdb-t`, `isdb-s` 等）。
+- `-f, --freq <HZ>`: 受信周波数を Hz 単位で指定します。
+- `--tsid <N>`: 衛星放送の TSID を指定します（10 進数または `0x` プレフィックスの 16 進数）。
+- `-t, --time <SECONDS>`: 受信時間を秒単位で指定します（省略時は停止シグナルまで継続）。
+- `--packet-count <N>`: 受信する MPEG-TS パケット数を指定します。
+- `-o, --output <PATH>`: 出力ファイルパスを指定します（省略時または `-` で標準出力）。
+- `--receiver <N>`: 受信部番号を指定します（既定値: `0`）。
+- `-p, --pid <PID>`: 出力する TS パケットの PID をフィルタリングします（複数指定可、既定値は全 PID）。
+- `--control`: 標準入力から改行区切りの選局コマンド（`channel <TOKEN>` / `tune <HZ>` / `quit`）を受け付けて動的に選局します。
+- `--fail-on-drop`: 受信キュー溢れや出力詰まりを検知した時点で即座に出力を停止し終了します。
 
 ### 終了コード
 
+エラー処理および終了コードは、他製品（`px4-userland`, `asicen-userland`, `siano-userland`）と共通の分類体系を採用しています。
+
 | コード | 意味 |
 |---|---|
-| `0` | 正常終了。受信および検査の実行時は、取得した TS パケットの整合性（PAT/PMT 等）を確認します。 |
-| `2` | コマンドライン引数の誤り、または端末画面への直接バイナリ出力防止による中断。 |
-| `3` | 対象機器が見つからない。 |
-| `4` | 機器が使用中、またはカーネルドライバーが所有。 |
-| `5` | 信号ロック待ちタイムアウト、または指定衛星TSが見つからない。 |
-| `7` | USB通信・機器プロトコル・切断エラー。 |
-| `8` | TS整合性、キュー満杯、出力進捗停滞。 |
-| `9` | B-CASカード未挿入。 |
-| `10` | FPGA・認証データの欠損、不正サイズ、初期化時の拒否。 |
-| `70` | 内部エラー、メモリ・スレッド・ローカルファイル・診断I/Oエラー。 |
+| `0` | 正常終了。 |
+| `2` | コマンドライン引数の不正、または端末画面への直接バイナリ出力防止による中断。 |
+| `3` | 対象機器が見つからない、未準備、または非対応。 |
+| `4` | デバイスが使用中、またはカーネルドライバが所有。 |
+| `5` | 信号ロック待ちタイムアウト、または指定された衛星 TS が見つからない。 |
+| `6` | IPC 通信エラー。 |
+| `7` | USB 通信エラー、機器プロトコル異常、または受信中の USB 切断。 |
+| `8` | TS 整合性異常、キュー満杯、または出力パイプ停滞による drop。 |
+| `9` | B-CAS カード未挿入。 |
+| `10` | FPGA ファームウェア・認証データの欠損、不正、または初期化拒否。 |
+| `70` | 内部エラー（メモリ確保失敗、スレッド生成失敗など）。 |
 
-正常なSIGINT/SIGTERM停止は初期化中も0です。ただし停止処理で新たな障害を検知した場合は該当コードになります。
-最初の障害分類を保持し、後続の終了処理の障害で置き換えません。
-px4のコード6はIPCに固有で、本ツールには該当する経路がありません。
-sianoには汎用エラー1もありますが、pix-ts-legacyでは原因に応じて上記へ分類します。
+## CARD 機能（内部カード状態照会）
 
-地上波53〜62chの番号・周波数変換は対応していますが、この帯域の実機受信は未検証です。
-以前の52ch上限はソフトウェアの入力検証であり、ハード制約を示す根拠ではありません。
+`pixctl card-status` により、チューナー内部の B-CAS カードの物理挿入状態（`present` / `absent`）を照会できます。
 
-### 受信・ストリーム出力の仕様
+```sh
+./pixctl --runtime-dir "$runtime_dir" --instance tuner card-status
+```
 
-- **伝送ストリーム全体の出力**: 選択したチャンネル（トランスポンダ）の伝送ストリーム全体（188 バイトパケット）を出力します。特定サービス（番組）の分離はしません。`--pid` 指定時は復号後に指定PIDのみを出力します。
-- **異常検知と停止**: 後段パイプの詰まりなどにより TS 出力が 3 秒以上進まない場合、または内部の受信キューが満杯になった場合は、パケットの欠落を放置せずエラー（コード 8）として受信を停止し、終了処理へ進みます。
-- **末尾端数パケットの破棄**: 受信終了時に発生した 188 バイト未満の端数データは TS 出力から除外して破棄し、標準エラー出力の JSON 統計情報（`trailing_bytes`）に記録します。正常終了（コード 0）であっても端数パケットが出力ファイルに混入することはありません。
-- **USB 転送暗号の復元**: 旧公式アプリがハードウェアとの間で行っていた独自の USB 転送暗号（セッション確立、鍵更新、AES 転送暗号）を内部で再現して TS を復元します。放送波自体の暗号に対するソフトウェア B-CAS / MULTI2 デスクランブル機能は含みません。
+> [!IMPORTANT]
+> 本ソフトウェアにおける CARD 機能は内部カードの挿入状態照会に限られます。
+> `px4-userland` や `asicen-userland` のような PC/SC IFD プラグイン（`pcscd` 用のスマートカードリーダー API）は提供していません。
+> また、ソフトウェアによる B25 / MULTI2 デスクランブル機能も備えていません。
+> PIX-DT181-PU0 等はハードウェア内部で B-CAS カードを用いた処理を行うため、正常に復元された TS が出力されますが、PC/SC 経由で外部の B25 ライブラリ等から直接カードを制御することはできません。
 
-### Android / Termux 連携の仕様
+## 注意事項・既知の制限
 
-`--fd FD` オプション（または引数末尾の整数）を指定すると、通常のデバイス探索を省略し、`libusb_wrap_sys_device` を使って渡されたファイルディスクリプタを直接制御します。受け取ったファイルディスクリプタの VID/PID を確認したうえで動作し、終了時も呼び出し元が所有するファイルディスクリプタは閉じません。
-なお、`--fd` は Windows 環境では利用できません。また、`--list` や 0 以外の `--device` とは併用できません。
+- **同時受信ストリームの制限**: 同時に受信できるストリームは 1 系統のみです。地上波端子と BS/CS 端子がありますが、排他利用となります。
+- **LNB 電源非対応**: チューナー本体からのアンテナ給電（LNB 15V）は行えません。BS/CS アンテナに給電が必要な環境では、外部の給電機器（テレビ、レコーダー、ブースター等）を併用してください。
+- **特定サービス分離・録画管理機能**: 選択した伝送ストリーム全体の 188 バイト MPEG-TS パケットを出力します。特定番組（Service ID）の分離、EPG 取得、予約録画管理、GUI、WebUSB 等の機能は備えていません。
+- **従来の standalone CLI (`pix-ts-legacy`) について**: ソースツリーの `make` でビルドされる `pix-ts-legacy` は内部診断および既存テスト用であり、通常配布パッケージには含まれません。公開された正式な利用手順には `pixd` / `pixctl` / `pix-ts` を使用してください。
 
-## ビルド方法
+## ソースからのビルド
 
 配布バイナリを利用する場合はビルド環境の準備は不要です。ソースからビルドする場合の手順を以下に示します。
 
 ### 3コマンドのビルド（pixd / pixctl / pix-ts）
 
-C++17 対応コンパイラ、CMake 3.16 以上、pkg-config、libusb 開発ヘッダー・ライブラリが必要です。固定した Core のソースは、ソースアーカイブでは `third_party/dtv-userland-core/` から、通常の checkout では GitHub から取得します。
+C++17 対応コンパイラ、CMake 3.16 以上、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
 
 ```sh
 cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release
@@ -325,69 +299,49 @@ cmake --build build/cmake --parallel 4
 ctest --test-dir build/cmake --output-on-failure
 ```
 
-`pixd`、`pixctl`、`pix-ts` が `build/cmake/` に生成されます。ローカルの Core を使う場合は `-DPIX_CORE_SOURCE_DIR=/path/to/dtv-userland-core` を指定します（固定コミットとの一致は確認されません）。
-
-### 従来 standalone CLI のビルド（内部診断・テスト用）
-
-C11 対応コンパイラ、make、pkg-config、および libusb 開発ヘッダー・ライブラリが必要です。`make` が生成するのは `pix-ts-legacy` で、配布アーカイブには含まれません。
-
-```sh
-# macOS (Homebrew)
-brew install libusb pkg-config
-make
-make test
-
-# Linux (glibc / musl): 各ディストリビューションのパッケージマネージャで libusb 開発パッケージを導入
-make
-make test
-```
-- `CC`, `CFLAGS`, `LDFLAGS`, `USB_CFLAGS`, `USB_LIBS` 変数は make 実行時に上書き可能です。
-- 大容量ファイルを扱うため `_FILE_OFFSET_BITS=64` が有効になっています。
+ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。
 
 ### ポータブルビルド（静的リンクスクリプト）
 
-各種プラットフォーム向けに、libusb 1.0.30 を静的リンクした `pixd` / `pixctl` / `pix-ts` を `build/` に生成するスクリプトを用意しています。従来 standalone CLI のテスト（`make test`）も同時に実行しますが、その成果物は `build/` に出力しません。CMake が必要です（Alpine では `cmake git python3` も追加）。
-`tools/build-portable.sh` は、source アーカイブに同梱されている `third_party/libusb-1.0.30.tar.bz2` があればそれを優先して使用し、無ければ自動でダウンロードします。いずれの場合も公式未改変ソースの SHA-256 チェックサムを照合します。
-なお、改変した libusb をリンクする場合は、改変した libusb のソースアーカイブを `LIBUSB_SOURCE_TARBALL` と `LIBUSB_ALLOW_MODIFIED=1` で指定して同じスクリプトを実行します（詳細は [docs/releases.md](docs/releases.md) を参照してください）。
+各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。
 
 ```sh
-# ネイティブ環境（Linux: glibc 動的 + libusb 静的、macOS: Apple 標準ライブラリ動的 + libusb 静的）
+# ネイティブ環境（Linux: glibc 動的 + libusb 静的、macOS: システムライブラリ動的 + libusb 静的）
 ./tools/build-portable.sh native
 
-# musl Linux 環境（Alpine Linux などの musl コンパイラ環境で完全静的バイナリを作成）
+# musl Linux 環境（Alpine Linux 等の musl 環境で完全静的バイナリを作成）
 ./tools/build-portable.sh musl
 
-# Android (Termux) 向けクロスビルド（Bionic 動的依存）
+# Android (Termux) 向けクロスビルド
 ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-portable.sh android
 ```
-- `musl` モードは glibc 環境から自動変換するスクリプトではありません。必ず Alpine Linux などの musl ネイティブ環境で実行してください。
-- Android クロスビルドでは `ANDROID_NDK_HOME` の指定が必須です。`ANDROID_ABI` は `aarch64`（既定値）、`armv7a`、`x86_64` から選択できます（ターゲット API レベルは 24）。
 
-### Windows でのビルド
+### Windows 向けクロスビルド
 
-Linux x86_64 で固定 llvm-mingw 20250910 UCRT を使いクロスビルドします。make, curl, tar, xz, bzip2, CMake, pkg-config, Python 3 が必要です。Core・製品・libusb 1.0.30 を同じ toolchain でソースからビルドし、他ABIの静的ライブラリは混ぜません。
+Linux x86_64 環境にて、llvm-mingw UCRT ツールチェーンを用いてクロスビルドを行います。
+
 ```sh
 ./tools/build-windows.sh
 ```
-libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe` / `pixctl.exe` / `pix-ts.exe`）を生成する手順です。
 
-`pixd --exit-on-stdin-eof` は親の標準入力が閉じたときに停止・解放します。Windowsの引数とasset/output pathはUTF-8から変換し、TSはbinaryで書き込みます。クロスビルド・PE監査とWindows runner上の実行proofは別々に確認します。対応sourceからの追加取得なし再ビルドは [docs/releases.md](docs/releases.md) を参照してください。
+libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe`, `pixctl.exe`, `pix-ts.exe`）が生成されます。
 
-## 関連ドキュメント
+## 関連ドキュメント・リリース作業
 
-詳細な設計情報や検証記録については、以下のドキュメントを参照してください。
+詳細な設計情報、検証記録、リリース作業手順については以下のドキュメントを参照してください。
 
-- [architecture.md](docs/architecture.md): 内部構造、USB 転送暗号の復元シーケンス、実装設計の解説
-- [validation.md](docs/validation.md): 実機および CI における検証範囲、テスト結果の詳細
-- [releases.md](docs/releases.md): プライベート Release 向けクロスビルド手順、CI パイプラインの詳細
+- [architecture.md](docs/architecture.md): 内部アーキテクチャ、USB 転送暗号の復元シーケンスの解説
+- [release-validation.md](docs/release-validation.md): リリース前の実機検証手順および判定基準
+- [validation.md](docs/validation.md): 実機および CI における検証記録の詳細
+- [releases.md](docs/releases.md): 配布バイナリのビルド環境および CI パイプラインの詳細
+- [dt295.md](docs/dt295.md): PIX-DT295 の開発状況および制限事項
 
 ## ライセンス・権利表記
 
-- 本プロジェクトの自作ソースコードには **MIT License** を適用しています（本リポジトリ自体は非公開です）。
-- プロジェクト全体を一括して MIT License と表記することはできません。静的リンクおよび同梱される各コンポーネントには、それぞれのライセンスが適用されます。
+- 本プロジェクトの自作ソースコードには **MIT License** を適用しています（詳細は [LICENSE](LICENSE) を参照してください）。
+- 静的リンクおよび同梱される各コンポーネントには、それぞれのライセンスが適用されます。
   - **libusb**: LGPL-2.1-or-later（詳細は `COPYING.libusb` を参照してください）
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
-- 手動同梱の source アーカイブ（`pix-userland-*-source.tar.gz`）には、再ビルド用のアプリソースコードやスクリプトに加え、静的リンクに対応した libusb のソースコードを同梱しています（GitHub が自動生成する Source code アーカイブとは内容が異なります）。
-- 機器用データ（`assets/` 内の `fpga.bin`, `bootstrap.bin`, `validation.bin`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、本プロジェクトの MIT License は適用されません。ソースアーカイブにも含まれません。
+- 機器用データ（`assets/` 内の `fpga.bin`, `bootstrap.bin`, `validation.bin`, `dt295.assets`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、本プロジェクトの MIT License は適用されません。ソースアーカイブにも含まれません。
