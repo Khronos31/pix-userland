@@ -278,8 +278,7 @@ int main()
 {
     const char* temp_parent = ::geteuid() == 0 ? "/run" : std::getenv("HOME");
     if (temp_parent == nullptr || temp_parent[0] != '/') return 1;
-    const std::string root_template = std::string(temp_parent) +
-        "/pix-public-runtime-proof-XXXXXX";
+    const std::string root_template = std::string(temp_parent) + "/p-XXXXXX";
     std::vector<char> root_storage(root_template.begin(), root_template.end());
     root_storage.push_back('\0');
     char* root_value = ::mkdtemp(root_storage.data());
