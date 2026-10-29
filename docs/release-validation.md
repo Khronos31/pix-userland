@@ -439,7 +439,7 @@ TOOL="$WORK/tooling"; mkdir -m 700 -p "$TOOL"
 gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-check.py?ref=$RUNBOOK_REF" > "$TOOL/ts-check.py"
 if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | sha256sum -c -; else printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | shasum -a 256 -c -; fi
 printf '%s\n' "$RUNBOOK_REF $HELPER_SHA256" > "$LOG/ts-helper-version.txt"
-QUALITY_REF='a41e1ff9bd059b1d77441664380a338de683cd9b'; QUALITY_SHA256='69db89cbae511fe849e3eec48524ed8177490002a5c18109acbbeda77a71e57d'
+QUALITY_REF='9d9d998672952e0608728fa35cc94e59eaf1b26e'; QUALITY_SHA256='8414beef6c3735ffa480a907b332a5776d9a7c734dacde9203920e18e4dce190'
 gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-quality-check.py?ref=$QUALITY_REF" > "$TOOL/ts-quality-check.py"
 if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$QUALITY_SHA256" "$TOOL/ts-quality-check.py" | sha256sum -c -; else printf '%s  %s\n' "$QUALITY_SHA256" "$TOOL/ts-quality-check.py" | shasum -a 256 -c -; fi
 printf '%s\n' "$QUALITY_REF $QUALITY_SHA256" > "$LOG/ts-quality-helper-version.txt"
@@ -532,7 +532,7 @@ if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
 ### T15 release前5分TS品質判定
 
 - **適用対象/頻度:** 毎release。T00で固定した同一candidateを、代表Linux x86_64 glibc、Windows x86_64、macOS arm64で実施する。既存の2時間soak、archive回帰、T09を置き換えない。
-- **準備:** 各環境のnative candidateと新しい`$LOG`を用意する。DT181-PU0とDT295を混ぜず、各機種の既存T03 channel/receiver条件で各TSを300秒取得する。
+- **準備:** 各環境のnative candidateと新しい`$LOG`を用意する。DT181-PU0とDT295を混ぜず、各機種の既存T03 channel/receiver条件で各TSを300秒取得する。PIX READMEの受信部節で両機種ともreceiver 0のみ（地デジ・BS・CS共用）と定義され、`src/usb_listing.c`も両modelについて`receivers=1` / `receiver=0`を公開する。従ってT02の公開receiver数照合とT03の公開receiver数分の取得に基づき、各profileの必要集合は`{0}`。
 - **実操作/利用者への依頼:** 各機種のcaptureについて実開始/終了時刻、client exit、TS hashを記録する。各TSで既存T09 `ts-check.py`を実行しJSONと終了値を保存する。parserが非0でも出力を残し、元のT09結果とT15結果を分ける。それぞれの機種の全scan JSONを対応profileへ渡す。
 
 | profile | pattern / 個別TS | TEI合格 | 採用CC合格 |
@@ -541,15 +541,26 @@ if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
 | `pix-dt295` | PIX-DT295の各TS | 0件 | 12件未満 |
 
 各環境で機種ごとに実行する。
-Windows PowerShellでは`python $QualityGate --profile pix-dt181 --environment windows <scan-json...>`、macOSでは`python3 "$TOOL/ts-quality-check.py" --profile pix-dt181 --environment macos <scan-json...>`を使う。DT295も同様に`pix-dt295`を指定し、JSONと終了値を保存する。
+Windows PowerShellでは`python $QualityGate --profile pix-dt181 --environment windows 0=<scan-json>`、macOSでは`python3 "$TOOL/ts-quality-check.py" --profile pix-dt181 --environment macos 0=<scan-json>`を使う。DT295も同様に`pix-dt295`を指定し、JSONと終了値を保存する。
 
 ```sh
 PROFILE='pix-dt181'; ENVIRONMENT='representative-linux'
-if python3 "$TOOL/ts-quality-check.py" --profile "$PROFILE" --environment "$ENVIRONMENT" "$LOG/dt181-rx0.ts-check.json" > "$LOG/t15-$PROFILE.json"; then T15_RC=0; else T15_RC=$?; fi
+if python3 "$TOOL/ts-quality-check.py" --profile "$PROFILE" --environment "$ENVIRONMENT" "0=$LOG/dt181-rx0.ts-check.json" > "$LOG/t15-$PROFILE.json"; then T15_RC=0; else T15_RC=$?; fi
 printf '%s\n' "$T15_RC" > "$LOG/t15-$PROFILE.rc"
 ```
 
-- **期待値/終了値:** 各TSでTEI=0かつ採用`tei_null_excluded` CC<12件が必要。0 packet、scan JSON欠落/不正、一つでも不合格のTSがあれば該当modelのT15全体をFAILとする。T15はTEI/CC判定のみで、既存T09 parser exitやsync/framing判定を上書きしない。
+- **Windows PowerShell T15例:** T09と同じhelperで各TS JSON・stderr・終了値を残す。非0でもthrowせず数値判定へ進み、T09の記録・評価は変更しない。
+
+```powershell
+$Ts = Join-Path $LOG 'dt181-rx0.ts'; $Json = Join-Path $LOG 'dt181-rx0.ts-check.json'; $Err = Join-Path $LOG 'dt181-rx0.ts-check.err'
+& python $Helper $Ts 1> $Json 2> $Err; $ParserRc = $LASTEXITCODE
+$ParserRc | Set-Content (Join-Path $LOG 'dt181-rx0.ts-check.rc')
+$ScanArg = '0=' + $Json
+& python $QualityGate --profile pix-dt181 --environment windows $ScanArg 1> (Join-Path $LOG 't15-pix-dt181.json') 2> (Join-Path $LOG 't15-pix-dt181.err'); $T15Rc = $LASTEXITCODE
+$T15Rc | Set-Content (Join-Path $LOG 't15-pix-dt181.rc')
+```
+
+- **期待値/終了値:** 各TSでTEI=0かつ採用`tei_null_excluded` CC<12件が必要。0 packet、scan JSON欠落/不正、一つでも不合格のTSがあれば該当modelの数値判定をFAILとする。tool出力の`scope`は`tei_cc_numeric_only`、`capture_conditions_verified_by_tool`はfalse、`t15_overall`は`not_determined_by_tool`とし、数値判定とT15全体を混同しない。各modelのT15全体は版別記録で、receiver 0のTSが揃い、記録時刻で300秒以上、client exit・T09 rc/JSON・tool出力が記録され、数値toolがPASSの場合に限り「完了・数値PASS」とする。欠落時は未完了、数値FAIL時は「完了・数値FAIL」として人間の逐次判断を待つ。T15はTEI/CC判定のみで、既存T09 parser exitやsync/framing判定を上書きしない。
 - **停止/cleanup:** 自動再取得・自動修復はしない。不合格で停止して人間の逐次判断を待つ。
 - **記録:** profile/pattern、model、環境、実測capture秒数、candidate/archive/helper ref/hash、TS path/hash、全TSのpacket数/TEI数/TEI率/採用CC、clientとparser終了値、T15 JSON/終了値を版別記録から参照する。人間が不合格を受け入れる場合は理由・判断者・コメント等の参照を別に記録し、測定値・T15 JSONの自動判定を編集しない。
 
