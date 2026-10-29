@@ -1,2 +1,1 @@
-/assets export-ignore
-/assets/** export-ignore
+/.private/assets.enc export-ignore

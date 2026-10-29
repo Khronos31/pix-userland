@@ -6,14 +6,15 @@ embedded_assets=${PIX_EMBEDDED_ASSETS:-OFF}
 embedded_args=()
 case "$embedded_assets" in
     ON|on|1|TRUE|true)
-        dt181_assets=${PIX_DT181_ASSET_DIR:-$root/assets}
-        dt295_assets=${PIX_DT295_ASSET_FILE:-$root/assets/dt295.assets}
-        [[ -d "$dt181_assets" && -f "$dt295_assets" ]] || {
-            echo 'Embedded builds require PIX_DT181_ASSET_DIR and PIX_DT295_ASSET_FILE' >&2
+        dt181_firmware=${PIX_DT181_FIRMWARE_FILE:-$root/firmware/dt181.bin}
+        dt295_firmware=${PIX_DT295_FIRMWARE_FILE:-$root/firmware/dt295.bin}
+        [[ -f "$dt181_firmware" && -f "$dt295_firmware" ]] || {
+            echo 'Embedded builds require PIX_DT181_FIRMWARE_FILE and PIX_DT295_FIRMWARE_FILE' >&2
             exit 2
         }
         embedded_args=(-DPIX_EMBEDDED_ASSETS=ON
-            "-DPIX_DT181_ASSET_DIR=$dt181_assets" "-DPIX_DT295_ASSET_FILE=$dt295_assets")
+            "-DPIX_DT181_FIRMWARE_FILE=$dt181_firmware"
+            "-DPIX_DT295_FIRMWARE_FILE=$dt295_firmware")
         embedded_assets=ON
         ;;
     OFF|off|0|FALSE|false) embedded_assets=OFF;;

@@ -6,11 +6,13 @@ import io
 import json
 from pathlib import Path
 import struct
+import sys
 import tarfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
 
 
 def load_script(name, module_name):
@@ -80,19 +82,13 @@ def source_members(commit):
         "third_party/dtv-userland-core/adapters/host_ts/COPYING": b"gpl",
         "third_party/libusb-1.0.30.tar.bz2": SYNTHETIC_LIBUSB,
     }
-    dt181 = {}
-    for name, size in verify.DT181_ASSET_SIZES.items():
-        data = bytes([len(name)]) * size
-        files["assets/" + name] = data
-        dt181[name] = {"size": size, "sha256": hashlib.sha256(data).hexdigest()}
-    dt295_bytes = synthetic_bundle()
-    files["assets/dt295.assets"] = dt295_bytes
-    asset_inputs = {
-        "dt181": {"provenance": verify.pack.DT181_PROVENANCE, "files": dt181},
-        "dt295": {"provenance": verify.pack.DT295_PROVENANCE,
-                  "file": {"name": "dt295.assets", "size": len(dt295_bytes),
-                           "sha256": hashlib.sha256(dt295_bytes).hexdigest()}},
-    }
+    for name in ("dt181.bin", "dt295.bin", "manifest.json"):
+        files["firmware/" + name] = (ROOT / "firmware" / name).read_bytes()
+    files["firmware/metadata/dt181-source.json"] = (ROOT / "firmware/metadata/dt181-source.json").read_bytes()
+    files["firmware/metadata/dt295-preservation.json"] = (ROOT / "firmware/metadata/dt295-preservation.json").read_bytes()
+    files["firmware/metadata/dt295-satellite-generation.json"] = (ROOT / "firmware/metadata/dt295-satellite-generation.json").read_bytes()
+    files["firmware/preserved/verified-ts-iv.bin"] = (ROOT / "firmware/preserved/verified-ts-iv.bin").read_bytes()
+    asset_inputs = verify._source_asset_records(files, "")
     identity = {
         "repository_commit": commit, "repository_tree": "b" * 40,
         "dtv_userland_core_commit": verify.CORE_PIN, "dtv_userland_core_tree": "c" * 40,
@@ -149,12 +145,10 @@ def make_release(tmp_path, monkeypatch):
     return root, commit
 
 
-def make_dt181_assets(tmp_path):
-    assets = tmp_path / "dt181"
-    assets.mkdir()
-    for name, size in finalize.DT181_SIZES.items():
-        (assets / name).write_bytes(bytes([len(name)]) * size)
-    return assets
+def make_dt181_firmware(tmp_path):
+    firmware = tmp_path / "dt181.bin"
+    firmware.write_bytes((ROOT / "firmware/dt181.bin").read_bytes())
+    return firmware
 
 
 class TestDT295Packaging(unittest.TestCase):
@@ -178,9 +172,9 @@ class TestDT295Packaging(unittest.TestCase):
       root, commit = make_release(tmp_path, self)
       source_path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-source.tar.gz"
       source_before = source_path.read_bytes()
-      dt181 = make_dt181_assets(tmp_path)
-      bundle_path = tmp_path / "dt295.assets"
-      bundle_path.write_bytes(synthetic_bundle())
+      dt181 = make_dt181_firmware(tmp_path)
+      bundle_path = tmp_path / "dt295.bin"
+      bundle_path.write_bytes((ROOT / "firmware/dt295.bin").read_bytes())
 
       finalize.finalize_private_release(dt181, bundle_path, root=root)
 
@@ -190,9 +184,9 @@ class TestDT295Packaging(unittest.TestCase):
         metadata = json.loads(contents[prefix + "release-info.json"])
         expected = target == "darwin-arm64"
         self.assertIs(metadata["dt295_assets"], expected)
-        self.assertEqual((prefix + "assets/dt295.assets" in contents), expected)
+        self.assertEqual((prefix + "firmware/dt295.bin" in contents), expected)
         if expected:
-            self.assertEqual(contents[prefix + "assets/dt295.assets"], bundle_path.read_bytes())
+            self.assertEqual(contents[prefix + "firmware/dt295.bin"], bundle_path.read_bytes())
       self.assertEqual(source_path.read_bytes(), source_before)
 
       verify.verify_release(root=root, with_assets=True, with_dt295_assets=True,
@@ -203,12 +197,12 @@ class TestDT295Packaging(unittest.TestCase):
     with __import__("tempfile").TemporaryDirectory() as temp:
       tmp_path = Path(temp)
       root, commit = make_release(tmp_path, self)
-      finalize.finalize_private_release(make_dt181_assets(tmp_path), root=root)
+      finalize.finalize_private_release(make_dt181_firmware(tmp_path), root=root)
       for target in finalize.pack.TARGETS:
         contents = read_archive(root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz")
         prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
         self.assertIs(json.loads(contents[prefix + "release-info.json"])["dt295_assets"], False)
-        self.assertFalse(any(name.startswith(prefix + "assets/dt295") for name in contents))
+        self.assertFalse(any(name.startswith(prefix + "firmware/dt295") for name in contents))
       verify.verify_release(root=root, with_assets=True, commit=commit,
                           source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
 
@@ -218,10 +212,10 @@ class TestDT295Packaging(unittest.TestCase):
       tmp_path = Path(temp)
       root, _ = make_release(tmp_path, self)
       before = {path.name: path.read_bytes() for path in (root / "dist").glob("*.tar.gz")}
-      invalid = tmp_path / "invalid.assets"
-      invalid.write_bytes(synthetic_bundle() + b"extra")
-      with self.assertRaisesRegex(ValueError, "trailing"):
-          finalize.finalize_private_release(make_dt181_assets(tmp_path), invalid, root=root)
+      invalid = tmp_path / "invalid.bin"
+      invalid.write_bytes((ROOT / "firmware/dt295.bin").read_bytes() + b"extra")
+      with self.assertRaisesRegex(ValueError, "size"):
+          finalize.finalize_private_release(make_dt181_firmware(tmp_path), invalid, root=root)
       after = {path.name: path.read_bytes() for path in (root / "dist").glob("*.tar.gz")}
       self.assertEqual(after, before)
 
@@ -232,12 +226,12 @@ class TestDT295Packaging(unittest.TestCase):
     with __import__("tempfile").TemporaryDirectory() as temp:
       tmp_path = Path(temp)
       root, commit = make_release(tmp_path, self)
-      bundle_path = tmp_path / "dt295.assets"
-      bundle_path.write_bytes(synthetic_bundle())
-      finalize.finalize_private_release(make_dt181_assets(tmp_path), bundle_path, root=root)
+      bundle_path = tmp_path / "dt295.bin"
+      bundle_path.write_bytes((ROOT / "firmware/dt295.bin").read_bytes())
+      finalize.finalize_private_release(make_dt181_firmware(tmp_path), bundle_path, root=root)
       archive_path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-darwin-arm64.tar.gz"
       members = read_archive(archive_path)
-      asset_name = f"pix-userland-{finalize.pack.VERSION}-darwin-arm64/assets/dt295.assets"
+      asset_name = f"pix-userland-{finalize.pack.VERSION}-darwin-arm64/firmware/dt295.bin"
       bad_bundle = bytearray(members[asset_name])
       bad_bundle[-1] ^= 1
       members[asset_name] = bytes(bad_bundle)
@@ -318,7 +312,10 @@ class TestDT295Packaging(unittest.TestCase):
                      "tools/build-windows.sh", "core-integration/tests/windows_os_thread_proof.c",
                      "tests/test_windows_runtime.py"):
       self.assertIn(required, names)
-    for required in ("assets/fpga.bin", "assets/bootstrap.bin", "assets/validation.bin", "assets/dt295.assets"):
+    for required in ("firmware/dt181.bin", "firmware/dt295.bin", "firmware/manifest.json",
+                     "firmware/metadata/dt181-source.json", "firmware/metadata/dt295-preservation.json",
+                     "firmware/metadata/dt295-satellite-generation.json",
+                     "firmware/preserved/verified-ts-iv.bin"):
       self.assertIn(required, names)
     self.assertNotIn(".private/assets.enc", names)
 

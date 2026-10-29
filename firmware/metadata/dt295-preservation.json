@@ -1,6 +1,6 @@
 {
   "preserved_unix": 1792153545.135467,
-  "purpose": "Owner explicitly requested PRIVATE repository preservation of firmware assets on 2026-10-16",
+  "purpose": "Preserved original terrestrial DT295 bundle hash and verified TS IV as historical provenance on 2026-10-16; the old bundle is rejected by the current runtime manifest",
   "dt295_bundle_sha256": "5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e",
   "files": [
     {

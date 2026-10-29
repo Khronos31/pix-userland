@@ -60,8 +60,6 @@ struct RuntimeFailureDiagnostic final {
     bool actual_is_lower_bound = false;
 };
 
-dtv::userland::Result<std::unique_ptr<Assets>> load_assets(
-    const char* directory, RuntimeFailureDiagnostic* diagnostic = nullptr) noexcept;
 /* Copy exact-size borrowed bytes into the existing owned, secure-clearable Assets object. */
 dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
     const std::uint8_t* firmware, std::size_t firmware_size,
@@ -72,7 +70,7 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
 class Family final : public dtv::userland::host_runtime::EnclosureFamily {
 public:
     static dtv::userland::Result<std::unique_ptr<Family>> create(
-        const LocatedDevice&, const char* assets_directory,
+        const LocatedDevice&, const char* firmware_path,
         RuntimeFailureDiagnostic* diagnostic = nullptr) noexcept;
     ~Family() noexcept override;
     Family(const Family&) = delete;

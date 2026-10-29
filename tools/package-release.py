@@ -3,6 +3,7 @@
 import argparse, gzip, hashlib, io, json, re, subprocess, tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from firmware_bundle import read_manifest, verify_bundle
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ('linux-x86_64', 'linux-aarch64', 'darwin-arm64', 'android-aarch64', 'android-armv7a', 'android-x86_64', 'windows-x64')
 VERSION = re.search(r'#define VERSION "([0-9]+\.[0-9]+\.[0-9]+)"', (ROOT/'include/version.h').read_text()).group(1)
@@ -14,15 +15,13 @@ TOP_FILES = {'Makefile', 'README.md', 'LICENSE', 'COPYING.libusb', 'THIRD_PARTY_
              'pix-dt181-consumer.cpp', 'pix-dt181-consumer.h', 'pix-dt181-receiver-adapter.cpp', 'pix-dt181-receiver-adapter.h',
              'pix-dt295-receiver-adapter.cpp', 'pix-dt295-receiver-adapter.h'}
 EXTENSIONS = {'.c', '.h', '.cpp', '.sh', '.py', '.md', '.json', '.yml', '.rules', '.conf'}
-SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','assets'}
+SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','firmware'}
 
 SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.txt', 'core-integration/dtv-userland-core.revision',
                 'packaging/pix-termux',
-                'assets/fpga.bin', 'assets/bootstrap.bin', 'assets/validation.bin', 'assets/dt295.assets'}
-DT181_ASSETS = ('fpga.bin', 'bootstrap.bin', 'validation.bin')
-DT181_SIZES = {'fpga.bin': 699673, 'bootstrap.bin': 16, 'validation.bin': 64}
+                'firmware/dt181.bin', 'firmware/dt295.bin', 'firmware/preserved/verified-ts-iv.bin'}
 DT181_PROVENANCE = 'StationTV/Pixela device data; not covered by the PIX MIT license'
-DT295_PROVENANCE = 'Private runtime bundle described by docs/dt295.md; not covered by the PIX MIT license'
+DT295_PROVENANCE = 'Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX MIT license'
 
 def git_value(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
@@ -52,22 +51,20 @@ def source_files():
             result.append((rel.as_posix(), f))
     return sorted(result)
 
-def asset_input_records(dt181_directory, dt295_path):
-    assets = {}
-    dt181 = {}
-    for name in DT181_ASSETS:
-        data = (Path(dt181_directory)/name).read_bytes()
-        if len(data) != DT181_SIZES[name]: raise ValueError(f'Invalid DT181 asset size: {name}')
-        dt181[name] = {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
-    data = Path(dt295_path).read_bytes()
-    assets['dt181'] = {'provenance': DT181_PROVENANCE, 'files': dt181}
-    assets['dt295'] = {'provenance': DT295_PROVENANCE,
-                       'file': {'name': 'dt295.assets', 'size': len(data),
-                                'sha256': hashlib.sha256(data).hexdigest()}}
-    return assets
+def asset_input_records(dt181_path, dt295_path):
+    canonical = read_manifest()
+    records = {}
+    for model, path, provenance in (('dt181', dt181_path, DT181_PROVENANCE),
+                                    ('dt295', dt295_path, DT295_PROVENANCE)):
+        data = Path(path).read_bytes()
+        expected = verify_bundle(model, data, canonical)
+        records[model] = {'provenance': provenance,
+                          'file': {'name': expected['file'], 'size': len(data),
+                                   'sha256': hashlib.sha256(data).hexdigest()}}
+    return records
 
 def source_asset_inputs(root=ROOT):
-    return asset_input_records(root/'assets', root/'assets/dt295.assets')
+    return asset_input_records(root/'firmware/dt181.bin', root/'firmware/dt295.bin')
 
 def embedded_build_metadata(build_info, manifest, manifest_bytes):
     lines = build_info.decode('utf-8').splitlines()
@@ -88,13 +85,13 @@ def embedded_build_metadata(build_info, manifest, manifest_bytes):
             model, name, size, digest = match.groups()
             if name in records.setdefault(model, {}): raise ValueError('Duplicate embedded asset build-info record')
             records[model][name] = {'size': int(size), 'sha256': digest}
-    expected_models = {'dt181': set(DT181_ASSETS), 'dt295': {'dt295.assets'}}
+    expected_models = {'dt181': {'dt181.bin'}, 'dt295': {'dt295.bin'}}
     if set(records) != set(expected_models) or any(set(records[m]) != names for m, names in expected_models.items()):
         raise ValueError('Incomplete embedded asset build-info records')
     expected_assets = {
-        'dt181': {'provenance': DT181_PROVENANCE, 'files': records['dt181']},
-        'dt295': {'provenance': DT295_PROVENANCE,
-                  'file': {'name': 'dt295.assets', **records['dt295']['dt295.assets']}},
+        model: {'provenance': provenance,
+                'file': {'name': next(iter(records[model])), **records[model][next(iter(records[model]))]}}
+        for model, provenance in (('dt181', DT181_PROVENANCE), ('dt295', DT295_PROVENANCE))
     }
     embedded = {'schema': 1, 'generator': 'tools/embed-assets.py', **values, 'assets': expected_assets}
     if set(values) != {'source_revision', 'dtv_userland_core_revision', 'toolchain', 'manifest_sha256'}:
@@ -138,7 +135,7 @@ def package(target, binary_dir=None, core_source_root=None, output_dir=None):
         metadata['device_assets'] = True
     required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions','packaging/pix-termux'}
     if target == 'source':
-        required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp','tools/build-windows.sh','include/os.h','src/dt181_capture_host.c','pix-dt181-consumer.cpp','core-integration/tests/windows_os_thread_proof.c','tests/test_windows_runtime.py','assets/fpga.bin','assets/bootstrap.bin','assets/validation.bin','assets/dt295.assets'}
+        required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp','tools/build-windows.sh','include/os.h','src/dt181_capture_host.c','pix-dt181-consumer.cpp','core-integration/tests/windows_os_thread_proof.c','tests/test_windows_runtime.py','firmware/dt181.bin','firmware/dt295.bin','firmware/manifest.json','firmware/metadata/dt181-source.json','firmware/metadata/dt295-preservation.json','firmware/metadata/dt295-satellite-generation.json','firmware/preserved/verified-ts-iv.bin'}
     assert required <= {name for name, _, _ in members}, 'Missing package documentation or licenses'
     if target == 'source':
         usb = ROOT/'build/deps/libusb-1.0.30.tar.bz2'

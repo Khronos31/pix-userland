@@ -52,15 +52,6 @@ bool same_identity(const dtv::userland::detail::Attachment& left,
 
 }  // namespace
 
-ReceiverAdapter::ReceiverAdapter(const char* assets_directory, const usb_selector& selector,
-                                 Clock& clock, ReceiverId receiver,
-                                 std::size_t queue_packets, int device_fd) noexcept
-    : clock_(clock), receiver_(receiver), queue_packets_(queue_packets)
-{
-    io_.owner = this;
-    initialize(assets_directory, selector, device_fd);
-}
-
 ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
                                  const usb_selector& selector, Clock& clock,
                                  ReceiverId receiver, std::size_t queue_packets,
@@ -74,22 +65,6 @@ ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_
 ReceiverAdapter::~ReceiverAdapter() noexcept
 {
     (void)shutdown();
-}
-
-void ReceiverAdapter::initialize(const char* assets_directory,
-                                 const usb_selector& selector, int device_fd) noexcept
-{
-    init_error_ = Error::INVALID_ARGUMENT;
-    if (assets_directory == nullptr || assets_directory[0] == '\0') return;
-    std::string path(assets_directory);
-    if (!path.empty() && path.back() != '/') path.push_back('/');
-    path += "dt295.assets";
-    char error[256]{};
-    if (dt295_assets_load(path.c_str(), &assets_, error, sizeof(error)) != 0) {
-        std::snprintf(init_detail_.data(), init_detail_.size(), "%s", error);
-        return;
-    }
-    initialize_device(selector, device_fd);
 }
 
 void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_size,

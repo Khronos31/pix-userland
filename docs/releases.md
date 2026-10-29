@@ -8,6 +8,10 @@
 
 `include/version.h` の版は変更していません。この移行は正式 Release・タグ・版更新を含みません。
 
+Release のバイナリアーカイブは DT181 および DT295 の標準バンドルを `pixd` に内蔵し、`embedded-assets.json` に機種別 SHA-256 とソース来歴を記録します。実行用バンドルを別の外部ファイルとして二重に同梱することはありません。外部 `--firmware` オプションは任意で、ソースアーカイブに含まれる機種別 `.bin` などを指定できます。
+
+GitHub 自動生成の Source code アーカイブと、`tools/package-release.py source` が生成する公式の対応ソースパッケージは構成が異なります。どちらも Git 追跡された `firmware/dt181.bin`、衛星テーブルを含む標準 `firmware/dt295.bin`、マニフェスト、メタデータ、保存 IV を含みます。ただし、GitHub 自動生成アーカイブは固定バージョンの Core / libusb ソーススナップショットを含まないため、ネットワーク接続のない完全なオフライン再ビルドには対応ソースパッケージを使用します。暗号化された生成用入力 `.private/assets.enc` はどちらのアーカイブにも含まれません。
+
 ### 3コマンド配布の検証状況
 
 | 対象 | 配線 | 確認済み | 未確認 |
@@ -20,7 +24,7 @@
 
 実機（DT181 / DT295）での受信は、この配布接続の検証範囲に含めません。
 
-リポジトリは所有者が承認・実施済みのPUBLIC状態です。可視性は変更しません。CIは開始時、成果物保存前、機器データ復元前、Releaseへの保存・発行前に対象リポジトリとPUBLIC状態を確認します（`tools/check-private.sh` は履歴上の名前を維持）。素材の追加許可や新たな権利判断を意味しません。
+リポジトリは所有者が承認・実施済みのPUBLIC状態です。可視性は変更しません。今回のowner instructionが標準runtime bundleの追跡・archive収録を指定しています。これは第三者のlicense確認済みを意味しません。CIは開始時、成果物保存前、機器データ復元前、Releaseへの保存・発行前に対象リポジトリとPUBLIC状態を確認します（`tools/check-private.sh` は履歴上の名前を維持）。
 操作対象も `Khronos31/pix-userland` に限定します。
 
 ## v0.1.4
@@ -86,15 +90,11 @@ CIに実機は接続していないため、CI成功は各OSでの受信を保�
 
 ## 実機データの保管
 
-所有者が許可した既存assetsだけを最終Releaseバイナリに同梱します。PUBLIC追従で追加の素材・鍵・driver表・rawを増やしません。
-`.private/assets.enc` はAES-256-GCMで認証暗号化した入力です。復元キーはGitHub Actions secretの `PIX_ASSETS_KEY` に保存し、Gitには入れません。
-キーはランダム32バイトをBase64化したものです。生成や更新時にログへ出力しないでください。
-`tools/assets-bundle.py seal ASSET_DIR .private/assets.enc` はこの環境変数を読み取ります。
-キーを更新する場合は暗号化ファイルとActions secretをセットで更新します。
+所有者指示（decision 6490053064）に従い、標準の `firmware/dt181.bin` および `firmware/dt295.bin` とマニフェスト・来歴メタデータを Git 追跡します。DT295 の標準バンドルは衛星レジスターテーブルを含みます。Release ビルドはこの 2 つのバンドルを検証して `pixd` に埋め込み、各バイナリアーカイブ内の `embedded-assets.json` と `build-info.txt` にファイルハッシュとビルド識別情報を記録します。Release ジョブで暗号化素材を復号することはありません。
 
-最終Releaseジョブだけが復元し、3つの名前・サイズを検証してバイナリアーカイブへ追加します。
-中間CI artifactsはassetsなしです。復元データをコンソールへ表示しません。
-ソースやテストデータは自作/合成のものを使い、メーカー由来assetsにMITライセンスを付けません。
+GitHub 自動生成の Source code アーカイブおよび対応ソースパッケージは、標準バンドル、マニフェスト、メタデータ、保存 IV を含みます。固定バージョンの Core / libusb ソーススナップショットが必要なネットワークなしのソース再ビルドには対応ソースパッケージを使用します。暗号化された `.private/assets.enc` は旧 DT181 復元用の生成入力であり、通常の実行やビルドには不要なため両ソースアーカイブから除外します。復元キーは GitHub Actions secret `PIX_ASSETS_KEY` に保存し、Git やログには出力しません。必要な場合のコマンドは `python3 tools/assets-bundle.py seal firmware/dt181.bin .private/assets.enc` および `python3 tools/assets-bundle.py open .private/assets.enc /path/to/output` です。
+
+メーカー由来のバンドルは本プロジェクトの MIT License の対象外です。`firmware/metadata/dt295-satellite-generation.json` に標準ハッシュと正規入力の来歴を記録していますが、これは第三者の再配布権を付与するものではありません。適用される第三者条件に従ってください。raw キャプチャ、録画 TS、セッションデータや未使用のドライバ・アーカイブは Git や Release に追加しません。テストデータには合成 fixture を使用します。
 
 ## 再ビルドと再リンク
 

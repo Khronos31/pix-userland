@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "standard_bundle": {
+    "file": "firmware/dt295.bin",
+    "size": 1839100,
+    "sha256": "3cabe15f585a8a7a7d7b9b3db548b677b0732c13926dc3a2b5270acf1bc6ffc8"
+  },
+  "previous_known_bundle_sha256": "5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e",
+  "generator": "tools/prepare-dt295-assets.py",
+  "official_source": {
+    "product": "PIX-DT295 StationTV X",
+    "version": "1.20.3000.2",
+    "archive": "stationtvx_updater12030002.zip",
+    "url": "https://www.pixela.co.jp/products/tv_capture/pix_dt460/data/stationtvx_updater12030002.zip",
+    "files": {
+      "driver": {
+        "path": "StationTV X_UpdateTool_1.20.3000.2/Driver/selene/usb/x64/pxmb86m0x_usb.sys",
+        "sha256": "46889d2f8b046485a0cc25451c1691ca87b13601d0566c807ee6e1c9084fc878"
+      },
+      "idle": {
+        "path": "StationTV X_UpdateTool_1.20.3000.2/Driver/selene/usb/x64/mb86m01_assp_osec_idle.bin",
+        "sha256": "3c4721204a987a5e8a818be4ac14ee2709a4786413a7ef77ddb33573370dd9d3"
+      },
+      "trc": {
+        "path": "StationTV X_UpdateTool_1.20.3000.2/Driver/selene/usb/x64/mb86m01_assp_osec_trc_m_h.bin",
+        "sha256": "a3520f60e80f08008621dcf44679474906e43a4de36770d769cd7642b19ddd0b"
+      }
+    }
+  },
+  "reused_section_indexes": {
+    "base_bundle_sha256": "5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e",
+    "normalized_fields": 4,
+    "key_request_words": 5,
+    "ts_iv": 6
+  },
+  "driver_material_change": {
+    "virtual_address": "0x845a0",
+    "bytes": 144,
+    "different_bytes": 33
+  },
+  "license_note": "Manufacturer-derived data; not covered by the PIX MIT license. Consult the applicable PIXELA license and obtain any permissions required for redistribution."
+}

@@ -78,6 +78,7 @@ test: pix-ts-legacy tests/test-dt295-protocol tests/test-dt295-satellite tests/t
 	$(PYTHON) tests/test_dt295_packaging.py
 	$(PYTHON) tests/test_legacy_source_copy.py
 	$(PYTHON) tests/test_dt295_assets.py
+	$(PYTHON) tests/test_firmware_bundle.py
 clean:
 	rm -f pix-ts-legacy pix-ts-legacy.exe tests/*.exe src/*.o src/*.d tests/*.o tests/*.d tests/test-crypto tests/test-transport tests/test-diagnostic tests/test-usb-log tests/test-usb-selector tests/test-usb-listing tests/test-compat tests/test-usb-restart tests/test-dt295 tests/test-dt295-routes tests/test-dt295-stream tests/test-ts-output tests/test-dt295-capture tests/test-dt295-protocol tests/test-dt295-satellite tests/test-dt295-assets-c
 -include $(OBJ:.o=.d) tests/test_crypto.d tests/test_transport.d tests/test_usb_log.d

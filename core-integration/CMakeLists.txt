@@ -154,13 +154,23 @@ endif()
 
 set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(PIX_FIRMWARE_MANIFEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/firmware-manifest")
+set(PIX_FIRMWARE_MANIFEST_HEADER "${PIX_FIRMWARE_MANIFEST_DIR}/pix_firmware_manifest_generated.h")
+add_custom_command(
+    OUTPUT "${PIX_FIRMWARE_MANIFEST_HEADER}"
+    COMMAND "${Python3_EXECUTABLE}" "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+        header --output "${PIX_FIRMWARE_MANIFEST_HEADER}"
+    DEPENDS "${PIX_SOURCE_DIR}/firmware/manifest.json"
+            "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+    VERBATIM)
 option(PIX_EMBEDDED_ASSETS "Embed the authorized DT181 and DT295 assets in pixd" OFF)
-set(PIX_DT181_ASSET_DIR "" CACHE PATH "Private directory containing DT181 assets")
-set(PIX_DT295_ASSET_FILE "" CACHE FILEPATH "Private DT295 asset bundle")
+set(PIX_DT181_FIRMWARE_FILE "" CACHE FILEPATH "Validated DT181 firmware bundle")
+set(PIX_DT295_FIRMWARE_FILE "" CACHE FILEPATH "Validated DT295 firmware bundle")
 
 if(PIX_EMBEDDED_ASSETS)
-    if(NOT IS_DIRECTORY "${PIX_DT181_ASSET_DIR}" OR NOT EXISTS "${PIX_DT295_ASSET_FILE}")
-        message(FATAL_ERROR "PIX_EMBEDDED_ASSETS requires DT181 and DT295 asset inputs")
+    if(NOT EXISTS "${PIX_DT181_FIRMWARE_FILE}" OR NOT EXISTS "${PIX_DT295_FIRMWARE_FILE}")
+        message(FATAL_ERROR "PIX_EMBEDDED_ASSETS requires DT181 and DT295 firmware files")
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(PIX_EMBEDDED_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/embedded-assets")
@@ -195,26 +205,28 @@ if(PIX_EMBEDDED_ASSETS)
         OUTPUT "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}"
                "${PIX_EMBEDDED_ASSET_MANIFEST}"
         COMMAND "${Python3_EXECUTABLE}" "${PIX_SOURCE_DIR}/tools/embed-assets.py"
-            --dt181-assets "${PIX_DT181_ASSET_DIR}"
-            --dt295-assets "${PIX_DT295_ASSET_FILE}"
+            --dt181-firmware "${PIX_DT181_FIRMWARE_FILE}"
+            --dt295-firmware "${PIX_DT295_FIRMWARE_FILE}"
             --output-dir "${PIX_EMBEDDED_ASSET_DIR}"
             --source-revision "${PIX_SOURCE_REVISION}"
             --core-revision "${PIX_CORE_REVISION}"
             --toolchain "${PIX_EMBEDDED_TOOLCHAIN}"
         DEPENDS
             "${PIX_SOURCE_DIR}/tools/embed-assets.py"
+            "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+            "${PIX_SOURCE_DIR}/firmware/manifest.json"
             "${PIX_SOURCE_DIR}/tools/finalize-private-release.py"
-            "${PIX_DT181_ASSET_DIR}/fpga.bin"
-            "${PIX_DT181_ASSET_DIR}/bootstrap.bin"
-            "${PIX_DT181_ASSET_DIR}/validation.bin"
-            "${PIX_DT295_ASSET_FILE}"
+            "${PIX_DT181_FIRMWARE_FILE}"
+            "${PIX_DT295_FIRMWARE_FILE}"
         VERBATIM)
 endif()
 
-add_library(pix_product_runtime STATIC pix_runtime.cpp)
+add_library(pix_product_runtime STATIC pix_runtime.cpp pix-firmware-bundle.cpp
+    "${PIX_FIRMWARE_MANIFEST_HEADER}")
 target_include_directories(pix_product_runtime PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}"
-    PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+    PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src"
+    "${PIX_FIRMWARE_MANIFEST_DIR}")
 if(PIX_EMBEDDED_ASSETS)
     target_sources(pix_product_runtime PRIVATE
         "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}")
@@ -253,6 +265,15 @@ if(PIX_EMBEDDED_ASSETS)
     target_compile_definitions(pix_asset_memory_proof PRIVATE PIX_EMBEDDED_ASSETS)
 endif()
 add_test(NAME pix_asset_memory_proof COMMAND pix_asset_memory_proof)
+add_executable(pix_firmware_bundle_proof tests/pix_firmware_bundle_proof.cpp)
+target_compile_features(pix_firmware_bundle_proof PRIVATE cxx_std_17)
+target_compile_options(pix_firmware_bundle_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_firmware_bundle_proof PRIVATE pix_product_runtime)
+add_test(NAME pix_firmware_bundle_proof
+    COMMAND pix_firmware_bundle_proof
+        "${PIX_SOURCE_DIR}/firmware/dt181.bin"
+        "${PIX_SOURCE_DIR}/firmware/dt295.bin")
 add_test(NAME pix_android_launcher
     COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh")
 
@@ -337,6 +358,8 @@ target_include_directories(pix_public_runtime_proof PRIVATE
 target_compile_definitions(pix_public_runtime_proof PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
     PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin"
+    PIX_FIRMWARE_DT295_PATH="${PIX_SOURCE_DIR}/firmware/dt295.bin"
     PIXTS_PATH="$<TARGET_FILE:pix-ts>" PIXCTL_PATH="$<TARGET_FILE:pixctl>")
 target_compile_features(pix_public_runtime_proof PRIVATE cxx_std_17)
 target_link_libraries(pix_public_runtime_proof PRIVATE pix_product_runtime Threads::Threads)
@@ -354,7 +377,8 @@ endif()
 if(PIX_EMBEDDED_ASSETS AND NOT WIN32)
 add_executable(pix_embedded_runtime_proof tests/pix_embedded_runtime_proof.cpp)
 target_compile_definitions(pix_embedded_runtime_proof PRIVATE
-    PIXD_PATH="$<TARGET_FILE:pixd_fixture>")
+    PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin")
 target_compile_features(pix_embedded_runtime_proof PRIVATE cxx_std_17)
 target_compile_options(pix_embedded_runtime_proof PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_dependencies(pix_embedded_runtime_proof pixd_fixture)

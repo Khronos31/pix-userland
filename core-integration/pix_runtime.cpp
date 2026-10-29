@@ -5,6 +5,8 @@
 #endif
 
 #include "pix-dt295-receiver-adapter.h"
+#include "pix-firmware-bundle.h"
+#include "pix_firmware_manifest_generated.h"
 
 #include "dtv/userland/identity.h"
 #include "dtv/userland/wire.h"
@@ -27,6 +29,7 @@
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 #ifdef _WIN32
 #include "px4_windows_args.h"
 #include <io.h>
@@ -752,31 +755,6 @@ Assets::~Assets() noexcept
     secure_clear(validation.data(), validation.size());
 }
 
-dtv::userland::Result<std::unique_ptr<Assets>> load_assets(
-    const char* directory, RuntimeFailureDiagnostic* diagnostic) noexcept
-{
-    if (diagnostic != nullptr) *diagnostic = RuntimeFailureDiagnostic{};
-    if (directory == nullptr || directory[0] == '\0') {
-        set_asset_diagnostic(diagnostic, "assets", "--assets directory is empty");
-        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
-    }
-    std::unique_ptr<Assets> assets(new (std::nothrow) Assets());
-    if (!assets) return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
-    std::string root(directory);
-    if (!root.empty() && root.back() != '/') root.push_back('/');
-    assets->firmware = static_cast<std::uint8_t*>(std::malloc(699673U));
-    if (assets->firmware == nullptr)
-        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INTERNAL);
-    if (!load_exact(root + "fpga.bin", "fpga.bin", assets->firmware, 699673U,
-                    diagnostic) ||
-        !load_exact(root + "bootstrap.bin", "bootstrap.bin", assets->bootstrap.data(),
-                    assets->bootstrap.size(), diagnostic) ||
-        !load_exact(root + "validation.bin", "validation.bin", assets->validation.data(),
-                    assets->validation.size(), diagnostic))
-        return dtv::userland::Result<std::unique_ptr<Assets>>::failure(Error::INVALID_ARGUMENT);
-    return dtv::userland::Result<std::unique_ptr<Assets>>::success(std::move(assets));
-}
-
 dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
     const std::uint8_t* firmware, std::size_t firmware_size,
     const std::uint8_t* bootstrap, std::size_t bootstrap_size,
@@ -816,13 +794,53 @@ dtv::userland::Result<std::unique_ptr<Assets>> load_assets_bytes(
     return dtv::userland::Result<std::unique_ptr<Assets>>::success(std::move(assets));
 }
 
+namespace {
+
+struct FirmwareBuffer final {
+    std::vector<std::uint8_t> bytes;
+    ~FirmwareBuffer() noexcept
+    {
+        if (!bytes.empty()) secure_clear(bytes.data(), bytes.size());
+    }
+};
+
+bool verify_bundle_bytes(Model model, const std::uint8_t* bytes, std::size_t size,
+                         FirmwareBundleView& view,
+                         RuntimeFailureDiagnostic* diagnostic) noexcept
+{
+    char error[192]{};
+    const FirmwareModel firmware_model = model == Model::dt295
+        ? FirmwareModel::dt295 : FirmwareModel::dt181;
+    if (verify_firmware_bundle(firmware_model, bytes, size, view,
+                               error, sizeof(error))) return true;
+    set_asset_diagnostic(diagnostic, "firmware", error);
+    return false;
+}
+
+bool read_firmware_file(const char* path, Model model,
+                        std::vector<std::uint8_t>& bytes,
+                        FirmwareBundleView& view,
+                        RuntimeFailureDiagnostic* diagnostic) noexcept
+{
+    if (path == nullptr || path[0] == '\0') {
+        set_asset_diagnostic(diagnostic, "firmware", "--firmware FILE is required");
+        return false;
+    }
+    const std::size_t expected = model == Model::dt295
+        ? PIX_DT295_BUNDLE_SIZE : PIX_DT181_BUNDLE_SIZE;
+    bytes.resize(expected);
+    if (!load_exact(path, "firmware", bytes.data(), bytes.size(), diagnostic)) return false;
+    return verify_bundle_bytes(model, bytes.data(), bytes.size(), view, diagnostic);
+}
+
+}  // namespace
+
 dtv::userland::Result<std::unique_ptr<Family>> Family::create(
-    const LocatedDevice& device, const char* assets_directory,
+    const LocatedDevice& device, const char* firmware_path,
     RuntimeFailureDiagnostic* diagnostic) noexcept
 {
     if (diagnostic != nullptr) *diagnostic = RuntimeFailureDiagnostic{};
 #if defined(PIX_EMBEDDED_ASSETS)
-    (void)assets_directory;
     const char* asset_manifest = pix_embedded_assets_manifest();
     if (asset_manifest == nullptr || asset_manifest[0] == '\0') {
         set_asset_diagnostic(diagnostic, "embedded assets",
@@ -837,25 +855,43 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     family->impl_->model = device.model;
     if (device.model == Model::dt295) {
+        FirmwareBuffer external_bundle;
+        FirmwareBundleView bundle_view{};
+        const std::uint8_t* bundle_data = nullptr;
+        std::size_t bundle_size = 0U;
+        if (firmware_path != nullptr && firmware_path[0] != '\0') {
+            if (!read_firmware_file(firmware_path, Model::dt295, external_bundle.bytes,
+                                    bundle_view, diagnostic))
+                return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+                    Error::INVALID_ARGUMENT);
+            bundle_data = external_bundle.bytes.data();
+            bundle_size = external_bundle.bytes.size();
+        }
 #if defined(PIX_EMBEDDED_ASSETS)
-        std::size_t asset_size = 0U;
-        const std::uint8_t* asset_data = pix_embedded_dt295_bundle(&asset_size);
-        std::unique_ptr<dt295::ReceiverAdapter> adapter(
-            new (std::nothrow) dt295::ReceiverAdapter(
-                asset_data, asset_size, device.selector, family->impl_->clock, 0U,
-                kTsQueuePackets, device.fd));
+        if (bundle_data == nullptr) {
+            bundle_data = pix_embedded_dt295_bundle(&bundle_size);
+            if (!verify_bundle_bytes(Model::dt295, bundle_data, bundle_size,
+                                     bundle_view, diagnostic))
+                return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+                    Error::INVALID_ARGUMENT);
+        }
 #else
+        if (bundle_data == nullptr) {
+            set_asset_diagnostic(diagnostic, "firmware", "--firmware FILE is required");
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+                Error::INVALID_ARGUMENT);
+        }
+#endif
         std::unique_ptr<dt295::ReceiverAdapter> adapter(
             new (std::nothrow) dt295::ReceiverAdapter(
-                assets_directory, device.selector, family->impl_->clock, 0U,
+                bundle_data, bundle_size, device.selector, family->impl_->clock, 0U,
                 kTsQueuePackets, device.fd));
-#endif
         if (!adapter)
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
         if (!adapter->ready())
         {
             if (diagnostic != nullptr && adapter->init_detail()[0] != '\0')
-                set_asset_diagnostic(diagnostic, "dt295.assets",
+                set_asset_diagnostic(diagnostic, "firmware",
                                      adapter->init_detail());
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(adapter->init_error());
         }
@@ -870,16 +906,36 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
             return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
         return dtv::userland::Result<std::unique_ptr<Family>>::success(std::move(family));
     }
+    FirmwareBuffer external_bundle;
+    FirmwareBundleView bundle_view{};
+    const std::uint8_t* bundle_data = nullptr;
+    if (firmware_path != nullptr && firmware_path[0] != '\0') {
+        if (!read_firmware_file(firmware_path, Model::dt181, external_bundle.bytes,
+                                bundle_view, diagnostic))
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+                Error::INVALID_ARGUMENT);
+        bundle_data = external_bundle.bytes.data();
+    }
 #if defined(PIX_EMBEDDED_ASSETS)
-    std::size_t firmware_size = 0U, bootstrap_size = 0U, validation_size = 0U;
-    const std::uint8_t* firmware = pix_embedded_dt181_firmware(&firmware_size);
-    const std::uint8_t* bootstrap = pix_embedded_dt181_bootstrap(&bootstrap_size);
-    const std::uint8_t* validation = pix_embedded_dt181_validation(&validation_size);
-    auto assets = load_assets_bytes(firmware, firmware_size, bootstrap, bootstrap_size,
-                                    validation, validation_size, diagnostic);
+    if (bundle_data == nullptr) {
+        std::size_t embedded_bundle_size = 0U;
+        bundle_data = pix_embedded_dt181_bundle(&embedded_bundle_size);
+        if (!verify_bundle_bytes(Model::dt181, bundle_data, embedded_bundle_size,
+                                 bundle_view, diagnostic))
+            return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+                Error::INVALID_ARGUMENT);
+    }
 #else
-    auto assets = load_assets(assets_directory, diagnostic);
+    if (bundle_data == nullptr) {
+        set_asset_diagnostic(diagnostic, "firmware", "--firmware FILE is required");
+        return dtv::userland::Result<std::unique_ptr<Family>>::failure(
+            Error::INVALID_ARGUMENT);
+    }
 #endif
+    auto assets = load_assets_bytes(bundle_view.fpga, bundle_view.fpga_size,
+                                    bundle_view.bootstrap, bundle_view.bootstrap_size,
+                                    bundle_view.validation, bundle_view.validation_size,
+                                    diagnostic);
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
     const int opened = dt181_session_open(&family->impl_->session, &device.selector,
