@@ -60,7 +60,7 @@ public:
     dtv::userland::Result<Consumer::ReadResult> read(
         const Attachment&, dtv::userland::MutableByteView,
         std::chrono::milliseconds) noexcept;
-    Result release_final(const Attachment&) noexcept;
+    Result release_final(const Attachment&) noexcept override;
 
 private:
     bool matches(ReceiverId) const noexcept;
