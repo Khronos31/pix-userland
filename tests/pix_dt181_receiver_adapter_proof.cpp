@@ -232,7 +232,7 @@ int main()
     assert(engine.run_stream_cleanup_v1(ticket.value()));
     auto final = adapter.final_snapshot(attachment);
     assert(final && final.value().counters.bytes == sizeof(plain));
-    assert(adapter.release_final(attachment));
+    assert(engine.release_stream_final_v1(ticket.value()));
     assert(engine.release(client, lease.value().lease_id));
 
     lease = engine.acquire(client, receiver);
@@ -265,7 +265,7 @@ int main()
     assert(engine.run_stream_cleanup_v1(ticket.value()));
     final = adapter.final_snapshot(replay_attachment);
     assert(final && final.value().counters.bytes == sizeof(plain));
-    assert(adapter.release_final(replay_attachment));
+    assert(engine.release_stream_final_v1(ticket.value()));
     assert(engine.release(client, lease.value().lease_id));
 
     lease = engine.acquire(client, receiver);
@@ -328,7 +328,7 @@ int main()
         MutableByteView{output.data(), output.size()}, 1000ms);
     assert(read && read.value().bytes == sizeof(plain));
     assert(std::memcmp(output.data(), plain, sizeof(plain)) == 0);
-    assert(adapter.release_final(held_attachment));
+    assert(engine.release_stream_final_v1(ticket.value()));
     assert(engine.release(client, lease.value().lease_id));
     assert(engine.shutdown());
 
