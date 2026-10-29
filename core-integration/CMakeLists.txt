@@ -32,13 +32,22 @@ set(DTV_USERLAND_BUILD_HOST_TS ON CACHE BOOL "Build shared host TS client" FORCE
 
 if(PIX_CORE_SOURCE_DIR)
     add_subdirectory("${PIX_CORE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/dtv-userland-core")
+    set(PIX_CORE_VERSION_SOURCE_DIR "${PIX_CORE_SOURCE_DIR}")
 else()
     FetchContent_Declare(dtv_userland_core
         GIT_REPOSITORY https://github.com/Khronos31/dtv-userland-core.git
         GIT_TAG "${PIX_CORE_REVISION}"
         GIT_SHALLOW FALSE)
     FetchContent_MakeAvailable(dtv_userland_core)
+    set(PIX_CORE_VERSION_SOURCE_DIR "${dtv_userland_core_SOURCE_DIR}")
 endif()
+file(STRINGS "${PIX_CORE_VERSION_SOURCE_DIR}/CMakeLists.txt" DTV_CORE_PROJECT_LINE
+    REGEX "^project\\(dtv_userland_core VERSION ")
+if(NOT DTV_CORE_PROJECT_LINE MATCHES
+        "^project\\(dtv_userland_core VERSION ([0-9]+\\.[0-9]+\\.[0-9]+) LANGUAGES CXX\\)$")
+    message(FATAL_ERROR "Could not read dtv-userland-core project version")
+endif()
+set(DTV_USERLAND_CORE_VERSION "${CMAKE_MATCH_1}")
 
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 
@@ -152,7 +161,14 @@ add_test(NAME pix_dt295_adapter_lifecycle_proof
     COMMAND pix_dt295_adapter_lifecycle_proof)
 endif()
 
-set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../include/version.h" PIX_PRODUCT_VERSION_LINE
+    REGEX "^#define VERSION \"")
+if(NOT PIX_PRODUCT_VERSION_LINE MATCHES
+        "^#define VERSION \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$")
+    message(FATAL_ERROR "Could not read PIX product version from include/version.h")
+endif()
+set(PIX_PRODUCT_VERSION "${CMAKE_MATCH_1}")
+set(PIX_RUNTIME_VERSION "${PIX_PRODUCT_VERSION}" CACHE STRING "PIX runtime version")
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(PIX_FIRMWARE_MANIFEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/firmware-manifest")
@@ -234,7 +250,8 @@ if(PIX_EMBEDDED_ASSETS)
     target_compile_definitions(pix_product_runtime PRIVATE PIX_EMBEDDED_ASSETS)
 endif()
 target_compile_definitions(pix_product_runtime PRIVATE
-    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    DTV_USERLAND_CORE_VERSION="${DTV_USERLAND_CORE_VERSION}")
 target_compile_features(pix_product_runtime PUBLIC cxx_std_17)
 target_compile_options(pix_product_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror
@@ -357,6 +374,7 @@ target_include_directories(pix_public_runtime_proof PRIVATE
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_compile_definitions(pix_public_runtime_proof PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    DTV_USERLAND_CORE_VERSION="${DTV_USERLAND_CORE_VERSION}"
     PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
     PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin"
     PIX_FIRMWARE_DT295_PATH="${PIX_SOURCE_DIR}/firmware/dt295.bin"
