@@ -8,6 +8,8 @@
 
 `include/version.h` の版は変更していません。この移行は正式 Release・タグ・版更新を含みません。
 
+GitHubが生成するSource codeアーカイブと `tools/package-release.py source` が作成する対応ソースパッケージは別物です。`.gitattributes` により自動アーカイブでは `firmware/manifest.json` とビルド用ソースを残し、許可済みバイナリ `firmware/dt181.bin`、`firmware/dt295.bin`、保存IVを除外します。対応ソースパッケージはオフライン再ビルドに使う許可済みファームウェア、manifest、保存metadata/IVを明示的に含みます。暗号化入力 `.private/assets.enc` はGitHub自動アーカイブには含まれますが、対応ソースパッケージには含めません。
+
 ### 3コマンド配布の検証状況
 
 | 対象 | 配線 | 確認済み | 未確認 |

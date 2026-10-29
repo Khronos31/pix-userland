@@ -1,11 +1,14 @@
 import hashlib
+import io
+import struct
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from firmware_bundle import generate_header, pack_dt181, read_manifest, unpack_dt181, verify_bundle
+from firmware_bundle import DT181_MAGIC, generate_header, pack_dt181, read_manifest, unpack_dt181, verify_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,6 +83,43 @@ class FirmwareBundleTests(unittest.TestCase):
                 generator._load_assets(changed, dt295)
             with self.assertRaisesRegex(ValueError, "size"):
                 generator._load_assets(dt181, dt181)
+
+    def test_assets_bundle_opens_current_and_legacy_synthetic_payloads(self):
+        import importlib.util
+        script = ROOT / "tools" / "assets-bundle.py"
+        spec = importlib.util.spec_from_file_location("pix_assets_bundle_test", script)
+        assets_bundle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(assets_bundle)
+        manifest = read_manifest()
+        sections = {"fpga": b"synthetic-fpga", "bootstrap": b"synthetic-bootstrap",
+                    "validation": b"synthetic-validation"}
+        record = manifest["models"]["dt181"]
+        for section in record["sections"]:
+            data = sections[section["name"]]
+            section["size"] = len(data)
+            section["sha256"] = hashlib.sha256(data).hexdigest()
+        bundle = DT181_MAGIC + struct.pack("<III", *(len(sections[name]) for name in
+            ("fpga", "bootstrap", "validation"))) + b"".join(sections[name] for name in
+            ("fpga", "bootstrap", "validation"))
+        record["size"] = len(bundle)
+        record["sha256"] = hashlib.sha256(bundle).hexdigest()
+        self.assertEqual(pack_dt181(sections, manifest), bundle)
+
+        def payload(members):
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode="w:gz") as archive:
+                for name, data in members.items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    info.mode = 0o600
+                    archive.addfile(info, io.BytesIO(data))
+            return output.getvalue()
+
+        self.assertEqual(assets_bundle.open_payload(payload({"dt181.bin": bundle}), manifest), bundle)
+        legacy = {name + ".bin": data for name, data in sections.items()}
+        self.assertEqual(assets_bundle.open_payload(payload(legacy), manifest), bundle)
+        with self.assertRaisesRegex(ValueError, "Unexpected firmware set"):
+            assets_bundle.open_payload(payload({**legacy, "extra.bin": b"synthetic"}), manifest)
 
 
 if __name__ == "__main__":

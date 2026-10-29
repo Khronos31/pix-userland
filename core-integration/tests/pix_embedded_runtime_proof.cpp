@@ -148,6 +148,29 @@ int main()
         if (::chmod(root.c_str(), 0750) != 0) return 1;
         if (!prove_model(root, "PIXDT18101", "PIX-DT181-PU0", 0U,
                          "-F", PIX_FIRMWARE_DT181_PATH)) return 2;
+        const std::string invalid_firmware = root + "/invalid-explicit-firmware.bin";
+        std::ifstream firmware_file(PIX_FIRMWARE_DT181_PATH, std::ios::binary);
+        std::vector<char> firmware((std::istreambuf_iterator<char>(firmware_file)), {});
+        if (firmware.empty()) return 2;
+        firmware.back() ^= 1;
+        {
+            std::ofstream output(invalid_firmware, std::ios::binary);
+            if (!output || !output.write(firmware.data(), static_cast<std::streamsize>(firmware.size())))
+                return 2;
+        }
+        const std::string invalid_empty = root + "/empty-invalid-explicit";
+        const std::string invalid_log = root + "/invalid-explicit.log";
+        if (::mkdir(invalid_empty.c_str(), 0700) != 0) return 2;
+        const pid_t invalid = launch({"--device", "serial:PIXDT18101", "--firmware",
+                                      invalid_firmware, "--runtime-dir", root, "--group"},
+                                     invalid_empty, invalid_log);
+        int invalid_status = 0;
+        if (invalid <= 0 || !wait_exit(invalid, invalid_status) || !WIFEXITED(invalid_status) ||
+            WEXITSTATUS(invalid_status) != 2) return 2;
+        const std::string invalid_text = read_log(invalid_log);
+        if (invalid_text.find("unrecognized DT181 firmware bundle SHA-256") == std::string::npos ||
+            invalid_text.find("pixd ready:") != std::string::npos ||
+            !std::filesystem::is_empty(invalid_empty)) return 2;
         if (!prove_model(root, "PIXDT29501", "PIX-DT295", 1U)) return 2;
 
         const std::string empty = root + "/empty-cli";

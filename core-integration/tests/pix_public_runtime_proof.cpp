@@ -296,6 +296,15 @@ int main()
     if (!write_file(short_firmware, short_asset, sizeof(short_asset)) ||
         !asset_failure(short_firmware, root + "/pixd-short-asset.log",
                        "expected 699773 bytes, found 3")) return 43;
+    if (!asset_failure(dt295_firmware, root + "/pixd-wrong-model-asset.log",
+                       "expected 699773 bytes, found 1839100")) return 44;
+    const std::string modified_firmware = root + "/modified-firmware.bin";
+    auto modified_asset = dt181_firmware;
+    if (modified_asset.empty()) return 44;
+    modified_asset.back() ^= 1U;
+    if (!write_file(modified_firmware, modified_asset.data(), modified_asset.size()) ||
+        !asset_failure(modified_firmware, root + "/pixd-modified-asset.log",
+                       "unrecognized DT181 firmware bundle SHA-256")) return 44;
     const auto pixd_failure = [&](const std::vector<std::string>& arguments,
                                   const std::string& log_path,
                                   const std::vector<std::string>& details) {

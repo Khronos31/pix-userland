@@ -54,7 +54,7 @@
 
 **配布バイナリにはこれらの必要なファームウェアデータがあらかじめ組み込まれています（埋め込み方式）。** 通常の利用環境で外部ファイルを用意したり、コマンドラインで指定したりする必要はありません。
 
-ソースから自身でビルドする場合、または開発・診断目的で埋め込みを無効にする場合（`PIX_EMBEDDED_ASSETS=OFF`）は、正規に所有するソフトウェアから生成スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて単一ファームウェアファイルを準備してください。
+ソースから自身でビルドする場合、または開発・診断目的で埋め込みを無効にする場合（`PIX_EMBEDDED_ASSETS=OFF`）は、正規に所有するソフトウェアから生成スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて単一ファームウェアファイルを準備してください。GitHubが自動生成するSource codeアーカイブにはファームウェア本体が含まれず、対応するソース一式の取得には同じReleaseの `pix-userland-VERSION-source.tar.gz` を使用してください。この対応ソースパッケージには既存の許可済みファームウェア本体とmanifest/metadataが含まれます。
 外部ファイルを指定してデーモンを起動する際は、`pixd` の `--firmware <FILE>`（または `-F <FILE>`）オプションを使用します。ファイル名や拡張子は任意でよく、ファイル内容（形式ヘッダ、機種識別、SHA-256 ハッシュ）に基づいて検証されます。
 
 ### 実行時ライブラリ
@@ -248,7 +248,7 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 | コード | 意味 |
 |---|---|
 | `0` | 正常終了。 |
-| `2` | コマンドライン引数の不正、または端末画面への直接バイナリ出力防止による中断。 |
+| `2` | コマンドライン引数の不正、`pixd` の `--firmware` ファイル欠損・不正・機種不一致、または端末画面への直接バイナリ出力防止による中断。 |
 | `3` | 対象機器が見つからない、未準備、または非対応。 |
 | `4` | デバイスが使用中、またはカーネルドライバが所有。 |
 | `5` | 信号ロック待ちタイムアウト、または指定された衛星 TS が見つからない。 |
@@ -256,7 +256,7 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 | `7` | USB 通信エラー、機器プロトコル異常、または受信中の USB 切断。 |
 | `8` | TS 整合性異常、キュー満杯、または出力パイプ停滞による drop。 |
 | `9` | B-CAS カード未挿入。 |
-| `10` | ファームウェア・認証データの欠損、不正、または初期化拒否。 |
+| `10` | 従来の内部診断用 `pix-ts-legacy` における機器データ・認証データの欠損または不正。公開3コマンド `pixd` の `--firmware` 検証失敗は `2` です。 |
 | `70` | 内部エラー（メモリ確保失敗、スレッド生成失敗など）。 |
 
 ## CARD 機能（内部カード状態照会）
@@ -286,7 +286,7 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 
 ### 3コマンドのビルド（pixd / pixctl / pix-ts）
 
-C++17 対応コンパイラ、CMake 3.16 以上、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
+C++17 対応コンパイラ、CMake 3.16 以上、Python 3、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。CMakeはconfigure時にPython 3 interpreterを必須とします。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
 
 配布バイナリと同様にファームウェアデータを埋め込んでビルドする場合は、あらかじめ `firmware/` に必要なファイル（`dt181.bin` および `dt295.bin`）を配置した上で、`-DPIX_EMBEDDED_ASSETS=ON` を指定します。配置先が標準パスと異なる場合は、`-DPIX_DT181_FIRMWARE_FILE=<FILE>` および `-DPIX_DT295_FIRMWARE_FILE=<FILE>` で個別ファイルを指定できます。
 
@@ -342,4 +342,4 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
-- 配布バイナリに組み込まれるファームウェアデータ（`dt181.bin`, `dt295.bin`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、バイナリへの埋め込みによってその由来や権利関係が変更されることはありません。本プロジェクトの MIT License は適用されず、ソースアーカイブにも含まれません。
+- 配布バイナリに組み込まれるファームウェアデータ（`dt181.bin`, `dt295.bin`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、バイナリへの埋め込みによってその由来や権利関係が変更されることはありません。本プロジェクトの MIT License は適用されません。GitHub自動生成Source codeアーカイブにはファームウェア本体と保存IVを含めず、Releaseの対応ソースパッケージには既存の許可済みファームウェア本体と関連manifest/metadataを含めます。
