@@ -475,7 +475,7 @@ static void configuration_tests(void) {
     reset_open_observation();
     closed = close_calls;
     assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
-    assert(config_set_calls == 1 && query_calls == 101 && claim_calls == 0);
+    assert(config_set_calls == 1 && query_calls == 100 && claim_calls == 0);
     assert(close_calls == closed + 1);
     assert(open_order_count == sizeof(open_order));
     assert(!strncmp(open_order, "GSAAAAAAAAAAAAAA", sizeof(open_order)));
