@@ -3,6 +3,7 @@
 #endif
 /* SPDX-License-Identifier: MIT */
 #include "dt295_capture.h"
+#include "control.h"
 #include "dt295.h"
 #include "dt295_routes.h"
 #include "dt295_stream.h"
@@ -22,6 +23,17 @@
 #include <sys/file.h>
 #include <unistd.h>
 #endif
+
+static int allow_ecm_conflict(void);
+
+static int allow_ecm_conflict(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("DT295_ALLOW_ECM_CONFLICT");
+        cached = v && *v && *v != '0';
+    }
+    return cached;
+}
 
 #if defined(__APPLE__) || defined(DT295_CAPTURE_TESTING)
 typedef struct {
@@ -143,7 +155,15 @@ static int live_additions_only(const dt295_route_plan *current,
             current->dedicated_pid[0] &&
             live_pid_is_retained(current, desired, current->dedicated_pid[0]))
             desired->video_stream_type = current->video_stream_type;
-        else {
+        else if (getenv("DT295_TOLERATE_PSI") &&
+                 current->dedicated_pid[0] == desired->dedicated_pid[0] &&
+                 current->dedicated_pid[1] == desired->dedicated_pid[1] &&
+                 current->dedicated_pid[2] == desired->dedicated_pid[2] &&
+                 current->dedicated_pid[3] == desired->dedicated_pid[3]) {
+            /* Opt-in: identical PID layout, only the advertised codec moved.
+             * The on-board transcoder does this at startup; the caller commits
+             * the new type with the rest of the effective plan. */
+        } else {
             snprintf(error, error_size,
                      "broadcast changed primary or dedicated PID metadata during recording");
             return -1;
@@ -340,6 +360,15 @@ static int capture_status(ts_output *diag, unsigned phase, uint64_t packets, uin
                                               : ts_output_submit(diag, line, (size_t)n, NULL);
 }
 
+static uint8_t capture_endpoint(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("DT295_CAPTURE_EP");
+        unsigned long ep = (v && *v) ? strtoul(v, NULL, 0) : 0x81u;
+        cached = (ep >= 0x01u && ep <= 0x8fu) ? (int)ep : 0x81;
+    }
+    return (uint8_t)cached;
+}
 #endif
 int dt295_capture_run(const dt295_capture_config *cfg) {
 #if !defined(__APPLE__) && !defined(DT295_CAPTURE_TESTING)
@@ -494,7 +523,96 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     uint64_t preparation_start = now_ms(), last_input = preparation_start,
              next_status = preparation_start;
     uint8_t data[65536 + 188], out[65536 + 188];
+    /* DT295_CONTROL=1 のとき、標準入力から選局指示 ("T21" / "BS01_0" / "quit") を
+     * 受け付ける。切替は「セッションを維持したまま stop -> tune -> prepare ->
+     * start」で行う (認証をやり直さないので 0xffff に落ちない)。 */
+    pix_control control = {0};
+    const char *control_env = getenv("DT295_CONTROL");
+    int control_on = control_env && *control_env && *control_env != '0';
+    unsigned cur_channel = cfg->channel;
+    int cur_slot = cfg->slot;
+    pixy_system cur_system = cfg->system;
+
     while (!cfg->interrupted || !*cfg->interrupted) {
+        if (control_on) {
+            pix_command cmd = {0};
+            int pr = pix_control_poll(&control, cur_system, &cmd);
+            if (pr == 2 || (pr == 1 && cmd.quit))
+                break;
+            if (pr == 1 && (cmd.channel.system != cur_system ||
+                            cmd.channel.channel != cur_channel || cmd.channel.slot != cur_slot)) {
+                int next_system = cmd.channel.system;
+                unsigned next_channel = cmd.channel.channel;
+                int next_slot = cmd.channel.slot;
+                if (u.stream) {
+                    (void)dt295_stream_stop(u.stream, 3000);
+                    if (dt295_stream_destroy(u.stream)) {
+                        native_abandoned = 1;
+                        rc = 7;
+                        break;
+                    }
+                    u.stream = NULL;
+                }
+                if (dt295_stop(d, &drained, error, sizeof(error))) {
+                    rc = 7;
+                    break;
+                }
+                dt295_routes_destroy(tables);
+                tables = dt295_routes_create();
+                if (!tables) {
+                    rc = 70;
+                    break;
+                }
+                dt295_routes_set_satellite(tables, next_system != PIXY_TERRESTRIAL);
+                int tuned_rc = 0;
+                if (next_system == PIXY_TERRESTRIAL) {
+                    tuned_rc = dt295_tune_terrestrial(d, next_channel, error, sizeof(error));
+                } else {
+                    uint32_t hz = 0;
+                    if (pixy_frequency((pixy_system)next_system, next_channel, &hz))
+                        tuned_rc = -1;
+                    else if (dt295_tune_satellite(d, hz, -1, error, sizeof(error)))
+                        tuned_rc = -1;
+                    else if (next_slot >= 0 &&
+                             dt295_select_satellite_slot(d, (unsigned)next_slot, error,
+                                                         sizeof(error)))
+                        tuned_rc = -1;
+                }
+                if (tuned_rc) {
+                    rc = 5;
+                    break;
+                }
+                dt295_route_plan next_plan = {0};
+                char next_error[DT295_ROUTE_ERROR] = {0};
+                if (dt295_routes_initial_plan(tables, &next_plan, next_error) ||
+                    dt295_prepare_plan(d, &next_plan, error, sizeof(error)) ||
+                    dt295_start(d, error, sizeof(error))) {
+                    rc = 7;
+                    break;
+                }
+                e = dt295_stream_start(usb_native_context(u.usb), usb_native_handle(u.usb),
+                                       &u.stream);
+                if (e) {
+                    rc = 7;
+                    snprintf(error, sizeof(error), "switch USB start error %d", e);
+                    break;
+                }
+                live = next_plan;
+                cur_system = (pixy_system)next_system;
+                cur_channel = next_channel;
+                cur_slot = next_slot;
+                remainder = 0;
+                recording = 0;
+                ts_check_init(check);
+                last_input = now_ms();
+                fprintf(stderr,
+                        "{\"event\":\"tuned\",\"type\":\"%s\",\"channel\":\"%u\","
+                        "\"slot\":%d}\n",
+                        next_system == PIXY_TERRESTRIAL ? "GR"
+                                                        : (next_system == PIXY_BS ? "BS" : "CS"),
+                        next_channel, next_slot);
+            }
+        }
         uint64_t now = now_ms();
         if (recording) {
             elapsed = now - record_start;
@@ -520,7 +638,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         }
         renewals += (unsigned)renewed;
         size_t actual = 0;
-        e = capture_bulk(&u, 0x81, data + remainder, 65536, 100, &actual);
+        e = capture_bulk(&u, capture_endpoint(), data + remainder, 65536, 100, &actual);
         if (e && !(e == LIBUSB_ERROR_TIMEOUT && actual)) {
             if (e == LIBUSB_ERROR_TIMEOUT && now_ms() - last_input < 10000)
                 continue;
@@ -569,7 +687,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                      (unsigned)sat_state.selected_tsid);
             break;
         }
-        if (snapshot.unsupported_tables) {
+        if (snapshot.unsupported_tables &&
+            !getenv("DT295_TOLERATE_PSI")) {
             rc = 8;
             snprintf(error, sizeof(error),
                      "unsupported or ambiguous PAT/PMT/CAT configuration; reacquisition required");
@@ -621,7 +740,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             for (unsigned i = 0; i < 64; i++)
                 if (full.routes[i].enabled && full.routes[i].is_ecm)
                     ecms++;
-            if (ecms > 1) {
+            if (ecms > 1 && !allow_ecm_conflict()) {
                 rc = 8;
                 snprintf(error, sizeof(error),
                          "multiple independent ECMs are outside the verified DT295 scope");

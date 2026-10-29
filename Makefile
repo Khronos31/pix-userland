@@ -38,7 +38,7 @@ tests/test-compat: tests/test_compat.c src/pid_filter.c src/channel.c src/contro
 tests/test-usb-restart: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o src/usb_selector.o src/platform.o
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(USB_LIBS) $(OS_LIBS)
 
-tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c
+tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c src/protocol.c src/control.c src/channel.c
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $(filter-out src/dt295_capture.c,$^) $(OS_LIBS)
 tests/test-dt295-protocol: tests/test_dt295_protocol.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
 	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)

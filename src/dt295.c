@@ -1549,6 +1549,26 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
         if (field(d, f->address, f->shift, f->width, f->value))
             return fail(d, e, en, "private receive profile apply failed");
     }
+
+    /* test hook: DT295_XREG="addr:shift:width:value[,addr:...]" (hex) */
+    {
+        const char *xr = getenv("DT295_XREG");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
     /* Replace every route register so stale private channel PIDs cannot survive. */
     dt295_route_op blank = {0};
     for (unsigned slot = 0; slot < 64; slot++) {
@@ -1566,6 +1586,26 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
     if (putword(d, 0x1018, program) || field(d, 0x101c, 8, 8, video_type) ||
         field(d, 0x101c, 0, 8, audio_type))
         return fail(d, e, en, "program metadata apply failed");
+    /* >>> DT295_XREG2 test hook (patch-xreg2.py) */
+    {
+        const char *xr = getenv("DT295_XREG2");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
+    /* <<< DT295_XREG2 test hook */
     if (putword(d, 0x82028, 0) || command(d, 4, 0x20, 0, 0, NULL) || wait_state(d, 1, 30000))
         return fail(d, e, en, "receive acquisition did not reach configured state");
     uint16_t dma = 0;
