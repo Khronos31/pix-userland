@@ -869,6 +869,11 @@ int main()
     std::array<std::uint8_t, 16U> epoch{};
     dtv::userland::wire::ListResponse list{};
     if (!pix::runtime::build_list(located.value(), "0.0.0-dev", epoch, list)) return 10;
+    if (std::string(list.producer.version.bytes.data(), list.producer.version.length) !=
+            "0.0.0-dev" || !list.producer.core_version.present ||
+        std::string(list.producer.core_version.value.bytes.data(),
+                    list.producer.core_version.value.length) !=
+            DTV_USERLAND_CORE_VERSION) return 10;
     dtv::userland::host_listener_context::ContextConfig config{};
     config.runtime_directory = unwind_runtime;
     config.product = "pix-userland";

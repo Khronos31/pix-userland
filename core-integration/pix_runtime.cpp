@@ -1035,8 +1035,10 @@ Result<void> build_list(const LocatedDevice& device, const std::string& version,
     const bool dt295 = device.model == Model::dt295;
     const char* model_id = dt295 ? "PIX-DT295" : "PIX-DT181-PU0";
     if (!set_string(list.producer.product, "pix-userland") ||
-        !set_string(list.producer.version, version))
+        !set_string(list.producer.version, version) ||
+        !set_string(list.producer.core_version.value, DTV_USERLAND_CORE_VERSION))
         return Result<void>::failure(Error::INTERNAL);
+    list.producer.core_version.present = true;
     list.topology.state = TopologyState::complete;
     list.topology.expected_function_count.present = true;
     list.topology.expected_function_count.value = 1U;
