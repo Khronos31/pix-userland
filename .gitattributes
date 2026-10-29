@@ -1,3 +1,1 @@
-/firmware/dt181.bin export-ignore
-/firmware/dt295.bin export-ignore
-/firmware/preserved/** export-ignore
+/.private/assets.enc export-ignore

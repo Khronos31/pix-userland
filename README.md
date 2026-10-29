@@ -47,15 +47,17 @@
 
 ### ファームウェア・機器用データ
 
-実機チューナーを動作させるには、機種に応じたファームウェアデータ（DT181 用の `dt181.bin`、および DT295 用の `dt295.bin`）が必要です。
+実機チューナーを動作させるには、機種に応じたファームウェアbundle（DT181 用の `dt181.bin`、および DT295 用の `dt295.bin`）が必要です。両方の標準bundleはGitで追跡され、Releaseの対応ソースとGitHub自動Source code archiveに含まれます。
 
 - **PIX-DT181-PU0**: 単一のファームウェアファイル `dt181.bin`（形式 `P181A1`、699,773 バイト、SHA-256 `a8532036b2995c869f713714b85609d2d21508f8848b96e5c7528ab75f3dd7a0`）。従来の 3 つの個別ファイル（FPGA ビットストリーム、ブートストラップ、認証データ）を単一ファイルへ統合・検証する形式です。
-- **PIX-DT295**: 単一のファームウェアファイル `dt295.bin`（形式 `D295A1`、1,839,100 バイト）。SHA-256 allowlist は、保存済み地上波bundle `5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e` と、同じ正規入力から衛星register tableを含めて再生成するbundle `3cabe15f585a8a7a7d7b9b3db548b677b0732c13926dc3a2b5270acf1bc6ffc8` です。衛星bundleの実機受信は未検証です。
+- **PIX-DT295**: 標準 `firmware/dt295.bin` は形式 `D295A1`、1,839,100 バイト、SHA-256 `3cabe15f585a8a7a7d7b9b3db548b677b0732c13926dc3a2b5270acf1bc6ffc8` です。公式driver由来の衛星register tableを含み、地上波で使う他のbundle sectionは従来版と同じです。従来の地上波bundle hash `5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e` も明示allowlistに残しています。衛星bundleの実機受信は未検証です。
 
 **配布バイナリにはこれらの必要なファームウェアデータがあらかじめ組み込まれています（埋め込み方式）。** 通常の利用環境で外部ファイルを用意したり、コマンドラインで指定したりする必要はありません。
 
-ソースから自身でビルドする場合、または開発・診断目的で埋め込みを無効にする場合（`PIX_EMBEDDED_ASSETS=OFF`）は、正規に所有するソフトウェアから生成スクリプト（DT181 は `tools/prepare-assets.py`、DT295 は `tools/prepare-dt295-assets.py`）を用いて単一ファームウェアファイルを準備してください。GitHubが自動生成するSource codeアーカイブにはファームウェア本体が含まれず、対応するソース一式の取得には同じReleaseの `pix-userland-VERSION-source.tar.gz` を使用してください。この対応ソースパッケージには既存の許可済みファームウェア本体とmanifest/metadataが含まれます。
-外部ファイルを指定してデーモンを起動する際は、`pixd` の `--firmware <FILE>`（または `-F <FILE>`）オプションを使用します。ファイル名や拡張子は任意でよく、ファイル内容（形式ヘッダ、機種識別、SHA-256 ハッシュ）に基づいて検証されます。
+標準Releaseバイナリは地上波・衛星に使うbundleを `pixd` に内蔵し、通常起動に外部ファイルやbundle生成は不要です。ソースから埋め込み有効でビルドする場合も、checkoutまたはSource code archiveにある `firmware/dt181.bin` と `firmware/dt295.bin` がそのまま使われます。生成スクリプトはbundleの保守・再現用で、利用者が公式アプリからbundleを作る手順ではありません。
+
+埋め込み無効build（`PIX_EMBEDDED_ASSETS=OFF`）では従来どおり `--firmware <FILE>` または `-F <FILE>` が必要です。GitHub自動Source code archiveとReleaseの対応source packageはいずれも標準bundle、manifest、来歴metadata、再構成検証用の保存IVを含みます。
+外部ファイルを指定してデーモンを起動する際は、`pixd` の `--firmware <FILE>`（または `-F <FILE>`）オプションを使用します。checkout/source archiveに含まれる標準機種別 `.bin` を指定できます。ファイル名や拡張子は任意で、ファイル内容（形式ヘッダ、機種識別、SHA-256 ハッシュ）に基づいて検証されます。
 
 ### 実行時ライブラリ
 
@@ -342,4 +344,4 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
-- 配布バイナリに組み込まれるファームウェアデータ（`dt181.bin`, `dt295.bin`）はピクセラ製機器・ソフトウェアに由来するバイナリデータであり、バイナリへの埋め込みによってその由来や権利関係が変更されることはありません。本プロジェクトの MIT License は適用されません。GitHub自動生成Source codeアーカイブにはファームウェア本体と保存IVを含めず、Releaseの対応ソースパッケージには既存の許可済みファームウェア本体と関連manifest/metadataを含めます。
+- 配布バイナリに組み込まれる `dt181.bin` と `dt295.bin` はメーカー由来の機器データを含み、本プロジェクトの MIT License は適用されません。DT295の衛星tableはPIXELA StationTV X更新データ内のdriver materialから生成しています。Git追跡やbundle化によって権利が付与されるものではなく、適用される第三者条件に従ってください。Source code archiveと対応source packageは標準 `.bin`、manifest、来歴metadata、保存IVを含みます。再生成だけに使う暗号化入力 `.private/assets.enc` は両archiveに含めません。

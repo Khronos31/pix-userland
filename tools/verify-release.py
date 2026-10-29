@@ -129,7 +129,11 @@ def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
                      "core-integration/tests/windows_os_thread_proof.c", "tests/test_windows_runtime.py"):
         if required not in listed:
             raise ValueError(f"Source closure lacks {required}")
-    for required in ("firmware/dt181.bin", "firmware/dt295.bin", "firmware/manifest.json"):
+    for required in ("firmware/dt181.bin", "firmware/dt295.bin", "firmware/manifest.json",
+                     "firmware/metadata/dt181-source.json",
+                     "firmware/metadata/dt295-preservation.json",
+                     "firmware/metadata/dt295-satellite-generation.json",
+                     "firmware/preserved/verified-ts-iv.bin"):
         if required not in listed:
             raise ValueError(f"Source closure lacks {required}")
     if not any(name.startswith("third_party/dtv-userland-core/adapters/") and name.endswith("/COPYING") for name in listed):

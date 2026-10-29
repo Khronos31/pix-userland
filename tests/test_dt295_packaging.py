@@ -86,6 +86,7 @@ def source_members(commit):
         files["firmware/" + name] = (ROOT / "firmware" / name).read_bytes()
     files["firmware/metadata/dt181-source.json"] = (ROOT / "firmware/metadata/dt181-source.json").read_bytes()
     files["firmware/metadata/dt295-preservation.json"] = (ROOT / "firmware/metadata/dt295-preservation.json").read_bytes()
+    files["firmware/metadata/dt295-satellite-generation.json"] = (ROOT / "firmware/metadata/dt295-satellite-generation.json").read_bytes()
     files["firmware/preserved/verified-ts-iv.bin"] = (ROOT / "firmware/preserved/verified-ts-iv.bin").read_bytes()
     asset_inputs = verify._source_asset_records(files, "")
     identity = {
@@ -313,6 +314,7 @@ class TestDT295Packaging(unittest.TestCase):
       self.assertIn(required, names)
     for required in ("firmware/dt181.bin", "firmware/dt295.bin", "firmware/manifest.json",
                      "firmware/metadata/dt181-source.json", "firmware/metadata/dt295-preservation.json",
+                     "firmware/metadata/dt295-satellite-generation.json",
                      "firmware/preserved/verified-ts-iv.bin"):
       self.assertIn(required, names)
     self.assertNotIn(".private/assets.enc", names)

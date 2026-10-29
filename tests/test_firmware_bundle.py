@@ -46,7 +46,13 @@ class FirmwareBundleTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("pix_finalize", finalizer_path)
         finalizer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(finalizer)
-        finalizer.validate_dt295_bundle(bundle)
+        sections = finalizer.validate_dt295_bundle(bundle)
+        metadata = json.loads((ROOT / "firmware" / "metadata" /
+                               "dt295-satellite-generation.json").read_text(encoding="utf-8"))
+        satellite_table = sections[2][0x845A0 - 0x841D0:0x845A0 - 0x841D0 + 144]
+        self.assertEqual(hashlib.sha256(bundle).hexdigest(), manifest["models"]["dt295"]["sha256"])
+        self.assertEqual(metadata["standard_bundle"]["sha256"], manifest["models"]["dt295"]["sha256"])
+        self.assertTrue(any(satellite_table))
         modified = bytearray(bundle)
         modified[len(modified) // 2] ^= 1
         with self.assertRaisesRegex(ValueError, "SHA-256"):
