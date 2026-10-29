@@ -64,8 +64,16 @@ static int usb_configure_interface(usb_backend *b, int *changed) {
     return 0;
 }
 #if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
+static int usb_interface_wait_expired(const struct timespec *start) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 1;
+    int64_t elapsed_ns = (int64_t)(now.tv_sec - start->tv_sec) * 1000000000LL +
+                         (int64_t)now.tv_nsec - start->tv_nsec;
+    return elapsed_ns >= INTERFACE_READY_TIMEOUT_MS * 1000000LL;
+}
 static int usb_wait_for_interface(usb_backend *b) {
-    struct timespec start, now, delay = {0, INTERFACE_READY_POLL_MS * 1000000L};
+    struct timespec start, delay = {0, INTERFACE_READY_POLL_MS * 1000000L};
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
         return LIBUSB_ERROR_NOT_FOUND;
     for (;;) {
@@ -75,14 +83,12 @@ static int usb_wait_for_interface(usb_backend *b) {
         } while (sleep_result == -1 && errno == EINTR);
         if (sleep_result == -1)
             return LIBUSB_ERROR_NOT_FOUND;
+        if (usb_interface_wait_expired(&start))
+            return LIBUSB_ERROR_NOT_FOUND;
         int active = libusb_kernel_driver_active(b->handle, 0);
         if (active != LIBUSB_ERROR_NOT_FOUND)
             return active;
-        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-            return LIBUSB_ERROR_NOT_FOUND;
-        int64_t elapsed_ns = (int64_t)(now.tv_sec - start.tv_sec) * 1000000000LL +
-                             (int64_t)now.tv_nsec - start.tv_nsec;
-        if (elapsed_ns >= INTERFACE_READY_TIMEOUT_MS * 1000000LL)
+        if (usb_interface_wait_expired(&start))
             return LIBUSB_ERROR_NOT_FOUND;
         delay.tv_sec = 0;
         delay.tv_nsec = INTERFACE_READY_POLL_MS * 1000000L;
