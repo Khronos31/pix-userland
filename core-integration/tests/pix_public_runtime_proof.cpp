@@ -55,22 +55,6 @@ bool write_file(const std::string& path, const std::uint8_t* bytes, std::size_t 
     return ::close(fd) == 0;
 }
 
-bool write_zero_file(const std::string& path, std::size_t length)
-{
-    std::array<std::uint8_t, 4096U> zeros{};
-    const int fd = ::open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
-    if (fd < 0) return false;
-    std::size_t left = length;
-    while (left != 0U) {
-        const std::size_t amount = left < zeros.size() ? left : zeros.size();
-        const ssize_t count = ::write(fd, zeros.data(), amount);
-        if (count < 0 && errno == EINTR) continue;
-        if (count <= 0) { (void)::close(fd); return false; }
-        left -= static_cast<std::size_t>(count);
-    }
-    return ::close(fd) == 0;
-}
-
 pid_t launch(const char* executable, const std::vector<std::string>& arguments,
              const std::string& log_path)
 {
@@ -284,17 +268,17 @@ int main()
     char* root_value = ::mkdtemp(root_storage.data());
     if (root_value == nullptr) return 1;
     const std::string root(root_value);
-    const std::string assets = root + "/assets";
-    if (::mkdir(assets.c_str(), 0700) != 0 ||
-        !write_zero_file(assets + "/fpga.bin", 699673U) ||
-        !write_zero_file(assets + "/bootstrap.bin", 16U) ||
-        !write_zero_file(assets + "/validation.bin", 64U) ||
+    const std::string firmware_path = root + "/renamed-firmware.payload";
+    const auto dt181_firmware = read_file(PIX_FIRMWARE_DT181_PATH);
+    if (dt181_firmware.empty() ||
+        !write_file(firmware_path, dt181_firmware.data(), dt181_firmware.size()) ||
         ::chmod(root.c_str(), 0770) != 0) return 2;
-    const auto asset_failure = [&](const std::string& asset_root,
+    const std::string dt295_firmware = PIX_FIRMWARE_DT295_PATH;
+    const auto asset_failure = [&](const std::string& firmware_file,
                                    const std::string& log_path,
                                    const char* detail) {
         const pid_t child = launch(PIXD_PATH,
-            {"--device", "serial:PIXDT18101", "--assets", asset_root,
+            {"--device", "serial:PIXDT18101", "--firmware", firmware_file,
              "--runtime-dir", root}, log_path);
         int status = 0;
         if (child <= 0 || ::waitpid(child, &status, 0) != child ||
@@ -302,17 +286,16 @@ int main()
         const auto bytes = read_file(log_path);
         const std::string log(bytes.begin(), bytes.end());
         return log.find(detail) != std::string::npos &&
-               log.find("--assets entry fpga.bin") != std::string::npos &&
+               log.find("firmware firmware") != std::string::npos &&
                log.find(root) == std::string::npos;
     };
-    if (!asset_failure(root + "/missing-assets", root + "/pixd-missing-asset.log",
+    if (!asset_failure(root + "/missing-firmware.bin", root + "/pixd-missing-asset.log",
                        "not found")) return 42;
-    const std::string short_assets = root + "/short-assets";
+    const std::string short_firmware = root + "/short-firmware.bin";
     const std::uint8_t short_asset[] = {1U, 2U, 3U};
-    if (::mkdir(short_assets.c_str(), 0700) != 0 ||
-        !write_file(short_assets + "/fpga.bin", short_asset, sizeof(short_asset)) ||
-        !asset_failure(short_assets, root + "/pixd-short-asset.log",
-                       "expected 699673 bytes, found 3")) return 43;
+    if (!write_file(short_firmware, short_asset, sizeof(short_asset)) ||
+        !asset_failure(short_firmware, root + "/pixd-short-asset.log",
+                       "expected 699773 bytes, found 3")) return 43;
     const auto pixd_failure = [&](const std::vector<std::string>& arguments,
                                   const std::string& log_path,
                                   const std::vector<std::string>& details) {
@@ -326,24 +309,24 @@ int main()
             if (log.find(detail) == std::string::npos) return false;
         return log.find(root) == std::string::npos;
     };
-    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--firmware", firmware_path,
                        "--runtime-dir", root, "--instance", "bad/"},
                       root + "/pixd-invalid-instance.log",
                       {"invalid --instance", "1..64 ASCII bytes",
                        "Windows reserved device names"})) return 45;
     const std::string long_runtime = root + "/" + std::string(180U, 'x');
-    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--firmware", firmware_path,
                        "--runtime-dir", long_runtime},
                       root + "/pixd-long-endpoint.log",
                       {"endpoint path is too long", "path bytes", "including NUL",
                        "native capacity", "Shorten --runtime-dir or --instance"})) return 46;
-    if (!pixd_failure({"--device", "serial:PIXDT18101", "--assets", assets,
+    if (!pixd_failure({"--device", "serial:PIXDT18101", "--firmware", firmware_path,
                        "--runtime-dir", "relative"},
                       root + "/pixd-relative-runtime.log",
                       {"--runtime-dir must be a non-empty absolute local path"})) return 47;
     const std::string mode_log = root + "/pixd-runtime-mode.log";
     const pid_t mode_process = launch(PIXD_PATH,
-        {"--device", "serial:PIXDT18101", "--assets", assets,
+        {"--device", "serial:PIXDT18101", "--firmware", firmware_path,
          "--runtime-dir", root}, mode_log);
     int mode_status = 0;
     if (mode_process <= 0 || ::waitpid(mode_process, &mode_status, 0) != mode_process ||
@@ -361,7 +344,7 @@ int main()
         ::chmod(product_directory.c_str(), 0770) != 0) return 53;
     const std::string nested_mode_log = root + "/pixd-product-mode.log";
     const pid_t nested_mode_process = launch(PIXD_PATH,
-        {"--device", "serial:PIXDT18101", "--assets", assets,
+        {"--device", "serial:PIXDT18101", "--firmware", firmware_path,
          "--runtime-dir", nested_runtime, "--instance", "pix"}, nested_mode_log);
     int nested_mode_status = 0;
     if (nested_mode_process <= 0 ||
@@ -458,7 +441,7 @@ int main()
     if (::chmod(root.c_str(), 0750) != 0) return 34;
 
     const pid_t daemon = launch(PIXD_PATH,
-        {"--device", "serial:PIXDT18101", "--assets", assets,
+        {"--device", "serial:PIXDT18101", "--firmware", firmware_path,
          "--runtime-dir", root, "--group"},
         root + "/pixd.log");
     if (daemon <= 0 || !wait_ready(root + "/pixd.log", daemon)) {
@@ -468,7 +451,7 @@ int main()
     }
     const std::string duplicate_log = root + "/pixd-duplicate.log";
     const pid_t duplicate = launch(PIXD_PATH,
-        {"--device", "serial:PIXDT18101", "--assets", assets,
+        {"--device", "serial:PIXDT18101", "--firmware", firmware_path,
          "--runtime-dir", root, "--group"}, duplicate_log);
     int duplicate_status = 0;
     const bool duplicate_failed = duplicate > 0 &&
@@ -626,7 +609,7 @@ int main()
         else (void)::unsetenv("PIX_TEST_DT295_NOTIFICATION");
         const std::string log = root + "/dt295-card-" + std::to_string(index) + ".log";
         const pid_t card_daemon = launch(PIXD_PATH,
-            {"--device", "serial:PIXDT29501", "--assets", assets,
+            {"--device", "serial:PIXDT29501", "--firmware", dt295_firmware,
              "--runtime-dir", root, "--group"}, log);
         if (card_daemon <= 0 || !wait_ready(log, card_daemon)) return 36;
         std::string card_output;
@@ -650,7 +633,7 @@ int main()
     (void)::setenv("PIX_TEST_DT295_REINSERT_RAW", "1", 1);
     const std::string reinsert_log = root + "/dt295-card-reinsert.log";
     const pid_t reinsert_daemon = launch(PIXD_PATH,
-        {"--device", "serial:PIXDT29501", "--assets", assets,
+        {"--device", "serial:PIXDT29501", "--firmware", dt295_firmware,
          "--runtime-dir", root, "--group"}, reinsert_log);
     if (reinsert_daemon <= 0 || !wait_ready(reinsert_log, reinsert_daemon)) return 39;
     std::string reinsert_output;
@@ -696,7 +679,7 @@ int main()
     if (::mkdir(no_ts_runtime.c_str(), 0700) != 0) return 28;
     (void)::setenv("PIX_NO_TS", "1", 1);
     const pid_t no_ts_daemon = launch(PIXD_PATH,
-        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", no_ts_runtime,
+        {"--device", "usb:1-2", "--firmware", firmware_path, "--runtime-dir", no_ts_runtime,
          "--instance", "pix-no-ts"}, root + "/pixd-no-ts.log");
     if (no_ts_daemon <= 0 || !wait_ready(root + "/pixd-no-ts.log", no_ts_daemon)) return 13;
     const pid_t no_ts_client = launch(PIXTS_PATH,
@@ -724,7 +707,7 @@ int main()
     (void)::setenv("PIX_HOLD_CALLBACK_FILE", gate_path.c_str(), 1);
     (void)::setenv("PIX_RELEASE_CALLBACK_FILE", release_path.c_str(), 1);
     const pid_t held_daemon = launch(PIXD_PATH,
-        {"--device", "usb:1-2", "--assets", assets, "--runtime-dir", held_runtime,
+        {"--device", "usb:1-2", "--firmware", firmware_path, "--runtime-dir", held_runtime,
          "--instance", "pix-held"}, root + "/pixd-held.log");
     if (held_daemon <= 0 || !wait_ready(root + "/pixd-held.log", held_daemon)) return 16;
     std::ifstream held_start_file(root + "/pixd-held.log");
@@ -803,7 +786,7 @@ int main()
     };
     const std::string fd_value = std::to_string(usb_fd);
     const pid_t fd_daemon = launch(PIXD_PATH,
-        {"--fd", fd_value, "--assets", assets, "--runtime-dir", fd_runtime,
+        {"--fd", fd_value, "--firmware", firmware_path, "--runtime-dir", fd_runtime,
          "--instance", "pixfd"}, root + "/pixd-fd.log");
     if (fd_daemon <= 0 || !wait_ready(root + "/pixd-fd.log", fd_daemon)) {
         if (fd_daemon > 0) {
@@ -827,18 +810,22 @@ int main()
                  root + "/pixd-fd-repeat.log", 2) ||
         !fd_exit({"--fd", "99999999"}, root + "/pixd-fd-closed.log", 2) ||
         !fd_exit({}, root + "/pixd-fd-missing.log", 2)) return 60;
-    if (!fd_exit({"--fd", fd_value, "--device", "serial:PIXDT29501"},
+    if (!fd_exit({"--fd", fd_value, "--device", "serial:PIXDT29501",
+                  "--firmware", firmware_path},
                  root + "/pixd-fd-selector-mismatch.log", 3)) return 61;
-    if (!fd_exit({"--fd", fd_value, "--device", "usb:1-3"},
+    if (!fd_exit({"--fd", fd_value, "--device", "usb:1-3",
+                  "--firmware", firmware_path},
                  root + "/pixd-fd-topology-mismatch.log", 3)) return 61;
     if (::setenv("PIX_TEST_USB_FD_MODEL", "wrong-vid", 1) != 0 ||
-        !fd_exit({"--fd", fd_value}, root + "/pixd-fd-wrong-vid.log", 3)) return 62;
+        !fd_exit({"--fd", fd_value, "--firmware", firmware_path},
+                 root + "/pixd-fd-wrong-vid.log", 3)) return 62;
     if (::setenv("PIX_TEST_USB_FD_MODEL", "invalid", 1) != 0 ||
-        !fd_exit({"--fd", fd_value}, root + "/pixd-fd-non-usb.log", 2)) return 63;
+        !fd_exit({"--fd", fd_value, "--firmware", firmware_path},
+                 root + "/pixd-fd-non-usb.log", 2)) return 63;
     if (::setenv("PIX_TEST_USB_FD_MODEL", "dt295", 1) != 0 ||
         ::setenv("PIX_TEST_DT295_FAKE", "1", 1) != 0) return 64;
     const pid_t fd295_daemon = launch(PIXD_PATH,
-        {"--fd", fd_value, "--assets", assets, "--runtime-dir", fd295_runtime,
+        {"--fd", fd_value, "--firmware", dt295_firmware, "--runtime-dir", fd295_runtime,
          "--instance", "pixfd295"}, root + "/pixd-fd295.log");
     if (fd295_daemon <= 0 || !wait_ready(root + "/pixd-fd295.log", fd295_daemon)) {
         if (fd295_daemon > 0) {
@@ -863,7 +850,7 @@ int main()
 
     const auto located = pix::runtime::locate_dt181("usb:1-2");
     if (!located) return 8;
-    auto family_result = pix::runtime::Family::create(located.value(), assets.c_str());
+    auto family_result = pix::runtime::Family::create(located.value(), firmware_path.c_str());
     if (!family_result) return 9;
     std::unique_ptr<dtv::userland::host_runtime::EnclosureFamily> family(
         std::move(family_result.value()));

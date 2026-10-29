@@ -141,7 +141,7 @@ def main():
     ap.add_argument("--trc", required=True, help="official terrestrial TRC image")
     ap.add_argument("--profile", required=True, help="private target-0 profile JSON")
     ap.add_argument("--iv", required=True, help="16-byte IV extracted from the official application")
-    ap.add_argument("--output", required=True, help="private bundle output, usually assets/dt295.assets")
+    ap.add_argument("--output", required=True, help="private firmware bundle output, usually firmware/dt295.bin")
     args = ap.parse_args()
     idle = Path(args.idle).read_bytes()
     trc = Path(args.trc).read_bytes()

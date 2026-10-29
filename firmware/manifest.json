@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "models": {
+    "dt181": {
+      "file": "dt181.bin",
+      "format": "P181A1",
+      "size": 699773,
+      "sha256": "a8532036b2995c869f713714b85609d2d21508f8848b96e5c7528ab75f3dd7a0",
+      "sections": [
+        {
+          "name": "fpga",
+          "size": 699673,
+          "sha256": "e481f33e9fa092593246330461ce9616be26938de4078a9a0157f8e13efd686e"
+        },
+        {
+          "name": "bootstrap",
+          "size": 16,
+          "sha256": "d3d17f344c73a86c158a657cb646106c84fb397157b1141aae9dc70127b45426"
+        },
+        {
+          "name": "validation",
+          "size": 64,
+          "sha256": "21499c18a876951686ecb36829de7b26621428cba8d13d1e73bd7df8b10e4815"
+        }
+      ]
+    },
+    "dt295": {
+      "file": "dt295.bin",
+      "format": "D295A1",
+      "size": 1839100,
+      "sha256": "5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e"
+    }
+  }
+}

@@ -23,16 +23,13 @@ def embedded_members(target, commit, assets):
         "assets": {
             "dt181": {
                 "provenance": pack.DT181_PROVENANCE,
-                "files": {
-                    name.removeprefix("assets/"): {
-                        "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-                    for name, data in files.items() if name.startswith("assets/") and name != "assets/dt295.assets"
-                },
+                "file": {"name": "dt181.bin", "size": len(files["firmware/dt181.bin"]),
+                         "sha256": hashlib.sha256(files["firmware/dt181.bin"]).hexdigest()},
             },
             "dt295": {
                 "provenance": pack.DT295_PROVENANCE,
-                "file": {"name": "dt295.assets", "size": len(files["assets/dt295.assets"]),
-                         "sha256": hashlib.sha256(files["assets/dt295.assets"]).hexdigest()},
+                "file": {"name": "dt295.bin", "size": len(files["firmware/dt295.bin"]),
+                         "sha256": hashlib.sha256(files["firmware/dt295.bin"]).hexdigest()},
             },
         },
     }
@@ -66,7 +63,7 @@ def write_embedded_release(root, commit):
     source_prefix = f"pix-userland-{pack.VERSION}-source/"
     source = fixture.source_members(commit)
     fixture.write_archive(out/f"pix-userland-{pack.VERSION}-source.tar.gz", "source", source)
-    source_contents = {name: data for name, data in source.items() if name.startswith("assets/")}
+    source_contents = {name: data for name, data in source.items() if name.startswith("firmware/")}
     for target in pack.TARGETS:
         members = embedded_members(target, commit, source_contents)
         fixture.write_archive(out/f"pix-userland-{pack.VERSION}-{target}.tar.gz", target, members)
@@ -97,7 +94,7 @@ class TestEmbeddedRelease(unittest.TestCase):
             members = {name.removeprefix(prefix): data for name, data in fixture.read_archive(path).items()}
             members["pixd"] = b"binary without embedded assets"
             fixture.write_archive(path, "linux-x86_64", members)
-            with self.assertRaisesRegex(ValueError, "lacks embedded asset bytes"):
+            with self.assertRaisesRegex(ValueError, "lacks embedded firmware bytes"):
                 verify.verify_release(root=root, with_embedded_assets=True, commit=commit,
                                       source_libusb_sha256=hashlib.sha256(fixture.SYNTHETIC_LIBUSB).hexdigest())
 

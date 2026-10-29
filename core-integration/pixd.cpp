@@ -35,7 +35,7 @@ using namespace dtv::userland::host_listener_context;
 using namespace dtv::userland::host_runtime;
 
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
-extern "C" int dt295_actual_fixture_open(const char*);
+extern "C" int dt295_actual_fixture_open_runtime(const char*);
 extern "C" void dt295_actual_fixture_configure_presence(unsigned, int);
 extern "C" void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
 #endif
@@ -45,9 +45,7 @@ struct Arguments final {
     int fd = -1;
     std::string instance;
     std::string runtime_directory;
-#if !defined(PIX_EMBEDDED_ASSETS)
-    std::string assets = "assets";
-#endif
+    std::string firmware_path;
     bool group = false;
 #ifdef _WIN32
     bool exit_on_stdin_eof = false;
@@ -57,12 +55,8 @@ struct Arguments final {
 void usage(FILE* output) noexcept
 {
     std::fprintf(output,
-#if defined(PIX_EMBEDDED_ASSETS)
         "usage: pixd (--device serial:SELECTOR|usb:SELECTOR | --fd N [--device SELECTOR]) "
-#else
-        "usage: pixd (--device serial:SELECTOR|usb:SELECTOR [--assets DIR] | --fd N [--device SELECTOR]) "
-#endif
-        "[--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
+        "[--firmware FILE|-F FILE] [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
@@ -86,10 +80,7 @@ void usage(FILE* output) noexcept
 bool parse(int argc, char** argv, Arguments& out, bool& help,
            const char*& error) noexcept
 {
-    bool device = false, fd = false, instance = false, runtime = false;
-#if !defined(PIX_EMBEDDED_ASSETS)
-    bool assets = false;
-#endif
+    bool device = false, fd = false, instance = false, runtime = false, firmware = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
@@ -112,12 +103,9 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
             continue;
         }
         const bool value_option = option == "--device" || option == "--instance" ||
-            option == "--runtime-dir"
+            option == "--runtime-dir" || option == "--firmware" || option == "-F"
 #ifndef _WIN32
             || option == "--fd"
-#endif
-#if !defined(PIX_EMBEDDED_ASSETS)
-            || option == "--assets"
 #endif
             ;
         if (!value_option) {
@@ -129,7 +117,7 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
                 option == "--instance" ? "--instance requires a token value" :
                 option == "--runtime-dir" ? "--runtime-dir requires a directory value" :
                 option == "--fd" ? "--fd requires a decimal descriptor" :
-                "--assets requires a directory value";
+                "--firmware requires a file path";
             return false;
         }
         const char* value = argv[++i];
@@ -151,14 +139,19 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
-#if !defined(PIX_EMBEDDED_ASSETS)
-        else if (option == "--assets" && !assets) { out.assets = value; assets = true; }
-#endif
+        else if ((option == "--firmware" || option == "-F") && !firmware && value[0] != '\0') {
+            out.firmware_path = value;
+            firmware = true;
+        }
         else if (option == "--instance") {
             error = "--instance may be used once";
             return false;
+        } else if (option == "--firmware" || option == "-F") {
+            error = firmware ? "--firmware may be used once" :
+                "--firmware requires a non-empty file path";
+            return false;
         } else if (option == "--device" || option == "--runtime-dir" ||
-                   option == "--assets") {
+                   option == "--firmware" || option == "-F") {
             error = "option may be used once";
             return false;
         } else {
@@ -170,6 +163,12 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         error = "--device or --fd is required";
         return false;
     }
+#if !defined(PIX_EMBEDDED_ASSETS)
+    if (!firmware) {
+        error = "--firmware FILE is required in this build";
+        return false;
+    }
+#endif
     if (out.group && (!runtime || out.runtime_directory.empty())) {
         error = "--group requires an explicit non-empty --runtime-dir";
         return false;
@@ -511,10 +510,9 @@ int run(int argc, char** argv)
          (arguments.fd >= 0 && fd_model != nullptr &&
           std::strcmp(fd_model, "dt295") == 0));
     if (fake_dt295) {
-        std::string bundle = arguments.assets;
-        if (!bundle.empty() && bundle.back() != '/') bundle.push_back('/');
-        bundle += "dt295.assets";
-        if (dt295_actual_fixture_open(bundle.c_str()) != 0) return 70;
+        if (arguments.firmware_path.empty() ||
+            dt295_actual_fixture_open_runtime(arguments.firmware_path.c_str()) != 0)
+            return 70;
         const char* raw_value = std::getenv("PIX_TEST_DT295_RAW");
         const unsigned raw_state = raw_value == nullptr ? 3U :
             static_cast<unsigned>(std::strtoul(raw_value, nullptr, 10));
@@ -533,34 +531,21 @@ int run(int argc, char** argv)
         return fail(located.error());
     }
     pix::runtime::RuntimeFailureDiagnostic family_diagnostic{};
-#if defined(PIX_EMBEDDED_ASSETS)
     auto family_result = pix::runtime::Family::create(
-        located.value(), nullptr, &family_diagnostic);
-#else
-    auto family_result = pix::runtime::Family::create(
-        located.value(), arguments.assets.c_str(), &family_diagnostic);
-#endif
+        located.value(), arguments.firmware_path.empty() ? nullptr :
+            arguments.firmware_path.c_str(), &family_diagnostic);
     if (!family_result) {
         std::fprintf(stderr, "PIX_STAGE family error=%u\n", static_cast<unsigned>(family_result.error()));
         if (family_diagnostic.asset[0] != '\0') {
-#if defined(PIX_EMBEDDED_ASSETS)
-            std::fprintf(stderr, "pixd: embedded PIX asset %s: %s",
+            std::fprintf(stderr, "pixd: firmware %s: %s",
                 family_diagnostic.asset.data(), family_diagnostic.detail.data());
-#else
-            std::fprintf(stderr, "pixd: --assets entry %s: %s",
-                family_diagnostic.asset.data(), family_diagnostic.detail.data());
-#endif
             if (family_diagnostic.byte_counts_valid) {
                 std::fprintf(stderr, " (expected %zu bytes, found %s%zu)",
                     family_diagnostic.expected_bytes,
                     family_diagnostic.actual_is_lower_bound ? "at least " : "",
                     family_diagnostic.actual_bytes);
             }
-#if defined(PIX_EMBEDDED_ASSETS)
-            std::fprintf(stderr, ". The packaged PIX asset bundle is invalid.\n");
-#else
-            std::fprintf(stderr, ". Check the PIX asset files selected by --assets and retry.\n");
-#endif
+            std::fprintf(stderr, ". Verify the firmware bundle and selected device model.\n");
         }
         return fail(family_result.error());
     }

@@ -34,8 +34,6 @@ public:
     using Attachment = dtv::userland::detail::Attachment;
     using ReadResult = dtv::userland::detail::StreamReadResult;
 
-    ReceiverAdapter(const char* assets_directory, const usb_selector&, Clock&,
-                    ReceiverId, std::size_t queue_packets, int device_fd = -1) noexcept;
     ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
                     const usb_selector&, Clock&, ReceiverId,
                     std::size_t queue_packets, int device_fd = -1) noexcept;
@@ -96,7 +94,6 @@ private:
     static void sleep_ms(void*, unsigned) noexcept;
 
     bool matches(ReceiverId) const noexcept;
-    void initialize(const char* assets_directory, const usb_selector&, int device_fd) noexcept;
     void initialize(const std::uint8_t* assets, std::size_t assets_size,
                     const usb_selector&, int device_fd) noexcept;
     void initialize_device(const usb_selector&, int device_fd) noexcept;

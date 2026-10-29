@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import tarfile
+from firmware_bundle import read_manifest, verify_bundle
 
 _spec = importlib.util.spec_from_file_location("pix_package", Path(__file__).with_name("package-release.py"))
 pack = importlib.util.module_from_spec(_spec)
@@ -18,7 +19,7 @@ _final_spec.loader.exec_module(finalize)
 SOURCE_LIBUSB_SHA256 = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
 CORE_PIN = pack.CORE_LOCK
 SOURCE_ONLY_KEYS = {"repository_commit", "repository_tree", "dtv_userland_core_tree", "libusb_sha256"}
-DT181_ASSET_SIZES = {"fpga.bin": 699673, "bootstrap.bin": 16, "validation.bin": 64}
+FIRMWARE_MANIFEST = read_manifest()
 
 
 def validate_flags(with_assets, with_dt295_assets, with_embedded_assets=False):
@@ -50,24 +51,20 @@ def _expected_metadata(target, commit, with_assets, with_dt295_assets, with_embe
 
 
 def _source_asset_records(contents, prefix):
-    dt181 = {}
-    for name, size in DT181_ASSET_SIZES.items():
-        path = prefix + "assets/" + name
+    records = {}
+    for model, provenance in (("dt181", pack.DT181_PROVENANCE),
+                              ("dt295", pack.DT295_PROVENANCE)):
+        file_name = FIRMWARE_MANIFEST["models"][model]["file"]
+        path = prefix + "firmware/" + file_name
         data = contents.get(path)
-        if data is None or len(data) != size:
-            raise ValueError(f"Missing or invalid source asset input: {name}")
-        dt181[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-    dt295_path = prefix + "assets/dt295.assets"
-    dt295 = contents.get(dt295_path)
-    if dt295 is None:
-        raise ValueError("Missing source asset input: dt295.assets")
-    finalize.validate_dt295_bundle(dt295)
-    return {
-        "dt181": {"provenance": pack.DT181_PROVENANCE, "files": dt181},
-        "dt295": {"provenance": pack.DT295_PROVENANCE,
-                  "file": {"name": "dt295.assets", "size": len(dt295),
-                           "sha256": hashlib.sha256(dt295).hexdigest()}},
-    }
+        if data is None:
+            raise ValueError(f"Missing source firmware input: {file_name}")
+        verify_bundle(model, data, FIRMWARE_MANIFEST)
+        if model == "dt295": finalize.validate_dt295_bundle(data)
+        records[model] = {"provenance": provenance,
+                          "file": {"name": file_name, "size": len(data),
+                                   "sha256": hashlib.sha256(data).hexdigest()}}
+    return records
 
 
 def _verify_embedded_binary(contents, prefix, metadata, source_assets, source_contents, source_prefix):
@@ -82,16 +79,15 @@ def _verify_embedded_binary(contents, prefix, metadata, source_assets, source_co
         raise ValueError("Embedded asset manifest differs from corresponding source inputs")
     if embedded["source_revision"] != metadata["commit"] or embedded["dtv_userland_core_revision"] != CORE_PIN:
         raise ValueError("Embedded source or Core revision mismatch")
-    asset_names = {name for name in contents if name.startswith(prefix + "assets/")}
+    asset_names = {name for name in contents if name.startswith(prefix + "firmware/")}
     if asset_names:
         raise ValueError("Embedded binary package contains external asset files")
     pixd = contents[prefix + "pixd" + (".exe" if metadata["target"] == "windows-x64" else "")]
     for model, entries in source_assets.items():
-        files = entries["files"] if "files" in entries else {entries["file"]["name"]: entries["file"]}
-        for name in files:
-            asset_path = source_prefix + "assets/" + name
-            if pixd.find(source_contents[asset_path]) < 0:
-                raise ValueError(f"pixd lacks embedded asset bytes: {model}/{name}")
+        asset = entries["file"]
+        asset_path = source_prefix + "firmware/" + asset["name"]
+        if pixd.find(source_contents[asset_path]) < 0:
+            raise ValueError(f"pixd lacks embedded firmware bytes: {model}/{asset['name']}")
     if metadata.get("embedded_assets") != embedded:
         raise ValueError("Release metadata differs from embedded manifest")
     return embedded
@@ -131,6 +127,9 @@ def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
                      "core-integration/tools/pix_ts.cpp", "tools/build-windows.sh", "include/os.h",
                      "src/dt181_capture_host.c", "pix-dt181-consumer.cpp",
                      "core-integration/tests/windows_os_thread_proof.c", "tests/test_windows_runtime.py"):
+        if required not in listed:
+            raise ValueError(f"Source closure lacks {required}")
+    for required in ("firmware/dt181.bin", "firmware/dt295.bin", "firmware/manifest.json"):
         if required not in listed:
             raise ValueError(f"Source closure lacks {required}")
     if not any(name.startswith("third_party/dtv-userland-core/adapters/") and name.endswith("/COPYING") for name in listed):
@@ -189,20 +188,26 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
                 contents, prefix, metadata, source_assets, source_contents, source_prefix)
         if compared != expected_metadata:
             raise ValueError(f"Release metadata mismatch: {target}")
-        assets_prefix = prefix + "assets/"
-        asset_names = {member_name for member_name in contents if member_name.startswith(assets_prefix)}
+        firmware_prefix = prefix + "firmware/"
+        asset_names = {member_name for member_name in contents if member_name.startswith(firmware_prefix)}
         expected_assets = {}
         if with_assets and target != "source":
-            expected_assets.update({assets_prefix + asset: size for asset, size in DT181_ASSET_SIZES.items()})
+            expected_assets[firmware_prefix + FIRMWARE_MANIFEST["models"]["dt181"]["file"]] = \
+                FIRMWARE_MANIFEST["models"]["dt181"]["size"]
         if with_dt295_assets and target == "darwin-arm64":
-            expected_assets[assets_prefix + "dt295.assets"] = None
+            expected_assets[firmware_prefix + FIRMWARE_MANIFEST["models"]["dt295"]["file"]] = \
+                FIRMWARE_MANIFEST["models"]["dt295"]["size"]
         if target != "source" and asset_names != set(expected_assets):
             raise ValueError(f"Incorrect device asset set: {target}")
         for asset_name, size in expected_assets.items():
             if size is not None and len(contents[asset_name]) != size:
                 raise ValueError(f"Invalid device asset size: {asset_name}")
-        if with_dt295_assets and target == "darwin-arm64":
-            finalize.validate_dt295_bundle(contents[assets_prefix + "dt295.assets"])
+        for asset_name in expected_assets:
+            if asset_name.endswith("dt181.bin"):
+                verify_bundle("dt181", contents[asset_name], FIRMWARE_MANIFEST)
+            elif asset_name.endswith("dt295.bin"):
+                verify_bundle("dt295", contents[asset_name], FIRMWARE_MANIFEST)
+                finalize.validate_dt295_bundle(contents[asset_name])
         if any(member_name.lower().endswith((".dll", ".dylib", ".so")) for member_name in contents):
             raise ValueError("Unexpected shared library")
         for required in ("LICENSE", "COPYING.libusb", "THIRD_PARTY_NOTICES.md", "licenses/musl-COPYRIGHT.txt"):
@@ -239,7 +244,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-assets", action="store_true")
     parser.add_argument("--with-dt295-assets", action="store_true",
-                        help="require and verify assets/dt295.assets in darwin-arm64")
+                        help="require and verify the DT295 firmware bundle in darwin-arm64")
     parser.add_argument("--with-embedded-assets", action="store_true",
                         help="require embedded asset metadata and bytes in all seven binaries")
     args = parser.parse_args(argv)

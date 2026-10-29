@@ -174,7 +174,7 @@ static void pipeline_satellite_read(uint8_t sub, uint16_t length)
         reply[i] = pipeline_sat_regs[(uint8_t)(pipeline_sat_pending + i)];
 }
 
-int dt295_actual_fixture_open(const char *assets_path)
+static int dt295_actual_fixture_setup(void)
 {
     memset(&pipeline_fake, 0, sizeof(pipeline_fake));
     atomic_store_explicit(&pipeline_control_active, 0U, memory_order_release);
@@ -206,7 +206,58 @@ int dt295_actual_fixture_open(const char *assets_path)
     pipeline_omit_cat = 0;
     wr16(pipeline_fake.mem + 0x82008, 0x10);
     pipeline_fake.mem[0x822ac] = 0x30;
+    return 0;
+}
+
+int dt295_actual_fixture_open(const char *assets_path)
+{
+    if (dt295_actual_fixture_setup() != 0) return -1;
     create_assets(assets_path, &pipeline_fake);
+    return 0;
+}
+
+int dt295_actual_fixture_open_runtime(const char *firmware_path)
+{
+    if (dt295_actual_fixture_setup() != 0) return -1;
+    FILE *file = fopen(firmware_path, "rb");
+    if (file == NULL || fseek(file, 0, SEEK_END) != 0) {
+        if (file != NULL) fclose(file);
+        return -1;
+    }
+    const long file_size = ftell(file);
+    if (file_size < 8 + 6 * 36 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+    uint8_t *bundle = malloc((size_t)file_size);
+    if (bundle == NULL || fread(bundle, 1, (size_t)file_size, file) != (size_t)file_size) {
+        free(bundle);
+        fclose(file);
+        return -1;
+    }
+    fclose(file);
+    size_t lengths[6];
+    size_t total = 8 + 6 * 36;
+    for (unsigned index = 0; index < 6; index++) {
+        const uint8_t *length = bundle + 8 + index * 36;
+        lengths[index] = (size_t)length[0] | (size_t)length[1] << 8 |
+            (size_t)length[2] << 16 | (size_t)length[3] << 24;
+        if (lengths[index] > (size_t)file_size - total) {
+            free(bundle);
+            return -1;
+        }
+        total += lengths[index];
+    }
+    if (total != (size_t)file_size || lengths[2] != sizeof(pipeline_fake.material) ||
+        lengths[5] != sizeof(pipeline_fake.ts_iv)) {
+        free(bundle);
+        return -1;
+    }
+    size_t offset = 8 + 6 * 36 + lengths[0] + lengths[1];
+    memcpy(pipeline_fake.material, bundle + offset, sizeof(pipeline_fake.material));
+    offset += lengths[2] + lengths[3] + lengths[4];
+    memcpy(pipeline_fake.ts_iv, bundle + offset, sizeof(pipeline_fake.ts_iv));
+    free(bundle);
     return 0;
 }
 

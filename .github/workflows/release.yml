@@ -64,7 +64,7 @@ jobs:
             sh tests/test_mdev.sh
             PIX_EMBEDDED_ASSETS=ON CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
           '
-      - run: python3 tools/verify-embedded-assets.py build/musl/pixd "$PWD/assets" "$PWD/assets/dt295.assets" build/musl/embedded-assets.json --build-info build/musl/build-info.txt
+      - run: python3 tools/verify-embedded-assets.py build/musl/pixd "$PWD/firmware/dt181.bin" "$PWD/firmware/dt295.bin" build/musl/embedded-assets.json --build-info build/musl/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py '${{ matrix.target }}' "build/musl/$program"; done
       - run: python3 tools/package-release.py '${{ matrix.target }}' build/musl
       - run: tools/check-private.sh
@@ -83,7 +83,7 @@ jobs:
           persist-credentials: false
       - run: brew install cmake pkgconf
       - run: PIX_EMBEDDED_ASSETS=ON CFLAGS='-O2 -g -Werror' tools/build-portable.sh native
-      - run: python3 tools/verify-embedded-assets.py build/native/pixd "$PWD/assets" "$PWD/assets/dt295.assets" build/native/embedded-assets.json --build-info build/native/build-info.txt
+      - run: python3 tools/verify-embedded-assets.py build/native/pixd "$PWD/firmware/dt181.bin" "$PWD/firmware/dt295.bin" build/native/embedded-assets.json --build-info build/native/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py darwin-arm64 "build/native/$program"; done
       - run: python3 tools/package-release.py darwin-arm64 build/native
       - run: tools/check-private.sh
@@ -115,7 +115,7 @@ jobs:
           ANDROID_ABI: ${{ matrix.abi }}
           CFLAGS: -O2 -g -Werror
           PIX_EMBEDDED_ASSETS: ON
-      - run: python3 tools/verify-embedded-assets.py "build/android-${{ matrix.abi }}/pixd" "$PWD/assets" "$PWD/assets/dt295.assets" "build/android-${{ matrix.abi }}/embedded-assets.json" --build-info "build/android-${{ matrix.abi }}/build-info.txt"
+      - run: python3 tools/verify-embedded-assets.py "build/android-${{ matrix.abi }}/pixd" "$PWD/firmware/dt181.bin" "$PWD/firmware/dt295.bin" "build/android-${{ matrix.abi }}/embedded-assets.json" --build-info "build/android-${{ matrix.abi }}/build-info.txt"
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py 'android-${{ matrix.abi }}' "build/android-${{ matrix.abi }}/$program"; done
       - run: python3 tools/package-release.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}'
       - run: tools/check-private.sh
@@ -134,7 +134,7 @@ jobs:
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config make curl xz-utils bzip2 binutils
       - run: PIX_EMBEDDED_ASSETS=ON tools/build-windows.sh
-      - run: python3 tools/verify-embedded-assets.py build/windows-x64/pixd.exe "$PWD/assets" "$PWD/assets/dt295.assets" build/windows-x64/embedded-assets.json --build-info build/windows-x64/build-info.txt
+      - run: python3 tools/verify-embedded-assets.py build/windows-x64/pixd.exe "$PWD/firmware/dt181.bin" "$PWD/firmware/dt295.bin" build/windows-x64/embedded-assets.json --build-info build/windows-x64/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"; done
       - shell: bash
         run: python3 tools/package-release.py windows-x64 build/windows-x64

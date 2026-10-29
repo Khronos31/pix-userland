@@ -12,8 +12,8 @@ pack = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pack)
 
 
-def verify(binary_path, dt181_directory, dt295_path, manifest_path, build_info_path=None):
-    records = pack.asset_input_records(dt181_directory, dt295_path)
+def verify(binary_path, dt181_path, dt295_path, manifest_path, build_info_path=None):
+    records = pack.asset_input_records(dt181_path, dt295_path)
     manifest_bytes = Path(manifest_path).read_bytes()
     manifest = json.loads(manifest_bytes)
     if build_info_path is not None:
@@ -37,25 +37,23 @@ def verify(binary_path, dt181_directory, dt295_path, manifest_path, build_info_p
     if embedded.get("assets") != records:
         raise ValueError("Embedded asset manifest differs from the input files")
     binary = Path(binary_path).read_bytes()
-    for model, entries in records.items():
-        files = entries["files"] if "files" in entries else {entries["file"]["name"]: entries["file"]}
-        for name in files:
-            data = (Path(dt181_directory)/name).read_bytes() if model == "dt181" else Path(dt295_path).read_bytes()
-            if binary.find(data) < 0:
-                raise ValueError(f"Embedded asset bytes missing from pixd: {model}/{name}")
+    for model, path in (("dt181", dt181_path), ("dt295", dt295_path)):
+        data = Path(path).read_bytes()
+        if binary.find(data) < 0:
+            raise ValueError(f"Embedded firmware bytes missing from pixd: {model}")
     return embedded
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pixd", type=Path)
-    parser.add_argument("dt181_assets", type=Path)
-    parser.add_argument("dt295_assets", type=Path)
+    parser.add_argument("dt181_firmware", type=Path)
+    parser.add_argument("dt295_firmware", type=Path)
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--build-info", type=Path)
     args = parser.parse_args(argv)
-    verify(args.pixd, args.dt181_assets, args.dt295_assets, args.manifest, args.build_info)
-    print("Embedded DT181 and DT295 asset bytes match inputs and manifest")
+    verify(args.pixd, args.dt181_firmware, args.dt295_firmware, args.manifest, args.build_info)
+    print("Embedded DT181 and DT295 firmware bytes match inputs and manifest")
 
 
 if __name__ == "__main__":
