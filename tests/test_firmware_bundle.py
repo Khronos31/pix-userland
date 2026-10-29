@@ -40,6 +40,10 @@ class FirmwareBundleTests(unittest.TestCase):
     def test_dt295_hash_allowlist_and_format_parser(self):
         manifest = read_manifest()
         bundle = (ROOT / "firmware" / "dt295.bin").read_bytes()
+        record = manifest["models"]["dt295"]
+        self.assertEqual(record["sha256_allowlist"], [record["sha256"]])
+        self.assertNotIn("5ea05c9d7a217a6184524479ec9bb259f8d0cd162fc71803ed830d2b3d50f11e",
+                         record["sha256_allowlist"])
         verify_bundle("dt295", bundle, manifest)
         finalizer_path = ROOT / "tools" / "finalize-private-release.py"
         import importlib.util
@@ -111,7 +115,7 @@ class FirmwareBundleTests(unittest.TestCase):
         self.assertIn("PIX_DT295_BUNDLE_SIZE 1839100U", header)
         self.assertIn("PIX_DT181_FPGA_SIZE 699673U", header)
         self.assertIn("PIX_DT181_VALIDATION_SHA256", header)
-        self.assertIn("PIX_DT295_BUNDLE_SHA256_COUNT 2U", header)
+        self.assertIn("PIX_DT295_BUNDLE_SHA256_COUNT 1U", header)
         self.assertIn("0x3cU, 0xabU, 0xe1U, 0x5fU", header)
 
     def test_embed_generator_uses_the_same_whole_bundle_allowlist(self):

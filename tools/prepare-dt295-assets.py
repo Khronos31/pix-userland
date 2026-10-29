@@ -156,7 +156,7 @@ def main():
     ap.add_argument("--idle", required=True, help="official idle firmware image")
     ap.add_argument("--trc", required=True, help="official terrestrial TRC image")
     ap.add_argument("--profile", help="private target-0 profile JSON")
-    ap.add_argument("--base-bundle", help="allowlisted DT295 bundle to reuse normalized fields, key request and IV")
+    ap.add_argument("--base-bundle", help="verified standard DT295 bundle to reuse normalized fields, key request and IV")
     ap.add_argument("--iv", help="16-byte IV extracted from the official application")
     ap.add_argument("--output", required=True, help="private firmware bundle output, usually firmware/dt295.bin")
     args = ap.parse_args()
