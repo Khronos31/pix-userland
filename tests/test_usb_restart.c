@@ -189,6 +189,10 @@ static int LIBUSB_CALL test_descriptor(libusb_device *d, struct libusb_device_de
 }
 static uint8_t LIBUSB_CALL test_bus(libusb_device *d) { return ((fake_usb_device *)d)->bus; }
 static uint8_t LIBUSB_CALL test_address(libusb_device *d) { return ((fake_usb_device *)d)->address; }
+static void record_open_order(char operation) {
+    if (open_order_count < sizeof(open_order))
+        open_order[open_order_count++] = operation;
+}
 static int LIBUSB_CALL test_ports(libusb_device *d, uint8_t *p, int n) {
     assert(n >= 1); *p = ((fake_usb_device *)d)->port; return 1;
 }
@@ -224,7 +228,7 @@ static libusb_device *LIBUSB_CALL test_device(libusb_device_handle *h) {
 static int LIBUSB_CALL test_active(libusb_device_handle *h, int i) {
     (void)h; (void)i;
     query_calls++;
-    open_order[open_order_count++] = 'A';
+    record_open_order('A');
     if (unconfigured_query_not_found && config_value == 0)
         return LIBUSB_ERROR_NOT_FOUND;
     return active_result;
@@ -237,14 +241,14 @@ static int LIBUSB_CALL test_release(libusb_device_handle *h, int i) { (void)h; (
 static int LIBUSB_CALL test_get_config(libusb_device_handle *h, int *cfg) {
     (void)h;
     config_get_calls++;
-    open_order[open_order_count++] = 'G';
+    record_open_order('G');
     *cfg = config_value;
     return config_get_result;
 }
 static int LIBUSB_CALL test_set_config(libusb_device_handle *h, int cfg) {
     (void)h;
     config_set_calls++;
-    open_order[open_order_count++] = 'S';
+    record_open_order('S');
     if (!config_set_result)
         config_value = cfg;
     return config_set_result;
@@ -252,7 +256,7 @@ static int LIBUSB_CALL test_set_config(libusb_device_handle *h, int cfg) {
 static int LIBUSB_CALL test_claim(libusb_device_handle *h, int i) {
     (void)h; (void)i;
     claim_calls++;
-    open_order[open_order_count++] = 'C';
+    record_open_order('C');
     return claim_result;
 }
 static void LIBUSB_CALL test_close(libusb_device_handle *h) { (void)h; close_calls++; }
@@ -399,7 +403,7 @@ static void configuration_tests(void) {
     active_result = 0;
     unconfigured_query_not_found = 1;
     reset_open_observation();
-#ifdef PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
     assert(!usb_open(&b, &selector, -1, 0));
     assert(config_set_calls == 1 && config_value == 1);
     assert(query_calls == 1 && claim_calls == 1);
@@ -417,7 +421,7 @@ static void configuration_tests(void) {
     reset_open_observation();
     assert(!usb_open(&b, &selector, -1, 0));
     assert(config_get_calls == 1 && config_set_calls == 0 && config_value == 1);
-#ifdef PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
     assert_open_order("GAC");
 #else
     assert_open_order("AGC");
@@ -437,7 +441,7 @@ static void configuration_tests(void) {
     closed = close_calls;
     assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
     assert(config_set_calls == 1 && claim_calls == 0 && close_calls == closed + 1);
-#ifdef PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
     assert(query_calls == 0);
     assert_open_order("GS");
 #else
