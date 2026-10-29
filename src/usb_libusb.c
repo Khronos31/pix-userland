@@ -45,6 +45,14 @@ static int open_usb_error(usb_backend *b, int error, const char *operation) {
     fprintf(stderr, "%s: %s\n", operation, libusb_error_name(error));
     return backend_fail(b, open_failure(error));
 }
+static int usb_configure_interface(usb_backend *b) {
+    int cfg;
+    if (open_usb_error(b, libusb_get_configuration(b->handle, &cfg), "get configuration"))
+        return -1;
+    if (cfg != 1 && open_usb_error(b, libusb_set_configuration(b->handle, 1), "set configuration"))
+        return -1;
+    return 0;
+}
 void usb_diagnostics(usb_backend *b, int enabled) {
     b->diagnostic = enabled;
 }
@@ -275,6 +283,10 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
             goto error;
         }
     }
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
+    if (b->model == USB_MODEL_DT181 && usb_configure_interface(b))
+        goto error;
+#endif
     int active = libusb_kernel_driver_active(b->handle, 0);
     if (active < 0 && active != LIBUSB_ERROR_NOT_SUPPORTED) {
         open_usb_error(b, active, "query kernel driver");
@@ -291,11 +303,13 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
             goto error;
         b->detached = 1;
     }
-    int cfg;
-    if (open_usb_error(b, libusb_get_configuration(b->handle, &cfg), "get configuration"))
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
+    if (b->model != USB_MODEL_DT181 && usb_configure_interface(b))
         goto error;
-    if (cfg != 1 && open_usb_error(b, libusb_set_configuration(b->handle, 1), "set configuration"))
+#else
+    if (usb_configure_interface(b))
         goto error;
+#endif
     if (open_usb_error(b, libusb_claim_interface(b->handle, 0), "claim interface"))
         goto error;
     b->claimed = 1;
