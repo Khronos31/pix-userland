@@ -455,7 +455,7 @@ Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khron
 $Actual = (Get-FileHash -LiteralPath $Helper -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($Actual -ne $HelperSha256) { throw 'runbook TS helper hash mismatch' }
 "$RunbookRef $Actual" | Set-Content (Join-Path $LOG 'ts-helper-version.txt')
-$QualityRef = 'a41e1ff9bd059b1d77441664380a338de683cd9b'; $QualitySha256 = '69db89cbae511fe849e3eec48524ed8177490002a5c18109acbbeda77a71e57d'
+$QualityRef = '9d9d998672952e0608728fa35cc94e59eaf1b26e'; $QualitySha256 = '8414beef6c3735ffa480a907b332a5776d9a7c734dacde9203920e18e4dce190'
 $QualityGate = Join-Path $Tool 'ts-quality-check.py'
 Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khronos31/siano-userland/$QualityRef/docs/release-validation/ts-quality-check.py" -OutFile $QualityGate
 $QualityActual = (Get-FileHash -LiteralPath $QualityGate -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -560,7 +560,7 @@ $ScanArg = '0=' + $Json
 $T15Rc | Set-Content (Join-Path $LOG 't15-pix-dt181.rc')
 ```
 
-- **期待値/終了値:** 各TSでTEI=0かつ採用`tei_null_excluded` CC<12件が必要。0 packet、scan JSON欠落/不正、一つでも不合格のTSがあればtoolはFAILとする。tool出力の`scope`は`tei_cc_numeric_only`、`capture_conditions_verified_by_tool`はfalse、`t15_overall`は`not_determined_by_tool`とし、数値判定とT15全体を混同しない。各modelのT15全体は版別記録で、receiver 0のTSが揃い、記録時刻で300秒以上、client exit・T09 rc/JSON・tool出力が記録され、読み取り可能なscanが揃った場合に限って完了判定する。これらが欠ける場合は未完了。完了したscanで数値条件を満たせば「完了・数値PASS」、数値条件を外せば「完了・数値FAIL」として人間の逐次判断を待つ。T15はTEI/CC判定のみで、既存T09 parser exitやsync/framing判定を上書きしない。
+- **期待値/終了値:** 各TSでTEI=0かつ採用`tei_null_excluded` CC<12件が必要。0 packet、scan JSON欠落/不正、一つでも不合格のTSがあればtoolはFAILとする。tool出力の`scope`は`tei_cc_numeric_only`、`capture_conditions_verified_by_tool`はfalse、`t15_overall`は`not_determined_by_tool`とし、数値判定とT15全体を混同しない。各modelのT15全体は版別記録で、receiver 0のTSが揃い、記録時刻で300秒以上、client exitが0（指定時間の満了による正常終了）であり、T09 rc/JSON・tool出力が記録され、読み取り可能なscanが揃った場合に限って完了判定する。client exitが非0なら、TSが300秒揃っていても未完了（FAIL扱いではなく人間判断待ち）とし、終了値とTSを保持する。自動再取得しない。T09 rcの非0だけではT15完了要件の失敗にせず、T09側の評価に残す。これらの完了条件が欠ける場合は未完了。完了したscanで数値条件を満たせば「完了・数値PASS」、数値条件を外せば「完了・数値FAIL」として人間の逐次判断を待つ。T15はTEI/CC判定のみで、既存T09 parser exitやsync/framing判定を上書きしない。
 - **停止/cleanup:** 自動再取得・自動修復はしない。不合格で停止して人間の逐次判断を待つ。
 - **記録:** profile/pattern、model、環境、実測capture秒数、candidate/archive/helper ref/hash、TS path/hash、全TSのpacket数/TEI数/TEI率/採用CC、clientとparser終了値、T15 JSON/終了値を版別記録から参照する。人間が不合格を受け入れる場合は理由・判断者・コメント等の参照を別に記録し、測定値・T15 JSONの自動判定を編集しない。
 
