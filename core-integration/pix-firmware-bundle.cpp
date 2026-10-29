@@ -31,6 +31,17 @@ bool matches_sha256(const std::uint8_t* bytes, std::size_t size,
     return std::memcmp(actual, expected, sizeof(actual)) == 0;
 }
 
+bool matches_any_sha256(const std::uint8_t* bytes, std::size_t size,
+                        const std::uint8_t expected[][32], std::size_t count) noexcept
+{
+    std::uint8_t actual[32]{};
+    dt295_sha256(bytes, size, actual);
+    for (std::size_t index = 0U; index < count; ++index) {
+        if (std::memcmp(actual, expected[index], sizeof(actual)) == 0) return true;
+    }
+    return false;
+}
+
 std::uint32_t read_le32(const std::uint8_t* bytes) noexcept
 {
     return static_cast<std::uint32_t>(bytes[0]) |
@@ -95,7 +106,8 @@ bool verify_firmware_bundle(FirmwareModel model, const std::uint8_t* bytes,
         set_error(error, error_size, "DT295 firmware bundle size is invalid");
         return false;
     }
-    if (!matches_sha256(bytes, size, PIX_DT295_BUNDLE_SHA256)) {
+    if (!matches_any_sha256(bytes, size, PIX_DT295_BUNDLE_SHA256,
+                            PIX_DT295_BUNDLE_SHA256_COUNT)) {
         set_error(error, error_size, "unrecognized DT295 firmware bundle SHA-256");
         return false;
     }

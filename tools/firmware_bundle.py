@@ -23,6 +23,11 @@ def read_manifest(path=MANIFEST):
             raise ValueError(f"invalid {model} bundle size")
         if not re.fullmatch(r"[0-9a-f]{64}", record.get("sha256", "")):
             raise ValueError(f"invalid {model} bundle SHA-256")
+        allowlist = record.get("sha256_allowlist", [record["sha256"]])
+        if not isinstance(allowlist, list) or not allowlist or allowlist[0] != record["sha256"] or \
+                any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                    for digest in allowlist) or len(set(allowlist)) != len(allowlist):
+            raise ValueError(f"invalid {model} bundle SHA-256 allowlist")
         if not isinstance(record.get("file"), str) or not record["file"]:
             raise ValueError(f"invalid {model} bundle name")
     sections = manifest["models"]["dt181"].get("sections", [])
@@ -87,7 +92,7 @@ def verify_bundle(model, data, manifest=None):
     record = manifest["models"][model]
     if len(data) != record["size"]:
         raise ValueError(f"invalid {model.upper()} firmware bundle size")
-    if hashlib.sha256(data).hexdigest() != record["sha256"]:
+    if hashlib.sha256(data).hexdigest() not in record.get("sha256_allowlist", [record["sha256"]]):
         raise ValueError(f"unrecognized {model.upper()} firmware bundle SHA-256")
     if model == "dt181":
         if data[:8] != DT181_MAGIC:
@@ -111,11 +116,20 @@ def generate_header(output, manifest=None):
              "#include <stddef.h>", "#include <stdint.h>"]
     for model in ("dt181", "dt295"):
         record = manifest["models"][model]
-        digest = bytes.fromhex(record["sha256"])
-        values = ", ".join(f"0x{value:02x}U" for value in digest)
         prefix = model.upper()
         lines.append(f"#define PIX_{prefix}_BUNDLE_SIZE {record['size']}U")
-        lines.append(f"static const uint8_t PIX_{prefix}_BUNDLE_SHA256[32] = {{{values}}};")
+        hashes = record.get("sha256_allowlist", [record["sha256"]])
+        if model == "dt295":
+            lines.append(f"#define PIX_{prefix}_BUNDLE_SHA256_COUNT {len(hashes)}U")
+            lines.append(f"static const uint8_t PIX_{prefix}_BUNDLE_SHA256[{len(hashes)}][32] = {{")
+            for digest in hashes:
+                values = ", ".join(f"0x{value:02x}U" for value in bytes.fromhex(digest))
+                lines.append(f"    {{{values}}},")
+            lines.append("};")
+        else:
+            digest = bytes.fromhex(record["sha256"])
+            values = ", ".join(f"0x{value:02x}U" for value in digest)
+            lines.append(f"static const uint8_t PIX_{prefix}_BUNDLE_SHA256[32] = {{{values}}};")
         if model == "dt181":
             for section in record["sections"]:
                 section_prefix = f"PIX_DT181_{section['name'].upper()}"

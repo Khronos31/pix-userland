@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import struct
 import sys
 import tarfile
@@ -53,6 +54,47 @@ class FirmwareBundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "size"):
             verify_bundle("dt181", bundle, manifest)
 
+    def test_dt295_allowlist_reuses_profile_sections_from_a_verified_bundle(self):
+        import importlib.util
+        prepare_path = ROOT / "tools" / "prepare-dt295-assets.py"
+        spec = importlib.util.spec_from_file_location("test_prepare_dt295_assets", prepare_path)
+        prepare = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prepare)
+        finalizer_path = ROOT / "tools" / "finalize-private-release.py"
+        spec = importlib.util.spec_from_file_location("test_finalize_dt295_bundle", finalizer_path)
+        finalizer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(finalizer)
+        manifest = json.loads(json.dumps(read_manifest()))
+        sections = (b"synthetic-idle", b"synthetic-trc",
+                    bytes(finalizer.DT295_MATERIAL_SIZE),
+                    struct.pack("<HBBHH", 0x1000, 0, 1, 1, 0),
+                    b"synthetickey", bytes(range(16, 32)))
+
+        def bundle_from(parts):
+            header = finalizer.DT295_MAGIC + b"".join(
+                struct.pack("<I", len(part)) + hashlib.sha256(part).digest()
+                for part in parts)
+            return header + b"".join(parts)
+
+        first = bundle_from(sections)
+        second_sections = (*sections[:-1], bytes(range(17, 33)))
+        second = bundle_from(second_sections)
+        record = manifest["models"]["dt295"]
+        record["size"] = len(first)
+        record["sha256"] = hashlib.sha256(first).hexdigest()
+        record["sha256_allowlist"] = [record["sha256"], hashlib.sha256(second).hexdigest()]
+        verify_bundle("dt295", first, manifest)
+        verify_bundle("dt295", second, manifest)
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary) / "base-dt295.bin"
+            base.write_bytes(first)
+            self.assertEqual(prepare.load_profile_sections(base, manifest),
+                             (sections[3], sections[4], sections[5]))
+        modified = bytearray(second)
+        modified[-1] ^= 1
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            verify_bundle("dt295", modified, manifest)
+
     def test_generated_runtime_header_uses_canonical_hashes(self):
         manifest = read_manifest()
         with tempfile.TemporaryDirectory() as temporary:
@@ -63,6 +105,8 @@ class FirmwareBundleTests(unittest.TestCase):
         self.assertIn("PIX_DT295_BUNDLE_SIZE 1839100U", header)
         self.assertIn("PIX_DT181_FPGA_SIZE 699673U", header)
         self.assertIn("PIX_DT181_VALIDATION_SHA256", header)
+        self.assertIn("PIX_DT295_BUNDLE_SHA256_COUNT 2U", header)
+        self.assertIn("0x3cU, 0xabU, 0xe1U, 0x5fU", header)
 
     def test_embed_generator_uses_the_same_whole_bundle_allowlist(self):
         import importlib.util
