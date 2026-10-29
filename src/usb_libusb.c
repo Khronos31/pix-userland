@@ -6,10 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
+#include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 #define TRANSFERS 16
+#define INTERFACE_READY_TIMEOUT_MS 1000
+#define INTERFACE_READY_POLL_MS 10
 struct usb_backend {
     libusb_context *ctx;
     libusb_device_handle *handle;
@@ -45,14 +49,46 @@ static int open_usb_error(usb_backend *b, int error, const char *operation) {
     fprintf(stderr, "%s: %s\n", operation, libusb_error_name(error));
     return backend_fail(b, open_failure(error));
 }
-static int usb_configure_interface(usb_backend *b) {
+static int usb_configure_interface(usb_backend *b, int *changed) {
     int cfg;
+    if (changed)
+        *changed = 0;
     if (open_usb_error(b, libusb_get_configuration(b->handle, &cfg), "get configuration"))
         return -1;
-    if (cfg != 1 && open_usb_error(b, libusb_set_configuration(b->handle, 1), "set configuration"))
-        return -1;
+    if (cfg != 1) {
+        if (open_usb_error(b, libusb_set_configuration(b->handle, 1), "set configuration"))
+            return -1;
+        if (changed)
+            *changed = 1;
+    }
     return 0;
 }
+#if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
+static int usb_wait_for_interface(usb_backend *b) {
+    struct timespec start, now, delay = {0, INTERFACE_READY_POLL_MS * 1000000L};
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
+        return LIBUSB_ERROR_NOT_FOUND;
+    for (;;) {
+        int sleep_result;
+        do {
+            sleep_result = nanosleep(&delay, &delay);
+        } while (sleep_result == -1 && errno == EINTR);
+        if (sleep_result == -1)
+            return LIBUSB_ERROR_NOT_FOUND;
+        int active = libusb_kernel_driver_active(b->handle, 0);
+        if (active != LIBUSB_ERROR_NOT_FOUND)
+            return active;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+            return LIBUSB_ERROR_NOT_FOUND;
+        int64_t elapsed_ns = (int64_t)(now.tv_sec - start.tv_sec) * 1000000000LL +
+                             (int64_t)now.tv_nsec - start.tv_nsec;
+        if (elapsed_ns >= INTERFACE_READY_TIMEOUT_MS * 1000000LL)
+            return LIBUSB_ERROR_NOT_FOUND;
+        delay.tv_sec = 0;
+        delay.tv_nsec = INTERFACE_READY_POLL_MS * 1000000L;
+    }
+}
+#endif
 void usb_diagnostics(usb_backend *b, int enabled) {
     b->diagnostic = enabled;
 }
@@ -175,6 +211,9 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
 #ifndef _WIN32
     b->wrapped_fd = -1;
 #endif
+#if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
+    int configuration_changed = 0;
+#endif
     int r = init(&b->ctx, fd);
     if (r < 0) {
         int code = open_failure(r);
@@ -284,10 +323,14 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
         }
     }
 #if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
-    if (b->model == USB_MODEL_DT181 && usb_configure_interface(b))
+    if (b->model == USB_MODEL_DT181 && usb_configure_interface(b, &configuration_changed))
         goto error;
 #endif
     int active = libusb_kernel_driver_active(b->handle, 0);
+#if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
+    if (active == LIBUSB_ERROR_NOT_FOUND && configuration_changed)
+        active = usb_wait_for_interface(b);
+#endif
     if (active < 0 && active != LIBUSB_ERROR_NOT_SUPPORTED) {
         open_usb_error(b, active, "query kernel driver");
         goto error;
@@ -304,10 +347,10 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
         b->detached = 1;
     }
 #if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
-    if (b->model != USB_MODEL_DT181 && usb_configure_interface(b))
+    if (b->model != USB_MODEL_DT181 && usb_configure_interface(b, NULL))
         goto error;
 #else
-    if (usb_configure_interface(b))
+    if (usb_configure_interface(b, NULL))
         goto error;
 #endif
     if (open_usb_error(b, libusb_claim_interface(b->handle, 0), "claim interface"))
