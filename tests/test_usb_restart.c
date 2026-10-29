@@ -2,11 +2,13 @@
 /* Exercise the real backend lifetime logic with deterministic USB completions.
  * Device discovery/claiming are never invoked. */
 #include <assert.h>
+#include <errno.h>
 #ifdef _WIN32
 #include <limits.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <time.h>
 #endif
 #include <libusb.h>
 #include <stdlib.h>
@@ -35,10 +37,17 @@ static int LIBUSB_CALL test_string_ascii(libusb_device_handle *, uint8_t, unsign
 static int LIBUSB_CALL test_wrap(libusb_context *, intptr_t, libusb_device_handle **);
 static libusb_device *LIBUSB_CALL test_device(libusb_device_handle *);
 static int LIBUSB_CALL test_active(libusb_device_handle *, int);
-static int LIBUSB_CALL test_interface(libusb_device_handle *, int);
+static int LIBUSB_CALL test_detach(libusb_device_handle *, int);
+static int LIBUSB_CALL test_attach(libusb_device_handle *, int);
+static int LIBUSB_CALL test_release(libusb_device_handle *, int);
+static int LIBUSB_CALL test_set_config(libusb_device_handle *, int);
 static int LIBUSB_CALL test_get_config(libusb_device_handle *, int *);
 static int LIBUSB_CALL test_claim(libusb_device_handle *, int);
 static void LIBUSB_CALL test_close(libusb_device_handle *);
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+static int test_clock_gettime(clockid_t, struct timespec *);
+static int test_nanosleep(const struct timespec *, struct timespec *);
+#endif
 static int LIBUSB_CALL test_bulk(libusb_device_handle *, unsigned char, unsigned char *, int, int *, unsigned);
 static void *test_calloc(size_t, size_t);
 #define libusb_init test_init
@@ -54,13 +63,17 @@ static void *test_calloc(size_t, size_t);
 #define libusb_wrap_sys_device test_wrap
 #define libusb_get_device test_device
 #define libusb_kernel_driver_active test_active
-#define libusb_detach_kernel_driver test_interface
-#define libusb_attach_kernel_driver test_interface
-#define libusb_release_interface test_interface
-#define libusb_set_configuration test_interface
+#define libusb_detach_kernel_driver test_detach
+#define libusb_attach_kernel_driver test_attach
+#define libusb_release_interface test_release
+#define libusb_set_configuration test_set_config
 #define libusb_get_configuration test_get_config
 #define libusb_claim_interface test_claim
 #define libusb_close test_close
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+#define clock_gettime test_clock_gettime
+#define nanosleep test_nanosleep
+#endif
 #define libusb_get_string_descriptor_ascii test_string_ascii
 #define libusb_bulk_transfer test_bulk
 #define calloc test_calloc
@@ -93,6 +106,10 @@ static void *test_calloc(size_t, size_t);
 #undef libusb_get_configuration
 #undef libusb_claim_interface
 #undef libusb_close
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+#undef clock_gettime
+#undef nanosleep
+#endif
 #undef libusb_get_string_descriptor_ascii
 #undef libusb_bulk_transfer
 #undef calloc
@@ -107,8 +124,19 @@ static void *test_calloc(size_t, size_t);
 #undef usb_log_close
 static int descriptor_product = 0x102b;
 static int init_result, list_result = 1, descriptor_result, wrong_model, open_result;
-static int active_result, claim_result, malloc_failure, bulk_result, short_write;
+static int active_result, claim_result, config_value = 1, config_get_result, config_set_result;
+static int unconfigured_query_not_found;
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+static int interface_not_found_queries;
+#endif
+static int query_calls, config_get_calls, config_set_calls, claim_calls, detach_calls, close_calls;
+static int malloc_failure, bulk_result, short_write;
+static char open_order[16];
+static size_t open_order_count;
 static int fake_context, fake_handle;
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+static struct timespec fake_monotonic;
+#endif
 typedef struct { uint16_t product; uint8_t bus, address, port; const char *serial; } fake_usb_device;
 static fake_usb_device fake_devices[2] = {{0x102b, 1, 7, 2, NULL}, {0x103b, 1, 8, 3, NULL}};
 static unsigned fake_device_count = 1;
@@ -181,6 +209,10 @@ static int LIBUSB_CALL test_descriptor(libusb_device *d, struct libusb_device_de
 }
 static uint8_t LIBUSB_CALL test_bus(libusb_device *d) { return ((fake_usb_device *)d)->bus; }
 static uint8_t LIBUSB_CALL test_address(libusb_device *d) { return ((fake_usb_device *)d)->address; }
+static void record_open_order(char operation) {
+    if (open_order_count < sizeof(open_order))
+        open_order[open_order_count++] = operation;
+}
 static int LIBUSB_CALL test_ports(libusb_device *d, uint8_t *p, int n) {
     assert(n >= 1); *p = ((fake_usb_device *)d)->port; return 1;
 }
@@ -214,16 +246,61 @@ static libusb_device *LIBUSB_CALL test_device(libusb_device_handle *h) {
     (void)h; return (libusb_device *)&fake_devices[0];
 }
 static int LIBUSB_CALL test_active(libusb_device_handle *h, int i) {
-    (void)h; (void)i; return active_result;
+    (void)h; (void)i;
+    query_calls++;
+    record_open_order('A');
+    if (unconfigured_query_not_found && config_value == 0)
+        return LIBUSB_ERROR_NOT_FOUND;
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+    if (query_calls <= interface_not_found_queries)
+        return LIBUSB_ERROR_NOT_FOUND;
+#endif
+    return active_result;
 }
-static int LIBUSB_CALL test_interface(libusb_device_handle *h, int i) { (void)h; (void)i; return 0; }
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+static int test_clock_gettime(clockid_t clock_id, struct timespec *value) {
+    assert(clock_id == CLOCK_MONOTONIC);
+    *value = fake_monotonic;
+    return 0;
+}
+static int test_nanosleep(const struct timespec *delay, struct timespec *remaining) {
+    (void)remaining;
+    fake_monotonic.tv_sec += delay->tv_sec;
+    fake_monotonic.tv_nsec += delay->tv_nsec;
+    if (fake_monotonic.tv_nsec >= 1000000000L) {
+        fake_monotonic.tv_sec++;
+        fake_monotonic.tv_nsec -= 1000000000L;
+    }
+    return 0;
+}
+#endif
+static int LIBUSB_CALL test_detach(libusb_device_handle *h, int i) {
+    (void)h; (void)i; detach_calls++; return 0;
+}
+static int LIBUSB_CALL test_attach(libusb_device_handle *h, int i) { (void)h; (void)i; return 0; }
+static int LIBUSB_CALL test_release(libusb_device_handle *h, int i) { (void)h; (void)i; return 0; }
 static int LIBUSB_CALL test_get_config(libusb_device_handle *h, int *cfg) {
-    (void)h; *cfg = 1; return 0;
+    (void)h;
+    config_get_calls++;
+    record_open_order('G');
+    *cfg = config_value;
+    return config_get_result;
+}
+static int LIBUSB_CALL test_set_config(libusb_device_handle *h, int cfg) {
+    (void)h;
+    config_set_calls++;
+    record_open_order('S');
+    if (!config_set_result)
+        config_value = cfg;
+    return config_set_result;
 }
 static int LIBUSB_CALL test_claim(libusb_device_handle *h, int i) {
-    (void)h; (void)i; return claim_result;
+    (void)h; (void)i;
+    claim_calls++;
+    record_open_order('C');
+    return claim_result;
 }
-static void LIBUSB_CALL test_close(libusb_device_handle *h) { (void)h; }
+static void LIBUSB_CALL test_close(libusb_device_handle *h) { (void)h; close_calls++; }
 static int LIBUSB_CALL test_bulk(libusb_device_handle *h, unsigned char ep, unsigned char *p,
                                   int len, int *actual, unsigned timeout) {
     (void)h; (void)ep; (void)p; (void)timeout;
@@ -348,6 +425,128 @@ static void stopped(usb_backend *b) {
     for (unsigned i = 0; i < 16; i++)
         assert(!b->transfers[i]);
 }
+static void reset_open_observation(void) {
+    query_calls = config_get_calls = config_set_calls = claim_calls = detach_calls = 0;
+    open_order_count = 0;
+    memset(open_order, 0, sizeof(open_order));
+}
+static void assert_open_order(const char *expected) {
+    assert(open_order_count == strlen(expected));
+    assert(!strcmp(open_order, expected));
+}
+static void configuration_tests(void) {
+    usb_selector selector;
+    usb_backend *b = NULL;
+    int closed;
+    assert(!usb_selector_parse("0", &selector));
+
+    config_value = 0;
+    active_result = 0;
+    unconfigured_query_not_found = 1;
+    reset_open_observation();
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
+    assert(!usb_open(&b, &selector, -1, 0));
+    assert(config_set_calls == 1 && config_value == 1);
+    assert(query_calls == 1 && claim_calls == 1);
+    assert_open_order("GSAC");
+#else
+    closed = close_calls;
+    assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
+    assert(query_calls == 1 && config_get_calls == 0 && claim_calls == 0);
+    assert(close_calls == closed + 1);
+    assert_open_order("A");
+#endif
+    unconfigured_query_not_found = 0;
+
+#if defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32)
+    config_value = 0;
+    active_result = 0;
+    interface_not_found_queries = 3;
+    fake_monotonic = (struct timespec){0, 0};
+    reset_open_observation();
+    assert(!usb_open(&b, &selector, -1, 0));
+    assert(config_set_calls == 1 && query_calls == 4 && claim_calls == 1);
+    assert_open_order("GSAAAAC");
+    usb_close(b);
+
+    config_value = 0;
+    interface_not_found_queries = 200;
+    fake_monotonic = (struct timespec){0, 0};
+    reset_open_observation();
+    closed = close_calls;
+    assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
+    assert(config_set_calls == 1 && query_calls == 100 && claim_calls == 0);
+    assert(close_calls == closed + 1);
+    assert(open_order_count == sizeof(open_order));
+    assert(!strncmp(open_order, "GSAAAAAAAAAAAAAA", sizeof(open_order)));
+
+    config_value = 0;
+    interface_not_found_queries = 1;
+    active_result = LIBUSB_ERROR_IO;
+    fake_monotonic = (struct timespec){0, 0};
+    reset_open_observation();
+    closed = close_calls;
+    assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
+    assert(config_set_calls == 1 && query_calls == 2 && claim_calls == 0);
+    assert(close_calls == closed + 1);
+    assert_open_order("GSAA");
+    interface_not_found_queries = 0;
+    active_result = 0;
+
+    config_value = 0;
+    descriptor_product = 0x103b;
+    reset_open_observation();
+    assert(!usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295));
+    assert(query_calls == 1 && config_set_calls == 1 && claim_calls == 1);
+    assert_open_order("AGSC");
+    usb_close(b);
+    descriptor_product = 0x102b;
+#endif
+
+    config_value = 1;
+    reset_open_observation();
+    assert(!usb_open(&b, &selector, -1, 0));
+    assert(config_get_calls == 1 && config_set_calls == 0 && config_value == 1);
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
+    assert_open_order("GAC");
+#else
+    assert_open_order("AGC");
+#endif
+    usb_close(b);
+
+    active_result = LIBUSB_ERROR_NOT_FOUND;
+    reset_open_observation();
+    closed = close_calls;
+    assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
+    assert(query_calls == 1 && claim_calls == 0 && close_calls == closed + 1);
+    active_result = 0;
+
+    config_value = 0;
+    config_set_result = LIBUSB_ERROR_IO;
+    reset_open_observation();
+    closed = close_calls;
+    assert(usb_open(&b, &selector, -1, 0) == 7 && !b);
+    assert(config_set_calls == 1 && claim_calls == 0 && close_calls == closed + 1);
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
+    assert(query_calls == 0);
+    assert_open_order("GS");
+#else
+    assert(query_calls == 1);
+    assert_open_order("AGS");
+#endif
+    config_set_result = 0;
+    config_value = 1;
+
+    active_result = 1;
+    reset_open_observation();
+    assert(usb_open(&b, &selector, -1, 0) == 4 && !b);
+    assert(detach_calls == 0 && claim_calls == 0);
+    reset_open_observation();
+    assert(!usb_open(&b, &selector, -1, 1));
+    assert(detach_calls == 1 && claim_calls == 1);
+    usb_close(b);
+    active_result = 0;
+}
 static void open_tests(void) {
     usb_selector selector;
     assert(!usb_selector_parse("0", &selector));
@@ -460,9 +659,14 @@ static void dt295_model_selection(void) {
     usb_backend *b = NULL;
     descriptor_product = 0x103b;
     assert(usb_open(&b, &selector, -1, 0) == 3 && !b);
+    config_value = 0;
+    unconfigured_query_not_found = 0;
+    reset_open_observation();
     assert(!usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295));
+    assert_open_order("AGSC");
     assert(usb_model(b) == USB_MODEL_DT295 && usb_native_context(b) && usb_native_handle(b));
     usb_close(b);
+    config_value = 1;
     descriptor_product = 0x102b;
     assert(usb_open_model(&b, &selector, -1, 0, USB_MODEL_DT295) == 3 && !b);
     assert(!usb_open(&b, &selector, -1, 0));
@@ -554,6 +758,7 @@ static void dt295_model_selection(void) {
     descriptor_product = 0x102b;
 }
 int main(void) {
+    configuration_tests();
     open_tests();
     failure_tests();
     usb_backend *b = calloc(1, sizeof(*b));
