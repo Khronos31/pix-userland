@@ -75,7 +75,7 @@ void usage(FILE* file) noexcept
 {
     std::fprintf(file,
         "usage: pix-ts (--device serial:SELECTOR|usb:SELECTOR | --instance TOKEN) "
-        "(-c|--channel CH | -f|--freq HZ) [--system isdb-t|isdb-s] "
+        "[--receiver ID] (-c|--channel CH | -f|--freq HZ) [--system isdb-t|isdb-s] "
         "[--slot N|--tsid N] [--time SECONDS|-] [-o PATH|-] "
         "[--runtime-dir PATH] [--group] [--packet-count N] "
         "[--tune-timeout-ms N]\n");
@@ -111,22 +111,16 @@ int run(int argc, char** argv)
         return 0;
     }
 
-    std::vector<const char*> normalized;
-    normalized.reserve(static_cast<std::size_t>(argc) + 2U);
-    normalized.push_back(argv[0]);
-    normalized.push_back("--receiver");
-    normalized.push_back("0");
     for (int index = 1; index < argc; ++index) {
         if (std::strcmp(argv[index], "--lnb-voltage") == 0) {
             std::fprintf(stderr, "pix-ts: --lnb-voltage is not supported by PIX\n");
             return 2;
         }
-        normalized.push_back(argv[index]);
     }
     const TsClientProfile profile{"pix-ts", "pix-userland",
         dtv::userland::identity::Product::pix, true, false, nullptr, true};
     const Px4TsArguments arguments = parse_px4_ts_product_arguments(
-        static_cast<int>(normalized.size()), normalized.data(), profile);
+        argc, const_cast<const char* const*>(argv), profile);
     if (!arguments.valid) {
         std::fprintf(stderr, "argument error: %s\n", arguments.error.c_str());
         usage(stderr);
