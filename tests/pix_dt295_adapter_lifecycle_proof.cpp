@@ -9,8 +9,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
+#include <vector>
 
 extern "C" {
 int dt295_actual_fixture_open(const char *);
@@ -232,10 +235,16 @@ int main()
         CHECK(file != nullptr);
         std::fclose(file);
     }
+    std::ifstream assets_file(assets_path, std::ios::binary);
+    CHECK(assets_file.good());
+    const std::vector<std::uint8_t> assets{
+        std::istreambuf_iterator<char>(assets_file), std::istreambuf_iterator<char>()};
+    CHECK(!assets.empty());
 
     Clock clock;
     usb_selector selector{};
-    pix::capture::dt295::ReceiverAdapter adapter(directory, selector, clock, 0U, 2048U);
+    pix::capture::dt295::ReceiverAdapter adapter(
+        assets.data(), assets.size(), selector, clock, 0U, 2048U);
     if (!adapter.ready()) {
         std::fprintf(stderr, "FAILED adapter init_error=%d\n",
                      static_cast<int>(adapter.init_error()));
