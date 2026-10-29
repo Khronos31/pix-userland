@@ -50,7 +50,7 @@ def generate(dt181_path, dt295_path, output_directory, source_revision,
                          "sha256": hashlib.sha256(dt181).hexdigest()},
             },
             "dt295": {
-                "provenance": "Private runtime bundle described by docs/dt295.md; not covered by the PIX MIT license",
+                "provenance": "Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX MIT license",
                 "file": {"name": expected["dt295"]["file"], "size": len(dt295),
                          "sha256": hashlib.sha256(dt295).hexdigest()},
             },

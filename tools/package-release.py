@@ -21,7 +21,7 @@ SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.tx
                 'packaging/pix-termux',
                 'firmware/dt181.bin', 'firmware/dt295.bin', 'firmware/preserved/verified-ts-iv.bin'}
 DT181_PROVENANCE = 'StationTV/Pixela device data; not covered by the PIX MIT license'
-DT295_PROVENANCE = 'Private runtime bundle described by docs/dt295.md; not covered by the PIX MIT license'
+DT295_PROVENANCE = 'Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX MIT license'
 
 def git_value(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
