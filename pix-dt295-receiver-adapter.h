@@ -75,7 +75,7 @@ public:
     dtv::userland::Result<ReadResult> read(
         const Attachment&, dtv::userland::MutableByteView,
         std::chrono::milliseconds) noexcept;
-    Result release_final(const Attachment&) noexcept;
+    Result release_final(const Attachment&) noexcept override;
 
 private:
     struct Io final {
