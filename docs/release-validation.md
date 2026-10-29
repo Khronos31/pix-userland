@@ -10,6 +10,7 @@
 |---|---|---|
 | 機種初回 | 各製品の全対象機種で、機種ごとに代表機の2時間連続受信と毎release項目を実施する。必要時項目も通し、結果は機種別に初回記録へ残す。 | 当該機種の公開能力・対応機能に沿って実行し、別機種の結果で代替しない。 |
 | 回帰（毎release） | 代表機で2時間連続受信する。全配布archiveをそれぞれ対応するnative OS/ABIで短時間実機回帰し、`--list-json`、機種の公開同時受信能力、TS/counter/終了値を確認する。最大同時受信で地上波・衛星の対象3波を確認できない場合は不足波を短時間取得する。受信中の状態と反復制御、正常停止、process/FD/IPC残留なし、対応機能のCARD挿抜、USB抜去/再挿入を確認する。native PC/SC/WinSCard経路がある製品・OSでは製品CLI経路と分けて確認する。 | 各archive/OS/ABIのrunと各機種の結果を分ける。未対応機能は理由付きでN/Aとし、未実施や失敗を合格に読み替えない。 |
+| release前TS品質（毎release） | T15の指定機種・patternを代表Linux x86_64 glibc、Windows x86_64、macOS arm64で各300秒取得し、各TSでTEI率と採用CCを別判定する。 | captureごとのTS/hash/packet数/TEI数/採用CC/終了値とT15 JSONを記録し、既存T09結果と人間判断を別に保つ。 |
 | 必要に応じて | 対応機能ではLNB出力電圧を実測し、非対応機種の拒否を確認する。複数チューナーの列挙/daemon並列と、変更機能に応じた機種×OS/ABIの追加確認も行う。 | 適用する機種・機能・OS/ABIと実測値を記録する。 |
 | 初回/major | 必要時項目を通し、代表機で全対象の無料channelを各10秒TS取得する。ソークはmacOS/Windows各30分、残るOS/ABI各10分とする。全channel取得は代表機だけで行い、別途指示されたソークは別に記録する。 | 30分/10分は各OS/ABIの個別時間であり、共通の一般定義である「一定時間以上の連続TS取得」を置き換えない。 |
 
@@ -428,7 +429,7 @@ OS/ABI別の具体操作は [USB切断・LNBの環境別手順](#pix-os-t07-reci
 - **停止/cleanup:** 無関係processへsignalしない。test専用runtimeだけ片付け失敗log保持。
 - **記録:** PID/role/exit、process/FD/IPC/socket/runtime、復旧状態。
 
-### 共通helperの固定取得（T09前提）
+### 共通helperの固定取得（T09/T15前提）
 
 T09を実行する前に、候補sourceとは独立した共通runbook helperをSiano runbookのimmutable commit `571491777d93cfbfb9b7f6238f2ab6c368b4e46d`から取得する。candidate checkout/archive内のhelper有無に依存しない。POSIX/Termuxでは次を一度実行し、以後の全captureで`$TOOL/ts-check.py`を使う。
 
@@ -438,6 +439,10 @@ TOOL="$WORK/tooling"; mkdir -m 700 -p "$TOOL"
 gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-check.py?ref=$RUNBOOK_REF" > "$TOOL/ts-check.py"
 if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | sha256sum -c -; else printf '%s  %s\n' "$HELPER_SHA256" "$TOOL/ts-check.py" | shasum -a 256 -c -; fi
 printf '%s\n' "$RUNBOOK_REF $HELPER_SHA256" > "$LOG/ts-helper-version.txt"
+QUALITY_REF='9d9d998672952e0608728fa35cc94e59eaf1b26e'; QUALITY_SHA256='8414beef6c3735ffa480a907b332a5776d9a7c734dacde9203920e18e4dce190'
+gh api -H 'Accept: application/vnd.github.raw' "repos/Khronos31/siano-userland/contents/docs/release-validation/ts-quality-check.py?ref=$QUALITY_REF" > "$TOOL/ts-quality-check.py"
+if command -v sha256sum >/dev/null 2>&1; then printf '%s  %s\n' "$QUALITY_SHA256" "$TOOL/ts-quality-check.py" | sha256sum -c -; else printf '%s  %s\n' "$QUALITY_SHA256" "$TOOL/ts-quality-check.py" | shasum -a 256 -c -; fi
+printf '%s\n' "$QUALITY_REF $QUALITY_SHA256" > "$LOG/ts-quality-helper-version.txt"
 ```
 
 Windows PowerShell 5.1でも同じ固定版を新しいtooling directoryへ取得し、hash一致後にのみ使う。
@@ -450,6 +455,12 @@ Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khron
 $Actual = (Get-FileHash -LiteralPath $Helper -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($Actual -ne $HelperSha256) { throw 'runbook TS helper hash mismatch' }
 "$RunbookRef $Actual" | Set-Content (Join-Path $LOG 'ts-helper-version.txt')
+$QualityRef = '9d9d998672952e0608728fa35cc94e59eaf1b26e'; $QualitySha256 = '8414beef6c3735ffa480a907b332a5776d9a7c734dacde9203920e18e4dce190'
+$QualityGate = Join-Path $Tool 'ts-quality-check.py'
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Khronos31/siano-userland/$QualityRef/docs/release-validation/ts-quality-check.py" -OutFile $QualityGate
+$QualityActual = (Get-FileHash -LiteralPath $QualityGate -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($QualityActual -ne $QualitySha256) { throw 'release TS quality helper hash mismatch' }
+"$QualityRef $QualityActual" | Set-Content (Join-Path $LOG 'ts-quality-helper-version.txt')
 ```
 
 helperのversionはrunbook Git commitとSHA-256の組で固定する。candidate source SHA、artifact digest、helper ref/hashを別々に記録する。
@@ -518,11 +529,48 @@ if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
 - **停止/cleanup:** candidateと失敗証拠を保持。tag/releaseは別依頼。
 - **記録:** T-ID、candidate/host/model、state、log、blocker、判定根拠。
 
+### T15 release前5分TS品質判定
+
+- **適用対象/頻度:** 毎release。T00で固定した同一candidateを、代表Linux x86_64 glibc、Windows x86_64、macOS arm64で実施する。既存の2時間soak、archive回帰、T09を置き換えない。
+- **準備:** 各環境のnative candidateと新しい`$LOG`を用意する。DT181-PU0とDT295を混ぜず、各機種の既存T03 channel/receiver条件で各TSを300秒取得する。PIX READMEの受信部節で両機種ともreceiver 0のみ（地デジ・BS・CS共用）と定義され、`src/usb_listing.c`も両modelについて`receivers=1` / `receiver=0`を公開する。従ってT02の公開receiver数照合とT03の公開receiver数分の取得に基づき、各profileの必要集合は`{0}`。
+- **実操作/利用者への依頼:** 各機種のcaptureについて実開始/終了時刻、client exit、TS hashを記録する。各TSで既存T09 `ts-check.py`を実行しJSONと終了値を保存する。parserが非0でも出力を残し、元のT09結果とT15結果を分ける。それぞれの機種の全scan JSONを対応profileへ渡す。
+
+| profile | pattern / 個別TS | TEI合格 | 採用CC合格 |
+|---|---|---:|---:|
+| `pix-dt181` | PIX-DT181-PU0の各TS | 0件 | 12件未満 |
+| `pix-dt295` | PIX-DT295の各TS | 0件 | 12件未満 |
+
+各環境で機種ごとに実行する。
+Windows PowerShellでは`python $QualityGate --profile pix-dt181 --environment windows 0=<scan-json>`、macOSでは`python3 "$TOOL/ts-quality-check.py" --profile pix-dt181 --environment macos 0=<scan-json>`を使う。DT295も同様に`pix-dt295`を指定し、JSONと終了値を保存する。
+
+```sh
+PROFILE='pix-dt181'; ENVIRONMENT='representative-linux'
+if python3 "$TOOL/ts-quality-check.py" --profile "$PROFILE" --environment "$ENVIRONMENT" "0=$LOG/dt181-rx0.ts-check.json" > "$LOG/t15-$PROFILE.json"; then T15_RC=0; else T15_RC=$?; fi
+printf '%s\n' "$T15_RC" > "$LOG/t15-$PROFILE.rc"
+```
+
+- **Windows PowerShell T15例:** T09と同じhelperで各TS JSON・stderr・終了値を残す。非0でもthrowせず数値判定へ進み、T09の記録・評価は変更しない。
+
+```powershell
+$Ts = Join-Path $LOG 'dt181-rx0.ts'; $Json = Join-Path $LOG 'dt181-rx0.ts-check.json'; $Err = Join-Path $LOG 'dt181-rx0.ts-check.err'
+& python $Helper $Ts 1> $Json 2> $Err; $ParserRc = $LASTEXITCODE
+$ParserRc | Set-Content (Join-Path $LOG 'dt181-rx0.ts-check.rc')
+$ScanArg = '0=' + $Json
+& python $QualityGate --profile pix-dt181 --environment windows $ScanArg 1> (Join-Path $LOG 't15-pix-dt181.json') 2> (Join-Path $LOG 't15-pix-dt181.err'); $T15Rc = $LASTEXITCODE
+$T15Rc | Set-Content (Join-Path $LOG 't15-pix-dt181.rc')
+```
+
+- **期待値/終了値:** 各TSでTEI=0かつ採用`tei_null_excluded` CC<12件が必要。0 packet、scan JSON欠落/不正、一つでも不合格のTSがあればtoolはFAILとする。tool出力の`scope`は`tei_cc_numeric_only`、`capture_conditions_verified_by_tool`はfalse、`t15_overall`は`not_determined_by_tool`とし、数値判定とT15全体を混同しない。各modelのT15全体は版別記録で、receiver 0のTSが揃い、記録時刻で300秒以上、client exitが0（指定時間の満了による正常終了）であり、T09 rc/JSON・tool出力が記録され、読み取り可能なscanが揃った場合に限って完了判定する。client exitが非0なら、TSが300秒揃っていても未完了（FAIL扱いではなく人間判断待ち）とし、終了値とTSを保持する。自動再取得しない。T09 rcの非0だけではT15完了要件の失敗にせず、T09側の評価に残す。これらの完了条件が欠ける場合は未完了。完了したscanで数値条件を満たせば「完了・数値PASS」、数値条件を外せば「完了・数値FAIL」として人間の逐次判断を待つ。T15はTEI/CC判定のみで、既存T09 parser exitやsync/framing判定を上書きしない。
+- **停止/cleanup:** 自動再取得・自動修復はしない。不合格で停止して人間の逐次判断を待つ。
+- **記録:** profile/pattern、model、環境、実測capture秒数、candidate/archive/helper ref/hash、TS path/hash、全TSのpacket数/TEI数/TEI率/採用CC、clientとparser終了値、T15 JSON/終了値を版別記録から参照する。人間が不合格を受け入れる場合は理由・判断者・コメント等の参照を別に記録し、測定値・T15 JSONの自動判定を編集しない。
+
 N/Aは製品機能上該当しない項目だけに使う。OS/ABI候補のunsupported、candidate欠落、未実施、失敗、環境不能は版別結果で未達とし、passに読み替えない。手順に記した期待値は実測結果ではない。
 
 ## 対象アーカイブ・環境から全試験への対応
 
 各正式archive/E-IDで適用されるT00–T14を独立して実行する。試験項目の準備、操作、期待値/終了値、停止/cleanup、記録は「共通試験シナリオ T00–T14」を唯一の定義とし、下表はarchiveごとのOS/ABI環境手順への参照を示す。異なるarchive、libc、OS/ABI、USB access boundaryの結果で代替しない。機能対象外はT本文と製品固有条件に理由を記し、未実施・unsupported・候補未入手・環境不足は未達として記録する。
+
+T15はこのarchive matrixと別に、指定candidateの代表Linux x86_64 glibc、Windows x86_64、macOS arm64で実施する。T15の3環境は他archive/OS/ABIの結果で代替しない。
 
 | archive / E-ID / 実行環境とprocedure |
 |---|
