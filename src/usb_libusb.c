@@ -211,7 +211,7 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
 #ifndef _WIN32
     b->wrapped_fd = -1;
 #endif
-#if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
+#if defined(__APPLE__) || defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY)
     int configuration_changed = 0;
 #endif
     int r = init(&b->ctx, fd);
