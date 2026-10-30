@@ -64,7 +64,7 @@ if [ "$mode" = android ]; then
     [ -x "$cc" ] && [ -x "$cxx" ] || { echo "Android compiler missing: $cc or $cxx" >&2; exit 2; }
     export AR="$toolchain/bin/llvm-ar" RANLIB="$toolchain/bin/llvm-ranlib"
     configure_host=--host=$triplet
-    extra_link=-llog
+    extra_link='-llog -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384'
     toolchain_file=$ndk/build/cmake/android.toolchain.cmake
 elif [ "$mode" = musl ]; then
     "$cc" -E -dM -include features.h - < /dev/null > "$build/compiler-macros"
