@@ -307,6 +307,14 @@ target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
 
+add_executable(pix_ts_profile_tests tests/pix_ts_profile_tests.cpp)
+target_include_directories(pix_ts_profile_tests PRIVATE tools)
+target_compile_features(pix_ts_profile_tests PRIVATE cxx_std_17)
+target_compile_options(pix_ts_profile_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_ts_profile_tests PRIVATE dtv::host_ts dtv::tuning)
+add_test(NAME pix_ts_profile_tests COMMAND pix_ts_profile_tests)
+
 add_executable(pixd_fixture pixd.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c
     "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
