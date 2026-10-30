@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <dtv/host_ts/px4_ts_core.h>
+#include "pix_ts_profile.h"
 #ifdef _WIN32
 #include <dtv/host_ts/px4_ts_windows_output.h>
 #include "px4_windows_args.h"
@@ -111,8 +112,7 @@ int run(int argc, char** argv)
         return 0;
     }
 
-    const TsClientProfile profile{"pix-ts", "pix-userland",
-        dtv::userland::identity::Product::pix, true, false, nullptr, true};
+    const TsClientProfile& profile = pix::core_integration::kPixTsProfile;
     const Px4TsArguments arguments = parse_px4_ts_product_arguments(
         argc, const_cast<const char* const*>(argv), profile);
     if (!arguments.valid) {
