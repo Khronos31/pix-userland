@@ -49,6 +49,10 @@ struct FakeStream final {
     bool bootstrap_sent = false;
     unsigned continuity = 0U;
     unsigned generations = 0U;
+    std::atomic<unsigned> stop_abandon_remaining{0U};
+    std::atomic<unsigned> stop_calls{0U};
+    std::atomic<unsigned> destroy_calls{0U};
+    std::atomic<bool> quiescent{true};
 };
 
 FakeStream g_stream;
@@ -176,6 +180,7 @@ extern "C" int __wrap_dt295_stream_start(libusb_context*, libusb_device_handle*,
     if (stream == nullptr) return LIBUSB_ERROR_INVALID_PARAM;
     g_stream.bootstrap_sent = false;
     g_stream.continuity = 0U;
+    g_stream.quiescent.store(false, std::memory_order_release);
     ++g_stream.generations;
     *stream = reinterpret_cast<dt295_stream*>(&g_stream);
     return 0;
@@ -218,8 +223,26 @@ extern "C" int __wrap_random_bytes(void* output, std::size_t length)
     return 0;
 }
 
-extern "C" int __wrap_dt295_stream_stop(dt295_stream*, unsigned) { return 0; }
-extern "C" int __wrap_dt295_stream_destroy(dt295_stream*) { return 0; }
+extern "C" int __wrap_dt295_stream_stop(dt295_stream*, unsigned)
+{
+    ++g_stream.stop_calls;
+    unsigned remaining = g_stream.stop_abandon_remaining.load(std::memory_order_acquire);
+    while (remaining != 0U) {
+        if (g_stream.stop_abandon_remaining.compare_exchange_weak(
+                remaining, remaining - 1U, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return DT295_STREAM_ABANDONED;
+    }
+    g_stream.quiescent.store(true, std::memory_order_release);
+    return 0;
+}
+
+extern "C" int __wrap_dt295_stream_destroy(dt295_stream*)
+{
+    ++g_stream.destroy_calls;
+    if (!g_stream.quiescent.load(std::memory_order_acquire)) return DT295_STREAM_ABANDONED;
+    return 0;
+}
 
 int main()
 {
@@ -351,6 +374,51 @@ int main()
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
                  "return T13");
 
+    {
+        const unsigned stop_calls_before = g_stream.stop_calls.load();
+        const unsigned destroy_calls_before = g_stream.destroy_calls.load();
+        const unsigned close_calls_before = g_usb_close_calls;
+        CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                     "pending start");
+        const unsigned generations_before = g_stream.generations;
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!adapter.stop_capture(0U, ReceiverSystem::terrestrial));
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 2U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        CHECK(!g_stream.quiescent.load());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.generations == generations_before);
+
+        Attachment blocked = attachment_for(7U);
+        CHECK(!adapter.start_capture(0U, ReceiverSystem::terrestrial));
+        CHECK(!adapter.attach(blocked));
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.generations == generations_before);
+
+        g_stream.stop_abandon_remaining.store(0U, std::memory_order_release);
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "pending stop retry");
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 3U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "pending duplicate stop");
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 3U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before);
+
+        CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                     "reuse start");
+        CHECK(g_stream.generations == generations_before + 1U);
+        CHECK_RESULT(adapter.attach(blocked), "reuse attach");
+        CHECK(read_ts(adapter, blocked, 188U * 8U));
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "reuse stop");
+        CHECK_RESULT(adapter.detach(blocked), "reuse detach");
+        drain_attachment(adapter, blocked);
+    }
+
     dt295_actual_fixture_set_omit_cat(1);
     unsigned generations = g_stream.generations;
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
@@ -403,6 +471,34 @@ int main()
     CHECK_RESULT(adapter.shutdown(), "shutdown");
     CHECK(dt295_actual_fixture_control_calls() > control_calls_after_fatal);
     CHECK(g_usb_close_calls == 1U);
+
+    {
+        pix::capture::dt295::ReceiverAdapter retained(
+            assets.data(), assets.size(), selector, clock, 0U, 2048U);
+        CHECK(retained.ready());
+        CHECK_RESULT(retained.open(0U), "retained open");
+        CHECK_RESULT(retained.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL,
+                                         1000U),
+                     "retained tune");
+        CHECK_RESULT(retained.start_capture(0U, ReceiverSystem::terrestrial),
+                     "retained start");
+        const unsigned close_calls_before = g_usb_close_calls;
+        const unsigned destroy_calls_before = g_stream.destroy_calls.load();
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!retained.shutdown());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!retained.shutdown());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        g_stream.stop_abandon_remaining.store(0U, std::memory_order_release);
+        CHECK_RESULT(retained.shutdown(), "retained shutdown");
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before + 1U);
+        CHECK_RESULT(retained.shutdown(), "retained repeated shutdown");
+        CHECK(g_usb_close_calls == close_calls_before + 1U);
+    }
 
     CHECK(g_stream.generations >= 4U);
     dt295_actual_fixture_close();

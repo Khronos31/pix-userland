@@ -449,6 +449,7 @@ ReceiverAdapter::Result ReceiverAdapter::halt_unlocked() noexcept
 
 ReceiverAdapter::Result ReceiverAdapter::start_stream_unlocked() noexcept
 {
+    if (stream_ != nullptr) return Result::failure(Error::BUSY);
     if (usb_ == nullptr) return Result::failure(Error::DISCONNECTED);
     dt295_stream* stream = nullptr;
     const int rc = dt295_stream_start(
@@ -496,6 +497,7 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
 {
     if (recovery_failed_) return Result::failure(Error::USB_IO);
     if (streaming_) return Result::success();
+    if (stream_ != nullptr) return Result::failure(Error::BUSY);
     if (device_ == nullptr || routes_ == nullptr)
         return Result::failure(Error::DISCONNECTED);
     char error[256]{};
@@ -756,7 +758,13 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
     Result outcome = Result::success();
     if (stream_ != nullptr) {
         const auto halted = halt_unlocked();
-        if (!halted) outcome = halted;
+        if (!halted) {
+            // The event thread still owns the stream, handle and context.
+            // Keep every resource reachable for a later stop; releasing the
+            // USB handle here would let callbacks touch freed memory.
+            streaming_ = false;
+            return halted;
+        }
     }
     {
         std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
