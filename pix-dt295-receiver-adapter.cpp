@@ -687,7 +687,9 @@ void ReceiverAdapter::pump() noexcept
             if (!ready) continue;
             {
                 std::lock_guard<std::mutex> lock(session_.mutex);
-                if (!stream_attached_ || session_.incarnation != attachment_incarnation_ ||
+                if (!stream_attached_ || !session_.attached ||
+                    session_.terminal != dtv::userland::detail::StreamTerminal::none ||
+                    session_.incarnation != attachment_incarnation_ ||
                     !same_identity(session_.identity, attachment_))
                     continue;
                 session_.append_locked(dtv::userland::ByteView{packet, 188U});

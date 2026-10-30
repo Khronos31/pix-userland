@@ -28,6 +28,7 @@ unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[4][188], int
 void dt295_actual_fixture_recording_packet(uint8_t packet[188], unsigned continuity);
 void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 int __real_dt295_reprepare_plan(dt295 *, const dt295_route_plan *, char *, std::size_t);
+int __real_dt295_routes_feed(dt295_routes *, const uint8_t packet[188]);
 }
 
 namespace {
@@ -50,6 +51,10 @@ std::atomic<bool> g_split_pat_sent{false};
 std::atomic<int> g_read_fail{0};
 std::atomic<int> g_start_fail{0};
 std::atomic<int> g_reprepare_fail{0};
+std::atomic<bool> g_arm_restart_block{false};
+std::atomic<int> g_race_remaining{0};
+std::atomic<int> g_race_stage{0};
+std::atomic<bool> g_release_first{false};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
     std::atomic<std::uint64_t> offset_ms{0U};
@@ -112,6 +117,10 @@ void reset_stream(int mode)
     g_read_fail.store(0, std::memory_order_release);
     g_start_fail.store(0, std::memory_order_release);
     g_reprepare_fail.store(0, std::memory_order_release);
+    g_arm_restart_block.store(false, std::memory_order_release);
+    g_race_remaining.store(0, std::memory_order_release);
+    g_race_stage.store(0, std::memory_order_release);
+    g_release_first.store(false, std::memory_order_release);
     g_bootstrap_sent = false;
     g_split_phase = 0;
     g_continuity = 0U;
@@ -386,6 +395,41 @@ int case_read_failure(const std::vector<std::uint8_t> &assets)
     return 0;
 }
 
+int case_terminal_detach_race(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0);
+    g_arm_restart_block.store(true, std::memory_order_release);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "race open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "race tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "race start");
+    const Attachment attachment = attachment_for(8U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "race attach");
+    for (unsigned attempt = 0U; attempt < 3000U && g_race_stage.load() != 1; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_race_stage.load() == 1);
+    CHECK(rig.adapter.acquisition().phase == Phase::ready);
+    rig.adapter.mark_disconnected(0U);
+    CHECK(rig.adapter.acquisition().phase == Phase::terminal);
+    CHECK(rig.adapter.acquisition().failure == Failure::disconnected);
+    g_release_first.store(true, std::memory_order_release);
+    (void)rig.adapter.detach(attachment);
+    std::uint8_t buffer[188U]{};
+    std::size_t bytes = 1U;
+    bool eof = false, timed_out = false;
+    CHECK(read_any(rig.adapter, attachment, buffer, sizeof(buffer), &bytes, &eof, &timed_out));
+    CHECK(bytes == 0U && eof && !timed_out);
+    const auto final = rig.adapter.final_snapshot(attachment);
+    CHECK(final);
+    CHECK(final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::disconnected));
+    (void)rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial);
+    CHECK_RESULT(rig.adapter.close(0U), "race close");
+    return 0;
+}
+
 int case_disconnected_and_reopen(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0);
@@ -479,6 +523,8 @@ extern "C" int __wrap_dt295_stream_start(libusb_context *, libusb_device_handle 
     g_split_phase = 0;
     g_continuity = 0U;
     if (initial) g_split_pat_sent.store(false, std::memory_order_release);
+    if (!initial && g_arm_restart_block.exchange(false, std::memory_order_acq_rel))
+        g_race_remaining.store(1, std::memory_order_release);
     *stream = reinterpret_cast<dt295_stream *>(static_cast<std::uintptr_t>(0x296));
     return 0;
 }
@@ -547,6 +593,19 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     return static_cast<int>(length);
 }
 
+extern "C" int __wrap_dt295_routes_feed(dt295_routes *routes, const uint8_t packet[188])
+{
+    const int remaining = g_race_remaining.load(std::memory_order_acquire);
+    const int previous = remaining > 0
+        ? g_race_remaining.fetch_sub(1, std::memory_order_acq_rel) : 0;
+    if (previous == 1) {
+        g_race_stage.store(1, std::memory_order_release);
+        while (!g_release_first.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return __real_dt295_routes_feed(routes, packet);
+}
+
 extern "C" int __wrap_dt295_stream_stop(dt295_stream *, unsigned) { return 0; }
 extern "C" int __wrap_dt295_stream_destroy(dt295_stream *) { return 0; }
 
@@ -595,6 +654,7 @@ int main()
                            dtv::userland::detail::StreamTerminal::bridge_fatal), true) == 0);
     CHECK(case_reprepare_failure(assets) == 0);
     CHECK(case_read_failure(assets) == 0);
+    CHECK(case_terminal_detach_race(assets) == 0);
     CHECK(case_disconnected_and_reopen(assets) == 0);
 
     dt295_actual_fixture_close();
