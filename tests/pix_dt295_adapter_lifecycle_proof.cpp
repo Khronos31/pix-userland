@@ -27,6 +27,7 @@ void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 uint16_t dt295_actual_fixture_satellite_tsid(void);
 void dt295_actual_fixture_set_omit_cat(int);
 void dt295_actual_fixture_set_tsid_delay(unsigned);
+void dt295_actual_fixture_set_bootstrap_tsid(uint16_t);
 void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
 void dt295_actual_fixture_fail_activation_once(void);
 unsigned dt295_actual_fixture_control_calls(void);
@@ -365,6 +366,7 @@ int main()
     CHECK(locked && locked.value());
     CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
     Attachment satellite = attachment_for(3U, ReceiverSystem::satellite);
+    dt295_actual_fixture_set_bootstrap_tsid(16400U);
     CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::satellite), "start satellite");
     CHECK_RESULT(adapter.attach(satellite), "attach satellite");
     CHECK(read_ts(adapter, satellite, 188U * 8U));
@@ -426,7 +428,15 @@ int main()
     Attachment no_cat_t = attachment_for(4U);
     CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial), "no-CAT start");
     CHECK_RESULT(adapter.attach(no_cat_t), "no-CAT attach");
-    CHECK(read_ts(adapter, no_cat_t, 188U * 8U));
+    std::uint8_t probe[188U]{};
+    const auto probe_result = adapter.read(no_cat_t,
+        dtv::userland::MutableByteView{probe, sizeof(probe)},
+        std::chrono::milliseconds(5));
+    CHECK(probe_result);
+    CHECK(probe_result.value().bytes == 0U && probe_result.value().timed_out &&
+          !probe_result.value().eof);
+    CHECK(adapter.acquisition().phase ==
+          pix::capture::dt295::ReceiverAdapter::AcquisitionPhase::preparing);
     CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "no-CAT stop");
     CHECK_RESULT(adapter.detach(no_cat_t), "no-CAT detach");
     drain_attachment(adapter, no_cat_t);

@@ -34,6 +34,27 @@ public:
     using Attachment = dtv::userland::detail::Attachment;
     using ReadResult = dtv::userland::detail::StreamReadResult;
 
+    enum class AcquisitionPhase : std::uint8_t { idle = 0U, preparing, ready, terminal };
+    enum class AcquisitionFailure : std::uint8_t {
+        none = 0U,
+        deadline,
+        unsupported,
+        plan,
+        multiple_ecm,
+        satellite_tsid,
+        usb,
+        packet,
+        disconnected
+    };
+    struct AcquisitionSnapshot final {
+        AcquisitionPhase phase = AcquisitionPhase::idle;
+        AcquisitionFailure failure = AcquisitionFailure::none;
+        std::uint64_t tune_generation = 0U;
+        std::uint64_t acquisition_generation = 0U;
+        std::uint64_t plan_generation = 0U;
+    };
+    AcquisitionSnapshot acquisition() const noexcept;
+
     ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
                     const usb_selector&, Clock&, ReceiverId,
                     std::size_t queue_packets, int device_fd = -1) noexcept;
@@ -106,6 +127,9 @@ private:
     void pump() noexcept;
     static void* pump_entry(void*) noexcept;
     Result stop_attached(const Attachment&) noexcept;
+    void fail_acquisition(AcquisitionFailure, dtv::userland::detail::StreamTerminal,
+                          dtv::userland::Error) noexcept;
+    void end_session_for_acquisition(dtv::userland::detail::StreamTerminal) noexcept;
 
     Clock& clock_;
     ReceiverId receiver_;
@@ -127,9 +151,17 @@ private:
     bool satellite_tuned_ = false;
     bool satellite_tsid_valid_ = false;
     std::uint16_t satellite_tsid_ = 0U;
+    ReceiverSystem tuned_system_ = ReceiverSystem::terrestrial;
     bool stream_attached_ = false;
+    bool session_ended_ = false;
     Attachment attachment_{};
     std::uint64_t attachment_incarnation_ = 0U;
+    std::uint64_t acquisition_started_ms_ = 0U;
+    std::atomic<AcquisitionPhase> acquisition_phase_{AcquisitionPhase::idle};
+    std::atomic<AcquisitionFailure> acquisition_failure_{AcquisitionFailure::none};
+    std::atomic<std::uint64_t> tune_generation_{0U};
+    std::atomic<std::uint64_t> acquisition_generation_{0U};
+    std::atomic<std::uint64_t> plan_generation_{0U};
     dtv::userland::detail::PacketStreamSession session_;
     std::mutex operation_mutex_;
     std::mutex protocol_mutex_;
