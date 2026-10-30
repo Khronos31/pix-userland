@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <limits>
 #include <new>
 #include <string>
@@ -50,6 +51,35 @@ bool same_identity(const dtv::userland::detail::Attachment& left,
     return dtv::userland::detail::PacketStreamSession::same_identity(left, right);
 }
 
+struct RetiredStream final {
+    dt295_stream* stream;
+    usb_backend* usb;
+    ::dt295* device;
+    dt295_routes* routes;
+    dt295_assets* assets;
+};
+
+/* The stream still owns its event thread and transfers after the adapter is
+ * gone. This worker keeps only the retired resources; device IO is not called
+ * once the adapter has been destroyed, so no io_/clock_ reference remains. */
+void* retire_stream_entry(void* opaque) noexcept
+{
+    auto* retired = static_cast<RetiredStream*>(opaque);
+    for (;;) {
+        const int rc = dt295_stream_stop(retired->stream, 3000U);
+        if (rc == 0) break;
+        const struct timespec pause = {0, 100000000L};
+        nanosleep(&pause, nullptr);
+    }
+    (void)dt295_stream_destroy(retired->stream);
+    dt295_routes_destroy(retired->routes);
+    dt295_destroy(retired->device);
+    usb_close(retired->usb);
+    dt295_assets_free(retired->assets);
+    delete retired;
+    return nullptr;
+}
+
 }  // namespace
 
 ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_size,
@@ -64,7 +94,30 @@ ReceiverAdapter::ReceiverAdapter(const std::uint8_t* assets, std::size_t assets_
 
 ReceiverAdapter::~ReceiverAdapter() noexcept
 {
-    (void)shutdown();
+    const auto outcome = shutdown();
+    if (outcome || stream_ == nullptr) return;
+    auto* retired = new (std::nothrow)
+        RetiredStream{stream_, usb_, device_, routes_, assets_};
+    if (retired == nullptr) {
+        std::fprintf(stderr, "DT295 retirement allocation failed; resources retained\n");
+        return;
+    }
+    stream_ = nullptr;
+    usb_ = nullptr;
+    device_ = nullptr;
+    routes_ = nullptr;
+    assets_ = nullptr;
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0) {
+        std::fprintf(stderr, "DT295 retirement attributes failed; resources retained\n");
+        return;
+    }
+    (void)pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+    pthread_t thread{};
+    const int created = pthread_create(&thread, &attributes, retire_stream_entry, retired);
+    (void)pthread_attr_destroy(&attributes);
+    if (created != 0)
+        std::fprintf(stderr, "DT295 retirement thread failed; resources retained\n");
 }
 
 void ReceiverAdapter::initialize(const std::uint8_t* assets, std::size_t assets_size,
