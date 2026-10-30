@@ -402,7 +402,6 @@ int main()
     const std::string list_json_log = root + "/list-json.log";
     const std::string ts_version_log = root + "/pix-ts-version.log";
     const std::string pixd_version_log = root + "/pixd-version.log";
-    const std::string unsupported_lnb_log = root + "/unsupported-lnb.log";
     const std::string missing_group_root_log = root + "/missing-group-root.log";
     (void)::setenv("PIX_TEST_TUNE_LOG", tune_log.c_str(), 1);
     if (!write_file(expected_path, plain, sizeof(plain))) return 3;
@@ -433,13 +432,21 @@ int main()
     const std::string pixd_version_text(pixd_version_bytes.begin(), pixd_version_bytes.end());
     if (pixd_version_text != std::string("pix-userland ") + PIX_RUNTIME_VERSION + "\n")
         return 32;
-    const pid_t unsupported_lnb = launch(PIXTS_PATH,
-        {"--channel", "T13", "--lnb-voltage", "15"}, unsupported_lnb_log);
-    int unsupported_lnb_status = 0;
-    if (unsupported_lnb <= 0 ||
-        ::waitpid(unsupported_lnb, &unsupported_lnb_status, 0) != unsupported_lnb ||
-        !WIFEXITED(unsupported_lnb_status) || WEXITSTATUS(unsupported_lnb_status) != 2)
-        return 33;
+    for (const char* voltage : {"0", "15"}) {
+        const std::string removed_lnb_log = root + "/removed-lnb-" + voltage + ".log";
+        const pid_t removed_lnb = launch(PIXTS_PATH,
+            {"--channel", "T13", "--lnb-voltage", voltage}, removed_lnb_log);
+        int removed_lnb_status = 0;
+        if (removed_lnb <= 0 ||
+            ::waitpid(removed_lnb, &removed_lnb_status, 0) != removed_lnb ||
+            !WIFEXITED(removed_lnb_status) || WEXITSTATUS(removed_lnb_status) != 2)
+            return 33;
+        const auto removed_lnb_bytes = read_file(removed_lnb_log);
+        const std::string removed_lnb_text(removed_lnb_bytes.begin(), removed_lnb_bytes.end());
+        if (removed_lnb_text.find("argument error: unknown argument") == std::string::npos ||
+            removed_lnb_text.find("usage: pix-ts") == std::string::npos ||
+            removed_lnb_text.find("not supported by PIX") != std::string::npos) return 33;
+    }
     const pid_t missing_group_root = launch(PIXD_PATH,
         {"--device", "usb:1-2", "--group"}, missing_group_root_log);
     int missing_group_root_status = 0;

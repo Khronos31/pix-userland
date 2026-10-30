@@ -111,12 +111,6 @@ int run(int argc, char** argv)
         return 0;
     }
 
-    for (int index = 1; index < argc; ++index) {
-        if (std::strcmp(argv[index], "--lnb-voltage") == 0) {
-            std::fprintf(stderr, "pix-ts: --lnb-voltage is not supported by PIX\n");
-            return 2;
-        }
-    }
     const TsClientProfile profile{"pix-ts", "pix-userland",
         dtv::userland::identity::Product::pix, true, false, nullptr, true};
     const Px4TsArguments arguments = parse_px4_ts_product_arguments(
