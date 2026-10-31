@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,21 +39,35 @@ using Adapter = pix::capture::dt295::ReceiverAdapter;
 using Attachment = dtv::userland::detail::Attachment;
 
 std::mutex g_mutex;
+std::condition_variable g_cond;
 bool g_bootstrap_sent = false;
 bool g_chunk_ready = false;
 std::vector<std::uint8_t> g_chunk;
 std::atomic<unsigned> g_route_writes{0U};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
-    std::uint64_t monotonic_ms() noexcept override
+    std::uint64_t real_ms() const noexcept
     {
         return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+    std::uint64_t monotonic_ms() noexcept override
+    {
+        if (frozen.load(std::memory_order_acquire))
+            return frozen_ms.load(std::memory_order_acquire);
+        return real_ms();
     }
     void sleep_ms(std::uint32_t milliseconds) noexcept override
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
     }
+    void freeze() noexcept
+    {
+        frozen_ms.store(real_ms(), std::memory_order_release);
+        frozen.store(true, std::memory_order_release);
+    }
+    std::atomic<bool> frozen{false};
+    std::atomic<std::uint64_t> frozen_ms{0U};
 };
 
 #define CHECK(condition)                                                          \
@@ -89,6 +104,7 @@ void queue_chunk(const std::vector<std::uint8_t> &chunk)
     std::lock_guard<std::mutex> lock(g_mutex);
     g_chunk = chunk;
     g_chunk_ready = true;
+    g_cond.notify_all();
 }
 
 void append_packet(std::vector<std::uint8_t> &chunk, std::uint8_t packet[188])
@@ -163,6 +179,7 @@ int prepare(Rig &rig, Attachment &attachment)
     attachment = attachment_for(200U);
     if (!rig.adapter.attach(attachment)) return 1;
     if (wait_ready(rig.adapter) != 0) return 1;
+    rig.clock.freeze();
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         g_chunk_ready = false;
@@ -182,7 +199,6 @@ int case_same_metadata(const std::vector<std::uint8_t> &assets)
     append_ts(chunk, 0x101U, 1U, 0x31U);
     const unsigned writes = g_route_writes.load();
     queue_chunk(chunk);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     std::uint8_t buffer[188U * 4U];
     const auto read = rig.adapter.read(attachment,
         dtv::userland::MutableByteView{buffer, sizeof(buffer)},
@@ -206,7 +222,6 @@ int case_safe_addition(const std::vector<std::uint8_t> &assets)
     append_ts(chunk, 0x111U, 0U, 0x41U);
     const unsigned writes = g_route_writes.load();
     queue_chunk(chunk);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     std::uint8_t buffer[188U * 4U];
     bool saw_new = false;
     for (unsigned n = 0U; n < 10U; ++n) {
@@ -285,7 +300,6 @@ int case_split_pmt(const std::vector<std::uint8_t> &assets)
     std::vector<std::uint8_t> partial(first, first + 188U);
     append_ts(partial, 0x101U, 1U, 0x61U);
     queue_chunk(partial);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     std::uint8_t buffer[188U * 4U];
     const auto before = rig.adapter.read(attachment,
         dtv::userland::MutableByteView{buffer, sizeof(buffer)},
@@ -305,7 +319,6 @@ int case_split_pmt(const std::vector<std::uint8_t> &assets)
     std::vector<std::uint8_t> completion(second, second + 188U);
     append_ts(completion, 0x101U, 2U, 0x62U);
     queue_chunk(completion);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     std::uint8_t after_buffer[188U * 4U];
     const auto after = rig.adapter.read(attachment,
         dtv::userland::MutableByteView{after_buffer, sizeof(after_buffer)},
@@ -342,7 +355,6 @@ int case_split_safe_addition(const std::vector<std::uint8_t> &assets)
     std::vector<std::uint8_t> partial(first, first + 188U);
     append_ts(partial, 0x101U, 1U, 0x71U);
     queue_chunk(partial);
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
     std::uint8_t buffer[188U * 4U];
     const auto before = rig.adapter.read(attachment,
         dtv::userland::MutableByteView{buffer, sizeof(buffer)},
@@ -449,7 +461,7 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     if (buffer == nullptr || capacity < 188U) return 0;
     auto *output = static_cast<std::uint8_t *>(buffer);
     std::size_t length = 0U;
-    std::lock_guard<std::mutex> lock(g_mutex);
+    std::unique_lock<std::mutex> lock(g_mutex);
     if (!g_bootstrap_sent) {
         std::uint8_t packets[3][188];
         dt295_actual_fixture_bootstrap(packets);
@@ -460,6 +472,10 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
         }
         g_bootstrap_sent = true;
     }
+    if (length == 0U && !g_chunk_ready) {
+        g_cond.wait_for(lock, std::chrono::milliseconds(5),
+                        [&] { return g_chunk_ready; });
+    }
     if (g_chunk_ready) {
         const std::size_t copy = std::min(capacity - length, g_chunk.size());
         std::memcpy(output + length, g_chunk.data(), copy);
@@ -467,10 +483,7 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
         g_chunk.clear();
         g_chunk_ready = false;
     }
-    if (length == 0U) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        return 0;
-    }
+    if (length == 0U) return 0;
     if (sequence != nullptr) *sequence += length / 188U;
     if (completed_ns != nullptr) *completed_ns = 1U;
     return static_cast<int>(length);
