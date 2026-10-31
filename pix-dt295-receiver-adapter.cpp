@@ -626,7 +626,9 @@ void ReceiverAdapter::end_session_for_acquisition(
         return;
     const auto detached = session_.detach_locked(attachment_);
     if (detached) {
-        session_.amend_final_terminal_locked(attachment_, terminal);
+        if (session_.final_snapshot.terminal == static_cast<std::uint8_t>(
+                dtv::userland::detail::StreamTerminal::stopped))
+            session_.amend_final_terminal_locked(attachment_, terminal);
         session_ended_ = true;
     }
 }
@@ -835,12 +837,15 @@ void ReceiverAdapter::pump() noexcept
                     break;
                 }
                 if (!acquisition_valid()) break;
+                AcquisitionPhase expected = AcquisitionPhase::preparing;
+                if (!acquisition_phase_.compare_exchange_strong(
+                        expected, AcquisitionPhase::ready, std::memory_order_acq_rel,
+                        std::memory_order_acquire))
+                    break;
                 live_ = plan;
                 plan_complete_ = true;
                 residue.clear();
                 plan_generation_.fetch_add(1U, std::memory_order_acq_rel);
-                acquisition_phase_.store(AcquisitionPhase::ready,
-                                         std::memory_order_release);
             }
         }
 

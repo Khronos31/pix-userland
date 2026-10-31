@@ -188,8 +188,9 @@ bool expect_terminal(pix::capture::dt295::ReceiverAdapter &adapter,
 }
 
 struct Rig final {
-    explicit Rig(const std::vector<std::uint8_t> &assets) noexcept
-        : adapter(assets.data(), assets.size(), selector, clock, 0U, 2048U) {}
+    explicit Rig(const std::vector<std::uint8_t> &assets,
+                 std::size_t queue_packets = 2048U) noexcept
+        : adapter(assets.data(), assets.size(), selector, clock, 0U, queue_packets) {}
     Clock clock;
     usb_selector selector{};
     pix::capture::dt295::ReceiverAdapter adapter;
@@ -532,6 +533,64 @@ int case_stop_reader_awake(const std::vector<std::uint8_t> &assets, bool shutdow
     return 0;
 }
 
+int case_slow_consumer_terminal(const std::vector<std::uint8_t> &assets, bool shutdown_mode)
+{
+    reset_stream(0);
+    Rig rig(assets, 1U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "slow open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "slow tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "slow start");
+    const Attachment attachment = attachment_for(12U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "slow attach");
+    bool overflow = false;
+    for (unsigned attempt = 0U; attempt < 3000U; ++attempt) {
+        const auto stats = rig.adapter.stats(attachment);
+        if (stats && stats.value().queue_drops > 0U) {
+            overflow = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(overflow);
+    if (shutdown_mode) {
+        CHECK_RESULT(rig.adapter.shutdown(), "slow shutdown");
+    } else {
+        CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "slow stop");
+        (void)rig.adapter.detach(attachment);
+    }
+    std::uint8_t packet[188U]{};
+    dtv::userland::detail::StreamTerminal terminal =
+        dtv::userland::detail::StreamTerminal::none;
+    bool saw_eof = false;
+    for (unsigned attempt = 0U; attempt < 16U; ++attempt) {
+        std::size_t bytes = 0U;
+        bool eof = false, timed_out = false;
+        dtv::userland::detail::StreamTerminal value =
+            dtv::userland::detail::StreamTerminal::none;
+        CHECK(read_any(rig.adapter, attachment, packet, sizeof(packet), &bytes, &eof,
+                       &timed_out, &value));
+        if (bytes != 0U) continue;
+        if (eof) {
+            terminal = value;
+            saw_eof = true;
+            break;
+        }
+        CHECK(timed_out);
+        break;
+    }
+    CHECK(saw_eof);
+    CHECK(terminal == dtv::userland::detail::StreamTerminal::slow_consumer);
+    const auto final = rig.adapter.final_snapshot(attachment);
+    CHECK(final);
+    CHECK(final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::slow_consumer));
+    CHECK(final.value().counters.queue_drops > 0U);
+    if (!shutdown_mode) CHECK_RESULT(rig.adapter.close(0U), "slow close");
+    return 0;
+}
+
 int case_terminal_detach_race(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0);
@@ -848,6 +907,8 @@ int main(int argc, char **argv)
     CHECK(run("reprepare", [&] { return case_reprepare_failure(assets); }));
     CHECK(run("read-failure", [&] { return case_read_failure(assets); }));
     CHECK(run("terminal-race", [&] { return case_terminal_detach_race(assets); }));
+    CHECK(run("slow-stop", [&] { return case_slow_consumer_terminal(assets, false); }));
+    CHECK(run("slow-shutdown", [&] { return case_slow_consumer_terminal(assets, true); }));
     CHECK(run("disconnect-preparing", [&] { return case_disconnect_preparing(assets); }));
     CHECK(run("retune-inflight", [&] { return case_retune_inflight(assets); }));
     CHECK(run("stop-reader", [&] { return case_stop_reader_awake(assets, false); }));
