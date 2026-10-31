@@ -165,6 +165,7 @@ private:
     dtv::userland::detail::PacketStreamSession session_;
     std::mutex operation_mutex_;
     std::mutex protocol_mutex_;
+    mutable std::mutex acquisition_view_mutex_;
     std::atomic<bool> pump_stop_{false};
     std::atomic<int> pump_error_{0};
     pthread_t pump_thread_{};

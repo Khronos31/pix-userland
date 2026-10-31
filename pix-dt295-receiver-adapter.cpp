@@ -162,6 +162,7 @@ bool ReceiverAdapter::supports(ReceiverId receiver, ReceiverSystem system) const
 
 ReceiverAdapter::AcquisitionSnapshot ReceiverAdapter::acquisition() const noexcept
 {
+    std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
     AcquisitionSnapshot snapshot{};
     snapshot.phase = acquisition_phase_.load(std::memory_order_acquire);
     snapshot.failure = acquisition_failure_.load(std::memory_order_acquire);
@@ -218,9 +219,12 @@ ReceiverAdapter::Result ReceiverAdapter::open(ReceiverId receiver) noexcept
         return Result::failure(Error::NO_CARD);
     }
     opened_ = true;
-    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
-    plan_generation_.store(0U, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+        plan_generation_.store(0U, std::memory_order_release);
+    }
     session_ended_ = false;
     return Result::success();
 }
@@ -245,10 +249,13 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         return TuneResult::failure(Error::INVALID_ARGUMENT);
     }
 
-    tune_generation_.fetch_add(1U, std::memory_order_acq_rel);
-    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
-    plan_generation_.store(0U, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        tune_generation_.fetch_add(1U, std::memory_order_acq_rel);
+        acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+        plan_generation_.store(0U, std::memory_order_release);
+    }
 
     if (stream_attached_) {
         const auto stopped = stop_attached(attachment_);
@@ -434,9 +441,12 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
     }
     satellite_tuned_ = false;
     satellite_tsid_valid_.store(false, std::memory_order_release);
-    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
-    plan_generation_.store(0U, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+        plan_generation_.store(0U, std::memory_order_release);
+    }
     return Result::success();
 }
 
@@ -519,9 +529,12 @@ ReceiverAdapter::Result ReceiverAdapter::stop_receiver_unlocked() noexcept
     const auto halted = halt_unlocked();
     if (!halted && outcome) outcome = halted;
     streaming_ = false;
-    plan_generation_.store(0U, std::memory_order_release);
-    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        plan_generation_.store(0U, std::memory_order_release);
+        acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+    }
     return outcome;
 }
 
@@ -609,11 +622,14 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     streaming_ = true;
     plan_complete_ = false;
     pump_error_.store(0, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
-    acquisition_started_ms_ = clock_.monotonic_ms();
-    plan_generation_.store(0U, std::memory_order_release);
-    acquisition_generation_.fetch_add(1U, std::memory_order_acq_rel);
-    acquisition_phase_.store(AcquisitionPhase::preparing, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+        acquisition_started_ms_ = clock_.monotonic_ms();
+        plan_generation_.store(0U, std::memory_order_release);
+        acquisition_generation_.fetch_add(1U, std::memory_order_acq_rel);
+        acquisition_phase_.store(AcquisitionPhase::preparing, std::memory_order_release);
+    }
     return Result::success();
 }
 
@@ -637,9 +653,12 @@ void ReceiverAdapter::fail_acquisition(AcquisitionFailure failure,
                                        dtv::userland::detail::StreamTerminal terminal,
                                        Error error) noexcept
 {
-    acquisition_failure_.store(failure, std::memory_order_release);
-    acquisition_phase_.store(AcquisitionPhase::terminal, std::memory_order_release);
-    pump_error_.store(static_cast<int>(error), std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        acquisition_failure_.store(failure, std::memory_order_release);
+        acquisition_phase_.store(AcquisitionPhase::terminal, std::memory_order_release);
+        pump_error_.store(static_cast<int>(error), std::memory_order_release);
+    }
     end_session_for_acquisition(terminal);
 }
 
@@ -836,16 +855,16 @@ void ReceiverAdapter::pump() noexcept
                                      restarted.error());
                     break;
                 }
-                if (!acquisition_valid()) break;
-                AcquisitionPhase expected = AcquisitionPhase::preparing;
-                if (!acquisition_phase_.compare_exchange_strong(
-                        expected, AcquisitionPhase::ready, std::memory_order_acq_rel,
-                        std::memory_order_acquire))
-                    break;
-                live_ = plan;
-                plan_complete_ = true;
-                residue.clear();
-                plan_generation_.fetch_add(1U, std::memory_order_acq_rel);
+                {
+                    std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+                    if (!acquisition_valid()) break;
+                    live_ = plan;
+                    plan_complete_ = true;
+                    residue.clear();
+                    plan_generation_.fetch_add(1U, std::memory_order_acq_rel);
+                    acquisition_phase_.store(AcquisitionPhase::ready,
+                                             std::memory_order_release);
+                }
             }
         }
 
@@ -991,9 +1010,12 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
         pump_joinable_ = false;
     }
     end_session_for_acquisition(dtv::userland::detail::StreamTerminal::stopped);
-    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
-    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
-    plan_generation_.store(0U, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
+        acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+        acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+        plan_generation_.store(0U, std::memory_order_release);
+    }
     Result outcome = Result::success();
     if (stream_ != nullptr) {
         const auto halted = halt_unlocked();
