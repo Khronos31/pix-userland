@@ -138,7 +138,8 @@ bool wait_phase(pix::capture::dt295::ReceiverAdapter &adapter, Phase phase,
 
 bool read_any(pix::capture::dt295::ReceiverAdapter &adapter, const Attachment &attachment,
               std::uint8_t *buffer, std::size_t capacity, std::size_t *bytes,
-              bool *eof, bool *timed_out)
+              bool *eof, bool *timed_out,
+              dtv::userland::detail::StreamTerminal *terminal = nullptr)
 {
     const auto result = adapter.read(attachment,
         dtv::userland::MutableByteView{buffer, capacity}, std::chrono::milliseconds(100));
@@ -146,6 +147,7 @@ bool read_any(pix::capture::dt295::ReceiverAdapter &adapter, const Attachment &a
     *bytes = result.value().bytes;
     *eof = result.value().eof;
     *timed_out = result.value().timed_out;
+    if (terminal != nullptr) *terminal = result.value().terminal;
     return true;
 }
 
@@ -173,9 +175,14 @@ bool expect_terminal(pix::capture::dt295::ReceiverAdapter &adapter,
     std::uint8_t buffer[188U]{};
     std::size_t bytes = 1U;
     bool eof = false, timed_out = false;
-    if (!read_any(adapter, attachment, buffer, sizeof(buffer), &bytes, &eof, &timed_out))
+    dtv::userland::detail::StreamTerminal terminal =
+        dtv::userland::detail::StreamTerminal::none;
+    if (!read_any(adapter, attachment, buffer, sizeof(buffer), &bytes, &eof, &timed_out,
+                  &terminal))
         return false;
     if (!eof || timed_out || bytes != 0U) return false;
+    if (terminal != static_cast<dtv::userland::detail::StreamTerminal>(raw_terminal))
+        return false;
     const auto final = adapter.final_snapshot(attachment);
     return final && final.value().terminal == raw_terminal;
 }
@@ -395,6 +402,136 @@ int case_read_failure(const std::vector<std::uint8_t> &assets)
     return 0;
 }
 
+int case_disconnect_preparing(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "preparing disconnect open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "preparing disconnect tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                 "preparing disconnect start");
+    g_race_remaining.store(1, std::memory_order_release);
+    const Attachment attachment = attachment_for(9U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "preparing disconnect attach");
+    for (unsigned attempt = 0U; attempt < 3000U && g_race_stage.load() != 1; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_race_stage.load() == 1);
+    CHECK(rig.adapter.acquisition().phase == Phase::preparing);
+    const unsigned generation_before = g_generation.load();
+    rig.adapter.mark_disconnected(0U);
+    CHECK(rig.adapter.acquisition().phase == Phase::terminal);
+    CHECK(rig.adapter.acquisition().failure == Failure::disconnected);
+    g_release_first.store(true, std::memory_order_release);
+    CHECK(!wait_phase(rig.adapter, Phase::ready, 500U));
+    const auto state = rig.adapter.acquisition();
+    CHECK(state.phase == Phase::terminal);
+    CHECK(state.failure == Failure::disconnected);
+    CHECK(state.plan_generation == 0U);
+    CHECK(g_generation.load() == generation_before);
+    (void)rig.adapter.detach(attachment);
+    (void)rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial);
+    CHECK_RESULT(rig.adapter.close(0U), "preparing disconnect close");
+    return 0;
+}
+
+int case_retune_inflight(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "retune open");
+    CHECK_RESULT(rig.adapter.select_satellite_tsid(0U, 16400U, 1000U), "retune saved TSID");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "retune terrestrial tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "retune start");
+    g_race_remaining.store(1, std::memory_order_release);
+    const Attachment attachment = attachment_for(10U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "retune attach");
+    for (unsigned attempt = 0U; attempt < 3000U && g_race_stage.load() != 1; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_race_stage.load() == 1);
+    std::atomic<int> tune_error{-1};
+    std::thread retune([&] {
+        const auto result = rig.adapter.program_hz(
+            0U, ReceiverSystem::satellite, 1049480000ULL, 1000U);
+        tune_error.store(result ? 0 : static_cast<int>(result.error()));
+    });
+    for (unsigned attempt = 0U; attempt < 3000U &&
+         rig.adapter.acquisition().tune_generation < 2U; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(rig.adapter.acquisition().tune_generation == 2U);
+    g_release_first.store(true, std::memory_order_release);
+    retune.join();
+    CHECK(tune_error.load() == 0);
+    CHECK(rig.adapter.acquisition().tune_generation == 2U);
+    (void)rig.adapter.detach(attachment);
+    (void)rig.adapter.stop_capture(0U, ReceiverSystem::satellite);
+    CHECK_RESULT(rig.adapter.close(0U), "retune close");
+    return 0;
+}
+
+int case_stop_reader_awake(const std::vector<std::uint8_t> &assets, bool shutdown_mode)
+{
+    reset_stream(6);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "stop reader open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "stop reader tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                 "stop reader start");
+    const Attachment attachment = attachment_for(11U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "stop reader attach");
+    for (unsigned attempt = 0U; attempt < 3000U && !g_split_pat_sent.load(); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_split_pat_sent.load());
+    std::atomic<bool> entered{false};
+    std::atomic<bool> finished{false};
+    std::size_t bytes = 1U;
+    bool eof = false, timed_out = true;
+    dtv::userland::detail::StreamTerminal terminal =
+        dtv::userland::detail::StreamTerminal::none;
+    std::thread reader([&] {
+        std::uint8_t packet[188U]{};
+        entered.store(true, std::memory_order_release);
+        const auto result = rig.adapter.read(attachment,
+            dtv::userland::MutableByteView{packet, sizeof(packet)},
+            std::chrono::milliseconds(5000));
+        if (result) {
+            bytes = result.value().bytes;
+            eof = result.value().eof;
+            timed_out = result.value().timed_out;
+            terminal = result.value().terminal;
+        }
+        finished.store(true, std::memory_order_release);
+    });
+    while (!entered.load(std::memory_order_acquire)) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (shutdown_mode) {
+        CHECK_RESULT(rig.adapter.shutdown(), "stop reader shutdown");
+    } else {
+        CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "stop reader stop");
+    }
+    bool woke = false;
+    for (unsigned attempt = 0U; attempt < 3000U && !finished.load(); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    woke = finished.load();
+    if (!woke) (void)rig.adapter.detach(attachment);
+    reader.join();
+    CHECK(woke);
+    CHECK(bytes == 0U && eof && !timed_out);
+    CHECK(terminal == dtv::userland::detail::StreamTerminal::stopped);
+    CHECK(rig.adapter.acquisition().phase == Phase::idle);
+    (void)rig.adapter.detach(attachment);
+    if (!shutdown_mode) {
+        CHECK_RESULT(rig.adapter.close(0U), "stop reader close");
+    }
+    return 0;
+}
+
 int case_terminal_detach_race(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0);
@@ -442,11 +579,50 @@ int case_disconnected_and_reopen(const std::vector<std::uint8_t> &assets)
     const Attachment attachment = attachment_for(7U);
     CHECK_RESULT(rig.adapter.attach(attachment), "disconnect attach");
     CHECK(wait_phase(rig.adapter, Phase::ready));
+    for (unsigned attempt = 0U; attempt < 3000U; ++attempt) {
+        const auto stats = rig.adapter.stats(attachment);
+        if (stats && stats.value().packets > 0U) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const auto queued = rig.adapter.stats(attachment);
+    CHECK(queued && queued.value().packets > 0U);
     rig.adapter.mark_disconnected(0U);
-    CHECK(expect_terminal(rig.adapter, attachment, Failure::disconnected,
-                          static_cast<std::uint8_t>(
-                              dtv::userland::detail::StreamTerminal::disconnected)));
+    CHECK(rig.adapter.acquisition().phase == Phase::terminal);
+    CHECK(rig.adapter.acquisition().failure == Failure::disconnected);
     (void)rig.adapter.detach(attachment);
+    std::size_t drained_packets = 0U;
+    bool saw_eof = false;
+    dtv::userland::detail::StreamTerminal terminal =
+        dtv::userland::detail::StreamTerminal::none;
+    std::uint8_t buffer[188U * 64U];
+    for (unsigned attempt = 0U; attempt < 200U; ++attempt) {
+        std::size_t bytes = 0U;
+        bool eof = false, timed_out = false;
+        dtv::userland::detail::StreamTerminal value =
+            dtv::userland::detail::StreamTerminal::none;
+        CHECK(read_any(rig.adapter, attachment, buffer, sizeof(buffer), &bytes, &eof,
+                       &timed_out, &value));
+        if (bytes != 0U) {
+            CHECK(bytes % 188U == 0U);
+            drained_packets += bytes / 188U;
+            CHECK(buffer[0] == 0x47U);
+            continue;
+        }
+        if (eof) {
+            saw_eof = true;
+            terminal = value;
+            break;
+        }
+        CHECK(timed_out);
+        break;
+    }
+    CHECK(saw_eof);
+    CHECK(drained_packets > 0U);
+    CHECK(terminal == dtv::userland::detail::StreamTerminal::disconnected);
+    const auto final = rig.adapter.final_snapshot(attachment);
+    CHECK(final);
+    CHECK(final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::disconnected));
     (void)rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial);
     CHECK_RESULT(rig.adapter.close(0U), "disconnect close");
     CHECK(rig.adapter.acquisition().phase == Phase::idle);
@@ -621,7 +797,7 @@ extern "C" int __wrap_dt295_reprepare_plan(dt295 *device, const dt295_route_plan
     return __real_dt295_reprepare_plan(device, plan, error, error_size);
 }
 
-int main()
+int main(int argc, char **argv)
 {
     char directory[] = "/tmp/pix-dt295-acquisition-XXXXXX";
     if (mkdtemp(directory) == nullptr) {
@@ -636,26 +812,47 @@ int main()
         std::istreambuf_iterator<char>(assets_file), std::istreambuf_iterator<char>()};
     assets_file.close();
     CHECK(!assets.empty());
+    const std::string only = argc > 1 ? argv[1] : std::string();
+    const auto run = [&](const char *name, const auto &body) {
+        if (!only.empty() && only != name) return true;
+        if (body() != 0) {
+            std::fprintf(stderr, "CASE failed: %s\n", name);
+            return false;
+        }
+        return true;
+    };
 
-    CHECK(case_ready(assets) == 0);
-    CHECK(case_split_gate(assets) == 0);
-    CHECK(case_deadline_and_retune(assets) == 0);
-    CHECK(case_failure(assets, 3, Failure::unsupported,
-                       static_cast<std::uint8_t>(
-                           dtv::userland::detail::StreamTerminal::bridge_fatal), false) == 0);
-    CHECK(case_failure(assets, 2, Failure::plan,
-                       static_cast<std::uint8_t>(
-                           dtv::userland::detail::StreamTerminal::bridge_fatal), false) == 0);
-    CHECK(case_failure(assets, 1, Failure::multiple_ecm,
-                       static_cast<std::uint8_t>(
-                           dtv::userland::detail::StreamTerminal::bridge_fatal), false) == 0);
-    CHECK(case_failure(assets, 4, Failure::satellite_tsid,
-                       static_cast<std::uint8_t>(
-                           dtv::userland::detail::StreamTerminal::bridge_fatal), true) == 0);
-    CHECK(case_reprepare_failure(assets) == 0);
-    CHECK(case_read_failure(assets) == 0);
-    CHECK(case_terminal_detach_race(assets) == 0);
-    CHECK(case_disconnected_and_reopen(assets) == 0);
+    CHECK(run("ready", [&] { return case_ready(assets); }));
+    CHECK(run("split", [&] { return case_split_gate(assets); }));
+    CHECK(run("deadline", [&] { return case_deadline_and_retune(assets); }));
+    CHECK(run("unsupported", [&] {
+        return case_failure(assets, 3, Failure::unsupported,
+                            static_cast<std::uint8_t>(
+                                dtv::userland::detail::StreamTerminal::bridge_fatal), false);
+    }));
+    CHECK(run("plan", [&] {
+        return case_failure(assets, 2, Failure::plan,
+                            static_cast<std::uint8_t>(
+                                dtv::userland::detail::StreamTerminal::bridge_fatal), false);
+    }));
+    CHECK(run("multiple-ecm", [&] {
+        return case_failure(assets, 1, Failure::multiple_ecm,
+                            static_cast<std::uint8_t>(
+                                dtv::userland::detail::StreamTerminal::bridge_fatal), false);
+    }));
+    CHECK(run("satellite-tsid", [&] {
+        return case_failure(assets, 4, Failure::satellite_tsid,
+                            static_cast<std::uint8_t>(
+                                dtv::userland::detail::StreamTerminal::bridge_fatal), true);
+    }));
+    CHECK(run("reprepare", [&] { return case_reprepare_failure(assets); }));
+    CHECK(run("read-failure", [&] { return case_read_failure(assets); }));
+    CHECK(run("terminal-race", [&] { return case_terminal_detach_race(assets); }));
+    CHECK(run("disconnect-preparing", [&] { return case_disconnect_preparing(assets); }));
+    CHECK(run("retune-inflight", [&] { return case_retune_inflight(assets); }));
+    CHECK(run("stop-reader", [&] { return case_stop_reader_awake(assets, false); }));
+    CHECK(run("shutdown-reader", [&] { return case_stop_reader_awake(assets, true); }));
+    CHECK(run("disconnect-drain", [&] { return case_disconnected_and_reopen(assets); }));
 
     dt295_actual_fixture_close();
     (void)unlink(assets_path.c_str());

@@ -249,7 +249,6 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
     acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
     acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
     plan_generation_.store(0U, std::memory_order_release);
-    tuned_system_ = system;
 
     if (stream_attached_) {
         const auto stopped = stop_attached(attachment_);
@@ -258,6 +257,7 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         const auto stopped = stop_receiver_unlocked();
         if (!stopped) return TuneResult::failure(stopped.error());
     }
+    tuned_system_.store(system, std::memory_order_release);
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     plan_complete_ = false;
     std::memset(&live_, 0, sizeof(live_));
@@ -273,7 +273,9 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
             return TuneResult::failure(Error::USB_IO);
         programmed_hz = center_for_channel(channel);
     } else {
-        const int tsid = satellite_tsid_valid_ ? satellite_tsid_ : -1;
+        const int tsid = satellite_tsid_valid_.load(std::memory_order_acquire)
+                             ? static_cast<int>(satellite_tsid_.load(std::memory_order_acquire))
+                             : -1;
         if (dt295_tune_satellite(device_, static_cast<std::uint32_t>(requested_hz), tsid,
                                  error, sizeof(error)) != 0)
             return TuneResult::failure(Error::USB_IO);
@@ -311,7 +313,8 @@ dtv::userland::Result<bool> ReceiverAdapter::is_locked(ReceiverId receiver,
     char error[256]{};
     if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
         return dtv::userland::Result<bool>::failure(Error::USB_IO);
-    const bool target = !satellite_tsid_valid_ || state.selected_tsid == satellite_tsid_;
+    const bool target = !satellite_tsid_valid_.load(std::memory_order_acquire) ||
+                        state.selected_tsid == satellite_tsid_.load(std::memory_order_acquire);
     return dtv::userland::Result<bool>::success(state.locked != 0U && target);
 }
 
@@ -375,8 +378,8 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiv
         return Result::failure(Error::USB_IO);
     const std::uint16_t tsid = table[slot];
     if (tsid == 0U || tsid == 0xffffU) return Result::failure(Error::INVALID_ARGUMENT);
-    satellite_tsid_ = tsid;
-    satellite_tsid_valid_ = true;
+    satellite_tsid_.store(tsid, std::memory_order_release);
+    satellite_tsid_valid_.store(true, std::memory_order_release);
     if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
         return Result::failure(Error::USB_IO);
     for (;;) {
@@ -396,8 +399,8 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiv
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
     if (recovery_failed_) return Result::failure(Error::USB_IO);
-    satellite_tsid_ = tsid;
-    satellite_tsid_valid_ = true;
+    satellite_tsid_.store(tsid, std::memory_order_release);
+    satellite_tsid_valid_.store(true, std::memory_order_release);
     if (!satellite_tuned_) return Result::success();
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     char error[256]{};
@@ -430,7 +433,7 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
         opened_ = false;
     }
     satellite_tuned_ = false;
-    satellite_tsid_valid_ = false;
+    satellite_tsid_valid_.store(false, std::memory_order_release);
     acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
     acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
     plan_generation_.store(0U, std::memory_order_release);
@@ -496,7 +499,9 @@ ReceiverAdapter::Result ReceiverAdapter::stop_capture(ReceiverId receiver, Recei
             return Result::failure(Error::INTERNAL);
         pump_joinable_ = false;
     }
-    return stop_receiver_unlocked();
+    const auto stopped = stop_receiver_unlocked();
+    end_session_for_acquisition(dtv::userland::detail::StreamTerminal::stopped);
+    return stopped;
 }
 
 ReceiverAdapter::Result ReceiverAdapter::stop_receiver_unlocked() noexcept
@@ -642,6 +647,13 @@ void ReceiverAdapter::pump() noexcept
     residue.reserve(65536U + 188U);
     std::uint8_t chunk[65536U];
     std::uint64_t last_renew = clock_.monotonic_ms();
+    const std::uint64_t generation = acquisition_generation_.load(std::memory_order_acquire);
+    const auto acquisition_valid = [&]() noexcept {
+        return !pump_stop_.load(std::memory_order_acquire) &&
+               acquisition_phase_.load(std::memory_order_acquire) !=
+                   AcquisitionPhase::terminal &&
+               acquisition_generation_.load(std::memory_order_acquire) == generation;
+    };
     while (!pump_stop_.load(std::memory_order_acquire)) {
         if (stream_ == nullptr) break;
         if (acquisition_phase_.load(std::memory_order_acquire) == AcquisitionPhase::terminal)
@@ -708,12 +720,15 @@ void ReceiverAdapter::pump() noexcept
         if (offset != 0U)
             residue.erase(residue.begin(), residue.begin() + static_cast<std::ptrdiff_t>(offset));
         if (terminal) break;
+        if (!acquisition_valid()) break;
 
         if (!plan_complete_ && count > 0) {
             dt295_routes_snapshot snapshot{};
             dt295_routes_snapshot_get(routes_, &snapshot);
-            if (tuned_system_ == ReceiverSystem::satellite && satellite_tsid_valid_ &&
-                snapshot.have_pat && snapshot.tsid != satellite_tsid_) {
+            if (tuned_system_.load(std::memory_order_acquire) == ReceiverSystem::satellite &&
+                satellite_tsid_valid_.load(std::memory_order_acquire) &&
+                snapshot.have_pat &&
+                snapshot.tsid != satellite_tsid_.load(std::memory_order_acquire)) {
                 fail_acquisition(AcquisitionFailure::satellite_tsid,
                                  dtv::userland::detail::StreamTerminal::bridge_fatal,
                                  Error::UNSUPPORTED);
@@ -734,6 +749,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::INTERNAL);
                     break;
                 }
+                if (!acquisition_valid()) break;
                 Result applied = Result::success();
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -764,6 +780,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::UNSUPPORTED);
                     break;
                 }
+                if (!acquisition_valid()) break;
                 char error[256]{};
                 size_t drained = 0U;
                 bool stopped = true;
@@ -777,6 +794,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::USB_IO);
                     break;
                 }
+                if (!acquisition_valid()) break;
                 const auto halted = halt_unlocked();
                 if (!halted) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -784,11 +802,11 @@ void ReceiverAdapter::pump() noexcept
                                      halted.error());
                     break;
                 }
+                if (!acquisition_valid()) break;
                 bool prepared = false;
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                    prepared = dt295_reprepare_plan(device_, &plan, error, sizeof(error)) == 0 &&
-                               dt295_start(device_, error, sizeof(error)) == 0;
+                    prepared = dt295_reprepare_plan(device_, &plan, error, sizeof(error)) == 0;
                 }
                 if (!prepared) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -796,6 +814,19 @@ void ReceiverAdapter::pump() noexcept
                                      Error::USB_IO);
                     break;
                 }
+                if (!acquisition_valid()) break;
+                bool started_device = false;
+                {
+                    std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
+                    started_device = dt295_start(device_, error, sizeof(error)) == 0;
+                }
+                if (!started_device) {
+                    fail_acquisition(AcquisitionFailure::usb,
+                                     dtv::userland::detail::StreamTerminal::usb_error,
+                                     Error::USB_IO);
+                    break;
+                }
+                if (!acquisition_valid()) break;
                 const auto restarted = start_stream_unlocked();
                 if (!restarted) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -803,6 +834,7 @@ void ReceiverAdapter::pump() noexcept
                                      restarted.error());
                     break;
                 }
+                if (!acquisition_valid()) break;
                 live_ = plan;
                 plan_complete_ = true;
                 residue.clear();
@@ -926,7 +958,18 @@ dtv::userland::Result<ReceiverAdapter::ReadResult> ReceiverAdapter::read(
         session_.changed.wait_for(lock, timeout, [&] {
             return session_.read_wake_locked(ticket.value());
         });
-    return session_.finish_read_locked(attachment, ticket.value(), output);
+    auto result = session_.finish_read_locked(attachment, ticket.value(), output);
+    if (result && result.value().eof &&
+        result.value().terminal == dtv::userland::detail::StreamTerminal::stopped &&
+        session_.final_snapshot_valid &&
+        same_identity(session_.final_identity, attachment)) {
+        const auto reason = static_cast<dtv::userland::detail::StreamTerminal>(
+            session_.final_snapshot.terminal);
+        if (reason != dtv::userland::detail::StreamTerminal::none &&
+            reason != dtv::userland::detail::StreamTerminal::stopped)
+            result.value().terminal = reason;
+    }
+    return result;
 }
 
 ReceiverAdapter::Result ReceiverAdapter::release_final(const Attachment& attachment) noexcept
@@ -942,6 +985,10 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
         (void)pthread_join(pump_thread_, nullptr);
         pump_joinable_ = false;
     }
+    end_session_for_acquisition(dtv::userland::detail::StreamTerminal::stopped);
+    acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
+    acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
+    plan_generation_.store(0U, std::memory_order_release);
     Result outcome = Result::success();
     if (stream_ != nullptr) {
         const auto halted = halt_unlocked();

@@ -149,9 +149,9 @@ private:
     bool plan_complete_ = false;
     bool key_retained_ = false;
     bool satellite_tuned_ = false;
-    bool satellite_tsid_valid_ = false;
-    std::uint16_t satellite_tsid_ = 0U;
-    ReceiverSystem tuned_system_ = ReceiverSystem::terrestrial;
+    std::atomic<bool> satellite_tsid_valid_{false};
+    std::atomic<std::uint16_t> satellite_tsid_{0U};
+    std::atomic<ReceiverSystem> tuned_system_{ReceiverSystem::terrestrial};
     bool stream_attached_ = false;
     bool session_ended_ = false;
     Attachment attachment_{};
