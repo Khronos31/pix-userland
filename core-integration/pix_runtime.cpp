@@ -1025,6 +1025,72 @@ TunerStreamControl* Family::stream_control() noexcept
         : static_cast<TunerStreamControl*>(impl_->shim.get());
 }
 
+bool Family::supports_dt295_scan() const noexcept
+{
+    return impl_ && impl_->model == Model::dt295 && impl_->dt295_adapter;
+}
+
+dtv::userland::Result<Dt295Acquisition> Family::dt295_acquisition() const noexcept
+{
+    if (!supports_dt295_scan())
+        return dtv::userland::Result<Dt295Acquisition>::failure(Error::UNSUPPORTED);
+    const auto value = impl_->dt295_adapter->acquisition();
+    Dt295Acquisition out{};
+    out.phase = static_cast<Dt295AcquisitionPhase>(value.phase);
+    out.failure = static_cast<Dt295AcquisitionFailure>(value.failure);
+    out.tune_generation = value.tune_generation;
+    out.acquisition_generation = value.acquisition_generation;
+    out.plan_generation = value.plan_generation;
+    return dtv::userland::Result<Dt295Acquisition>::success(out);
+}
+
+dtv::userland::Result<Dt295ScanLease> Family::begin_dt295_si_scan() noexcept
+{
+    if (!supports_dt295_scan())
+        return dtv::userland::Result<Dt295ScanLease>::failure(Error::UNSUPPORTED);
+    dt295::ReceiverAdapter::ScanLease value{};
+    const auto started = impl_->dt295_adapter->begin_scan(&value);
+    if (!started) return dtv::userland::Result<Dt295ScanLease>::failure(started.error());
+    Dt295ScanLease out{};
+    out.tune_generation = value.tune_generation;
+    out.scan_id = value.scan_id;
+    return dtv::userland::Result<Dt295ScanLease>::success(out);
+}
+
+dtv::userland::Result<Dt295SiRead> Family::read_dt295_si_scan(
+    const Dt295ScanLease& lease, dtv::userland::MutableByteView output,
+    std::chrono::milliseconds timeout) noexcept
+{
+    if (!supports_dt295_scan())
+        return dtv::userland::Result<Dt295SiRead>::failure(Error::UNSUPPORTED);
+    dt295::ReceiverAdapter::ScanLease value{};
+    value.tune_generation = lease.tune_generation;
+    value.scan_id = lease.scan_id;
+    dt295::ReceiverAdapter::SiReadResult read{};
+    const auto result = impl_->dt295_adapter->read_scan(value, output, timeout, &read);
+    if (!result) return dtv::userland::Result<Dt295SiRead>::failure(result.error());
+    Dt295SiRead out{};
+    out.bytes = read.bytes;
+    out.timed_out = read.timed_out;
+    out.terminal = read.terminal;
+    out.stale_generation = read.stale_generation;
+    out.dropped_packets = read.dropped_packets;
+    out.continuity_epoch = read.continuity_epoch;
+    out.reason = static_cast<Dt295SiEndReason>(read.reason);
+    return dtv::userland::Result<Dt295SiRead>::success(out);
+}
+
+dtv::userland::Result<void> Family::end_dt295_si_scan(
+    const Dt295ScanLease& lease) noexcept
+{
+    if (!supports_dt295_scan())
+        return dtv::userland::Result<void>::failure(Error::UNSUPPORTED);
+    dt295::ReceiverAdapter::ScanLease value{};
+    value.tune_generation = lease.tune_generation;
+    value.scan_id = lease.scan_id;
+    return impl_->dt295_adapter->end_scan(value);
+}
+
 Result<void> build_list(const LocatedDevice& device, const std::string& version,
                         const std::array<std::uint8_t, 16U>& epoch_bytes,
                         dtv::userland::wire::ListResponse& list) noexcept

@@ -521,6 +521,33 @@ add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
 endif()
 
+if(NOT WIN32)
+add_executable(pix_dt295_family_contract_proof
+    tests/pix_dt295_family_contract_proof.cpp
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_family_contract_proof PRIVATE
+    tests "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests"
+    "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pix_dt295_family_contract_proof PRIVATE
+    _POSIX_C_SOURCE=200809L
+    PIX_FIRMWARE_DT295_PATH="${PIX_SOURCE_DIR}/firmware/dt295.bin")
+target_compile_features(pix_dt295_family_contract_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_family_contract_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+target_link_libraries(pix_dt295_family_contract_proof PRIVATE
+    pix_product_runtime PkgConfig::LIBUSB Threads::Threads)
+target_link_options(pix_dt295_family_contract_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy)
+add_test(NAME pix_dt295_family_contract_proof
+    COMMAND pix_dt295_family_contract_proof)
+endif()
+
 if(PIX_EMBEDDED_ASSETS AND NOT WIN32)
 add_executable(pix_embedded_runtime_proof tests/pix_embedded_runtime_proof.cpp)
 target_compile_definitions(pix_embedded_runtime_proof PRIVATE
