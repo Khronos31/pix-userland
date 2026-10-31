@@ -623,9 +623,17 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
         std::lock_guard<std::mutex> si_lock(si_mutex_);
         scan_owned = scan_owner_ != 0U;
     }
+    Result scan_failure = Result::success();
     if (scan_owned) {
         const auto stopped_scan = scan_release_owner(SiEndReason::stop);
-        if (!stopped_scan) return stopped_scan;
+        if (!stopped_scan) {
+            if (stream_ != nullptr) return stopped_scan;
+            {
+                std::lock_guard<std::mutex> si_lock(si_mutex_);
+                scan_owner_ = 0U;
+            }
+            scan_failure = stopped_scan;
+        }
     }
     if (streaming_ || stream_ != nullptr) {
         const auto stopped = stop_receiver_unlocked();
@@ -645,7 +653,7 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
         acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
         plan_generation_.store(0U, std::memory_order_release);
     }
-    return Result::success();
+    return scan_failure;
 }
 
 ReceiverAdapter::Result ReceiverAdapter::begin_tune_power(ReceiverId receiver, ReceiverSystem system,
@@ -1338,6 +1346,7 @@ ReceiverAdapter::Result ReceiverAdapter::release_final(const Attachment& attachm
 ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+    Result outcome = Result::success();
     bool scan_owned = false;
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
@@ -1345,7 +1354,14 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
     }
     if (scan_owned) {
         const auto stopped_scan = scan_release_owner(SiEndReason::shutdown);
-        if (!stopped_scan) return stopped_scan;
+        if (!stopped_scan) {
+            if (stream_ != nullptr) return stopped_scan;
+            {
+                std::lock_guard<std::mutex> si_lock(si_mutex_);
+                scan_owner_ = 0U;
+            }
+            outcome = stopped_scan;
+        }
     }
     unconsumed_normal_refusals_ = 0U;
     pump_stop_.store(true, std::memory_order_release);
@@ -1360,7 +1376,6 @@ ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
         acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
         plan_generation_.store(0U, std::memory_order_release);
     }
-    Result outcome = Result::success();
     if (stream_ != nullptr) {
         const auto halted = halt_unlocked();
         if (!halted) {

@@ -245,9 +245,15 @@ target_link_options(pix_dt295_scan_contract_proof PRIVATE
     -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
     -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
     -Wl,--wrap=pthread_join -Wl,--wrap=pthread_create
-    -Wl,--wrap=dt295_stop)
+    -Wl,--wrap=dt295_stop
+    -Wl,--wrap=dt295_destroy -Wl,--wrap=dt295_routes_destroy
+    -Wl,--wrap=dt295_assets_free)
 add_test(NAME pix_dt295_scan_contract_proof
     COMMAND pix_dt295_scan_contract_proof)
+add_test(NAME pix_dt295_scan_persistent_close
+    COMMAND pix_dt295_scan_contract_proof persistent-close)
+add_test(NAME pix_dt295_scan_shutdown_persistent
+    COMMAND pix_dt295_scan_contract_proof shutdown-persistent)
 endif()
 
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../include/version.h" PIX_PRODUCT_VERSION_LINE

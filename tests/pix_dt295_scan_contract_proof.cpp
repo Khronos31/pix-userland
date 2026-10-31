@@ -47,7 +47,13 @@ std::atomic<unsigned> g_stream_stops{0};
 std::atomic<unsigned> g_join_calls{0};
 std::atomic<unsigned> g_creates{0};
 std::atomic<unsigned> g_device_stops{0};
+std::atomic<unsigned> g_stream_destroys{0U};
+std::atomic<unsigned> g_usb_closes{0U};
+std::atomic<unsigned> g_device_freed{0U};
+std::atomic<unsigned> g_routes_freed{0U};
+std::atomic<unsigned> g_assets_freed{0U};
 std::atomic<bool> g_fail_device_stop{false};
+std::atomic<bool> g_persistent_device_stop{false};
 bool g_first = true;
 unsigned g_cc_si[3] = {0U, 0U, 0U};
 unsigned g_cc_video = 0U;
@@ -108,6 +114,8 @@ void reset_stream(int mode, int si_per_read)
     g_si_per_read.store(si_per_read, std::memory_order_release);
     g_read_fail.store(0, std::memory_order_release);
     g_suppress_input.store(false, std::memory_order_release);
+    g_fail_device_stop.store(false, std::memory_order_release);
+    g_persistent_device_stop.store(false, std::memory_order_release);
     g_first = true;
     g_cc_si[0] = g_cc_si[1] = g_cc_si[2] = 0U;
     g_cc_video = 0U;
@@ -751,6 +759,163 @@ int case_close_retry(const std::vector<std::uint8_t> &assets)
     return 0;
 }
 
+int case_persistent_close(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "persistent close open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "persistent close tune");
+    Lease scan{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "persistent close begin");
+    g_persistent_device_stop.store(true, std::memory_order_release);
+    const unsigned destroys = g_stream_destroys.load();
+    const unsigned joins = g_join_calls.load();
+    const unsigned closes = g_usb_closes.load();
+    const unsigned device_free = g_device_freed.load();
+    const unsigned routes_free = g_routes_freed.load();
+    const unsigned assets_free = g_assets_freed.load();
+    const auto first = rig.adapter.close(0U);
+    const auto second = rig.adapter.close(0U);
+    std::fprintf(stderr,
+                 "u1-persistent-close: first_ok=%d second_ok=%d destroys=%u joins=%u\n",
+                 static_cast<int>(static_cast<bool>(first)),
+                 static_cast<int>(static_cast<bool>(second)),
+                 g_stream_destroys.load() - destroys, g_join_calls.load() - joins);
+    CHECK(!first && first.error() == dtv::userland::Error::USB_IO);
+    CHECK(second);
+    CHECK(g_stream_destroys.load() == destroys + 1U);
+    CHECK(g_join_calls.load() == joins + 1U);
+    const auto shutdown = rig.adapter.shutdown();
+    std::fprintf(stderr,
+                 "u1-shutdown-persistent: shutdown_ok=%d usb=%u device=%u routes=%u assets=%u destroys=%u joins=%u\n",
+                 static_cast<int>(static_cast<bool>(shutdown)),
+                 g_usb_closes.load() - closes, g_device_freed.load() - device_free,
+                 g_routes_freed.load() - routes_free, g_assets_freed.load() - assets_free,
+                 g_stream_destroys.load() - destroys, g_join_calls.load() - joins);
+    CHECK(!shutdown);
+    CHECK(g_usb_closes.load() == closes + 1U);
+    CHECK(g_device_freed.load() == device_free + 1U);
+    CHECK(g_routes_freed.load() == routes_free + 1U);
+    CHECK(g_assets_freed.load() == assets_free + 1U);
+    CHECK(g_stream_destroys.load() == destroys + 1U);
+    CHECK(g_join_calls.load() == joins + 1U);
+    g_persistent_device_stop.store(false, std::memory_order_release);
+    return 0;
+}
+
+int case_shutdown_persistent(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "persistent shutdown open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "persistent shutdown tune");
+    Lease scan{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "persistent shutdown begin");
+    g_persistent_device_stop.store(true, std::memory_order_release);
+    const unsigned destroys = g_stream_destroys.load();
+    const unsigned joins = g_join_calls.load();
+    const unsigned closes = g_usb_closes.load();
+    const unsigned device_free = g_device_freed.load();
+    const unsigned routes_free = g_routes_freed.load();
+    const unsigned assets_free = g_assets_freed.load();
+    const auto shutdown = rig.adapter.shutdown();
+    std::fprintf(stderr,
+                 "u1-shutdown-persistent: shutdown_ok=%d usb=%u device=%u routes=%u assets=%u destroys=%u joins=%u\n",
+                 static_cast<int>(static_cast<bool>(shutdown)),
+                 g_usb_closes.load() - closes, g_device_freed.load() - device_free,
+                 g_routes_freed.load() - routes_free, g_assets_freed.load() - assets_free,
+                 g_stream_destroys.load() - destroys, g_join_calls.load() - joins);
+    CHECK(!shutdown);
+    CHECK(g_usb_closes.load() == closes + 1U);
+    CHECK(g_device_freed.load() == device_free + 1U);
+    CHECK(g_routes_freed.load() == routes_free + 1U);
+    CHECK(g_assets_freed.load() == assets_free + 1U);
+    CHECK(g_stream_destroys.load() == destroys + 1U);
+    CHECK(g_join_calls.load() == joins + 1U);
+    g_persistent_device_stop.store(false, std::memory_order_release);
+    return 0;
+}
+
+int case_retry_stop(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "retry stop open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "retry stop tune");
+    Lease scan{}, next{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "retry stop begin");
+    const unsigned stops = g_device_stops.load();
+    const unsigned destroys = g_stream_destroys.load();
+    const unsigned joins = g_join_calls.load();
+    g_fail_device_stop.store(true, std::memory_order_release);
+    const auto first = rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial);
+    const auto rejected = rig.adapter.begin_scan(&next);
+    const auto second = rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial);
+    const auto begun = rig.adapter.begin_scan(&next);
+    std::fprintf(stderr,
+                 "u1-retry-stop: first_ok=%d rejected_busy=%d second_ok=%d stops=%u destroys=%u joins=%u next_ok=%d\n",
+                 static_cast<int>(static_cast<bool>(first)),
+                 static_cast<int>(!rejected),
+                 static_cast<int>(static_cast<bool>(second)),
+                 g_device_stops.load() - stops, g_stream_destroys.load() - destroys,
+                 g_join_calls.load() - joins, static_cast<int>(static_cast<bool>(begun)));
+    CHECK(!first && first.error() == dtv::userland::Error::USB_IO);
+    CHECK(!rejected && rejected.error() == dtv::userland::Error::BUSY);
+    CHECK(second);
+    CHECK(g_device_stops.load() == stops + 2U);
+    CHECK(g_stream_destroys.load() == destroys + 1U);
+    CHECK(g_join_calls.load() == joins + 1U);
+    CHECK(begun);
+    CHECK_RESULT(rig.adapter.end_scan(next), "retry stop end");
+    CHECK_RESULT(rig.adapter.close(0U), "retry stop close");
+    return 0;
+}
+
+int case_retry_retune(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "retry retune open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "retry retune tune");
+    Lease scan{}, next{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "retry retune begin");
+    const unsigned stops = g_device_stops.load();
+    const unsigned destroys = g_stream_destroys.load();
+    const unsigned joins = g_join_calls.load();
+    g_fail_device_stop.store(true, std::memory_order_release);
+    const auto first = rig.adapter.program_hz(0U, ReceiverSystem::terrestrial,
+                                              479142857ULL, 1000U);
+    const auto rejected = rig.adapter.begin_scan(&next);
+    const auto second = rig.adapter.program_hz(0U, ReceiverSystem::terrestrial,
+                                               479142857ULL, 1000U);
+    const auto begun = rig.adapter.begin_scan(&next);
+    std::fprintf(stderr,
+                 "u1-retry-retune: first_ok=%d rejected_busy=%d second_ok=%d stops=%u destroys=%u joins=%u next_ok=%d\n",
+                 static_cast<int>(static_cast<bool>(first)),
+                 static_cast<int>(!rejected),
+                 static_cast<int>(static_cast<bool>(second)),
+                 g_device_stops.load() - stops, g_stream_destroys.load() - destroys,
+                 g_join_calls.load() - joins, static_cast<int>(static_cast<bool>(begun)));
+    CHECK(!first && first.error() == dtv::userland::Error::USB_IO);
+    CHECK(!rejected && rejected.error() == dtv::userland::Error::BUSY);
+    CHECK(second);
+    CHECK(g_device_stops.load() == stops + 2U);
+    CHECK(g_stream_destroys.load() == destroys + 1U);
+    CHECK(g_join_calls.load() == joins + 1U);
+    CHECK(begun);
+    CHECK_RESULT(rig.adapter.end_scan(next), "retry retune end");
+    CHECK_RESULT(rig.adapter.close(0U), "retry retune close");
+    return 0;
+}
+
 int case_close_shutdown_terminal(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0, 2);
@@ -793,7 +958,10 @@ extern "C" int __wrap_usb_open_model(usb_backend **output, const usb_selector *,
     *output = reinterpret_cast<usb_backend *>(static_cast<std::uintptr_t>(0x295));
     return 0;
 }
-extern "C" void __wrap_usb_close(usb_backend *) {}
+extern "C" void __wrap_usb_close(usb_backend *)
+{
+    g_usb_closes.fetch_add(1U, std::memory_order_acq_rel);
+}
 extern "C" void *__wrap_usb_native_context(usb_backend *)
 {
     return reinterpret_cast<void *>(static_cast<std::uintptr_t>(0x29501));
@@ -905,6 +1073,7 @@ extern "C" int __wrap_dt295_stop(dt295 *device, size_t *drained, char *error,
                                   size_t error_size)
 {
     g_device_stops.fetch_add(1U, std::memory_order_acq_rel);
+    if (g_persistent_device_stop.load(std::memory_order_acquire)) return LIBUSB_ERROR_IO;
     if (g_fail_device_stop.exchange(false, std::memory_order_acq_rel))
         return LIBUSB_ERROR_IO;
     return __real_dt295_stop(device, drained, error, error_size);
@@ -917,7 +1086,29 @@ extern "C" int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *at
     g_creates.fetch_add(1U, std::memory_order_acq_rel);
     return __real_pthread_create(thread, attributes, entry, argument);
 }
-extern "C" int __wrap_dt295_stream_destroy(dt295_stream *) { return 0; }
+extern "C" int __wrap_dt295_stream_destroy(dt295_stream *)
+{
+    g_stream_destroys.fetch_add(1U, std::memory_order_acq_rel);
+    return 0;
+}
+extern "C" void __real_dt295_destroy(dt295 *);
+extern "C" void __wrap_dt295_destroy(dt295 *device)
+{
+    g_device_freed.fetch_add(1U, std::memory_order_acq_rel);
+    __real_dt295_destroy(device);
+}
+extern "C" void __real_dt295_routes_destroy(dt295_routes *);
+extern "C" void __wrap_dt295_routes_destroy(dt295_routes *routes)
+{
+    g_routes_freed.fetch_add(1U, std::memory_order_acq_rel);
+    __real_dt295_routes_destroy(routes);
+}
+extern "C" void __real_dt295_assets_free(dt295_assets *);
+extern "C" void __wrap_dt295_assets_free(dt295_assets *assets)
+{
+    g_assets_freed.fetch_add(1U, std::memory_order_acq_rel);
+    __real_dt295_assets_free(assets);
+}
 extern "C" int __real_pthread_join(pthread_t, void **);
 extern "C" int __wrap_pthread_join(pthread_t thread, void **value)
 {
@@ -966,6 +1157,12 @@ int main(int argc, char **argv)
     CHECK(run("physical-stop", [&] { return case_physical_stop_retry(assets); }));
     CHECK(run("refusal-count", [&] { return case_refusal_count(assets); }));
     CHECK(run("close-retry", [&] { return case_close_retry(assets); }));
+    if (!only.empty()) {
+        CHECK(run("persistent-close", [&] { return case_persistent_close(assets); }));
+        CHECK(run("shutdown-persistent", [&] { return case_shutdown_persistent(assets); }));
+    }
+    CHECK(run("retry-stop", [&] { return case_retry_stop(assets); }));
+    CHECK(run("retry-retune", [&] { return case_retry_retune(assets); }));
     CHECK(run("waiting-readers", [&] { return case_waiting_readers(assets); }));
     CHECK(run("close-shutdown", [&] { return case_close_shutdown_terminal(assets); }));
 
