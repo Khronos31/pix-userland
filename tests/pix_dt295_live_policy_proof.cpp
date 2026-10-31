@@ -258,15 +258,15 @@ int case_rejected_update(const std::vector<std::uint8_t> &assets, unsigned mode,
 
 int case_split_pmt(const std::vector<std::uint8_t> &assets)
 {
-    /* First read carries an incomplete PMT section and a TS packet; the next
-     * read carries the complete same-version PMT (retransmitted, not byte
-     * continuation) and a following TS. The boundary is the first complete
-     * dangerous section, not prediction of a future one. */
+    /* The same dangerous PMT section is split at a byte boundary across two
+     * TS packets in two reads. The first packed fragment can coexist with a
+     * TS; the final fragment completes the update and a following TS must not
+     * be published. */
     Rig rig(assets);
     Attachment attachment{};
     CHECK(prepare(rig, attachment) == 0);
     std::uint8_t full[188];
-    dt295_actual_fixture_update_packet(full, 1U, 0U, 2U);
+    dt295_actual_fixture_update_packet(full, 1U, 0U, 3U);
     const size_t section_size =
         3U + (size_t)(((full[6] & 0x0fU) << 8) | full[7]);
     const size_t split = section_size > 8U ? 8U : section_size / 2U;
@@ -279,6 +279,7 @@ int case_split_pmt(const std::vector<std::uint8_t> &assets)
     const size_t first_payload = 1U + split;
     first[4] = static_cast<std::uint8_t>(183U - first_payload);
     const size_t first_at = 5U + first[4];
+    first[5] = 0U;
     first[first_at] = 0U;
     std::memcpy(first + first_at + 1U, full + 5, split);
     std::vector<std::uint8_t> partial(first, first + 188U);
@@ -291,9 +292,17 @@ int case_split_pmt(const std::vector<std::uint8_t> &assets)
         std::chrono::milliseconds(200));
     CHECK(before && before.value().bytes != 0U && !before.value().eof);
     std::uint8_t second[188];
-    dt295_actual_fixture_update_packet(second, 1U, 2U, 3U);
-    std::vector<std::uint8_t> completion;
-    append_packet(completion, second);
+    std::memset(second, 0xff, sizeof(second));
+    second[0] = 0x47U;
+    second[1] = 0x01U;
+    second[2] = 0x00U;
+    second[3] = 0x32U;
+    const size_t second_payload = section_size - split;
+    second[4] = static_cast<std::uint8_t>(183U - second_payload);
+    const size_t second_at = 5U + second[4];
+    second[5] = 0U;
+    std::memcpy(second + second_at, full + 5 + split, second_payload);
+    std::vector<std::uint8_t> completion(second, second + 188U);
     append_ts(completion, 0x101U, 2U, 0x62U);
     queue_chunk(completion);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -307,6 +316,71 @@ int case_split_pmt(const std::vector<std::uint8_t> &assets)
                  static_cast<unsigned>(rig.adapter.acquisition().phase));
     (void)rig.adapter.detach(attachment);
     CHECK_RESULT(rig.adapter.close(0U), "split close");
+    return 0;
+}
+
+int case_split_safe_addition(const std::vector<std::uint8_t> &assets)
+{
+    Rig rig(assets);
+    Attachment attachment{};
+    CHECK(prepare(rig, attachment) == 0);
+    std::uint8_t full[188];
+    dt295_actual_fixture_update_packet(full, 1U, 0U, 1U);
+    const size_t section_size = 3U + (size_t)(((full[6] & 0x0fU) << 8) | full[7]);
+    const size_t split = section_size > 8U ? 8U : section_size / 2U;
+    std::uint8_t first[188];
+    std::memset(first, 0xff, sizeof(first));
+    first[0] = 0x47U;
+    first[1] = 0x41U;
+    first[2] = 0x00U;
+    first[3] = 0x31U;
+    first[4] = static_cast<std::uint8_t>(183U - (1U + split));
+    const size_t first_at = 5U + first[4];
+    first[5] = 0U;
+    first[first_at] = 0U;
+    std::memcpy(first + first_at + 1U, full + 5, split);
+    std::vector<std::uint8_t> partial(first, first + 188U);
+    append_ts(partial, 0x101U, 1U, 0x71U);
+    queue_chunk(partial);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    std::uint8_t buffer[188U * 4U];
+    const auto before = rig.adapter.read(attachment,
+        dtv::userland::MutableByteView{buffer, sizeof(buffer)},
+        std::chrono::milliseconds(200));
+    CHECK(before && before.value().bytes != 0U && !before.value().eof);
+    std::uint8_t second[188];
+    std::memset(second, 0xff, sizeof(second));
+    second[0] = 0x47U;
+    second[1] = 0x01U;
+    second[2] = 0x00U;
+    second[3] = 0x32U;
+    const size_t second_payload = section_size - split;
+    second[4] = static_cast<std::uint8_t>(183U - second_payload);
+    const size_t second_at = 5U + second[4];
+    second[5] = 0U;
+    std::memcpy(second + second_at, full + 5 + split, second_payload);
+    std::vector<std::uint8_t> completion(second, second + 188U);
+    append_ts(completion, 0x111U, 0U, 0x72U);
+    const unsigned writes = g_route_writes.load();
+    queue_chunk(completion);
+    bool saw_new = false;
+    for (unsigned n = 0U; n < 10U; ++n) {
+        const auto read = rig.adapter.read(attachment,
+            dtv::userland::MutableByteView{buffer, sizeof(buffer)},
+            std::chrono::milliseconds(50));
+        if (!read || read.value().bytes == 0U) break;
+        for (std::size_t at = 0U; at + 188U <= read.value().bytes; at += 188U) {
+            const unsigned pid =
+                (static_cast<unsigned>(buffer[at + 1] & 0x1fU) << 8) | buffer[at + 2];
+            if (pid == 0x111U) saw_new = true;
+        }
+    }
+    CHECK(saw_new);
+    CHECK(rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready);
+    CHECK(g_route_writes.load() == writes + 1U);
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "split add stop");
+    CHECK_RESULT(rig.adapter.detach(attachment), "split add detach");
+    CHECK_RESULT(rig.adapter.close(0U), "split add close");
     return 0;
 }
 
@@ -433,6 +507,7 @@ int main(int argc, char **argv)
     CHECK(run("ecm-rebind", [&] { return case_rejected_update(assets, 3U, "ecm-rebind"); }));
     CHECK(run("metadata-only", [&] { return case_rejected_update(assets, 4U, "metadata-only"); }));
     CHECK(run("split-pmt", [&] { return case_split_pmt(assets); }));
+    CHECK(run("split-safe", [&] { return case_split_safe_addition(assets); }));
 
     dt295_actual_fixture_close();
     (void)unlink(path.c_str());
