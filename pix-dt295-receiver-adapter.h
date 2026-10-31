@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "dt295.h"
+#include "dt295_live_policy.h"
 #include "dt295_routes.h"
 #include "dt295_stream.h"
 #include "usb_backend.h"
@@ -153,7 +154,8 @@ private:
     Result start_stream_unlocked() noexcept;
     Result stop_receiver_unlocked() noexcept;
     Result apply_plan_unlocked(dt295_route_plan* current,
-                               const dt295_route_plan* desired) noexcept;
+                               const dt295_route_plan* desired,
+                               bool live_policy) noexcept;
     Result ensure_streaming() noexcept;
     void pump() noexcept;
     static void* pump_entry(void*) noexcept;

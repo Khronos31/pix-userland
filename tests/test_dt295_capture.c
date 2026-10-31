@@ -777,6 +777,18 @@ int main(void) {
     assert(run_with_diagnostic(&c) == 8 && live_add_event_count == 0 &&
            live_add_summary_count == 1 && live_add_summary_value == 0);
     reset();
+    fragment_boundary = 65536;
+    fixture_mode = FIXTURE_SHARED_ADD;
+    assert(!dt295_capture_run(&c));
+    assert(route_write_pid273_count == 1 && pid273_output_count == 3);
+    assert(stops == 2 && cancels == 2 && shutdowns == 1 && closed == 1);
+    reset();
+    fragment_boundary = 65536;
+    fixture_mode = FIXTURE_NEW_ECM;
+    assert(dt295_capture_run(&c) == 8 && route_write_pid273_count == 0 &&
+           route_write_pid902_count == 0 && pid273_output_count == 0);
+    assert(stops == 2 && cancels == 2 && shutdowns == 1 && closed == 1);
+    reset();
     fixture_mode = FIXTURE_REBIND;
     assert(dt295_capture_run(&c) == 8 && route_write_pid273_count == 0 &&
            route_write_pid902_count == 0);

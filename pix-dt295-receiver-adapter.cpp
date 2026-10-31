@@ -807,7 +807,7 @@ ReceiverAdapter::Result ReceiverAdapter::start_stream_unlocked() noexcept
 }
 
 ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
-    dt295_route_plan* current, const dt295_route_plan* desired) noexcept
+    dt295_route_plan* current, const dt295_route_plan* desired, bool live_policy) noexcept
 {
     if (current == nullptr || desired == nullptr || device_ == nullptr)
         return Result::failure(Error::DISCONNECTED);
@@ -817,7 +817,12 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
     char route_error[DT295_ROUTE_ERROR]{};
     if (dt295_routes_plan_ops(current, &effective, ops, &count, route_error) != 0)
         return Result::failure(Error::INTERNAL);
-    if (count == 0U) return Result::success();
+    char policy_error[256]{};
+    if (live_policy &&
+        live_additions_only(current, &effective, ops, count, policy_error,
+                            sizeof(policy_error)) != 0)
+        return Result::failure(Error::UNSUPPORTED);
+    if (!live_policy && count == 0U) return Result::success();
     dt295_route_plan candidate{};
     if (dt295_routes_guard(current, ops, count, &candidate, route_error) != 0)
         return Result::failure(Error::INTERNAL);
@@ -912,6 +917,8 @@ void ReceiverAdapter::pump() noexcept
     bool normal_done = false;
     std::vector<std::uint8_t> residue;
     residue.reserve(65536U + 188U);
+    std::vector<std::uint8_t> publish_buffer;
+    publish_buffer.reserve(65536U + 188U);
     std::uint8_t chunk[65536U];
     std::uint64_t last_renew = clock_.monotonic_ms();
     const std::uint64_t generation = acquisition_generation_.load(std::memory_order_acquire);
@@ -975,20 +982,8 @@ void ReceiverAdapter::pump() noexcept
             }
             dt295_routes_feed(routes_, packet);
             if (scan_mode) scan_append_packet(packet);
-            if (!ready) continue;
-            {
-                std::lock_guard<std::mutex> lock(session_.mutex);
-                if (!stream_attached_ || !session_.attached ||
-                    session_.terminal != dtv::userland::detail::StreamTerminal::none ||
-                    session_.incarnation != attachment_incarnation_ ||
-                    !same_identity(session_.identity, attachment_))
-                    continue;
-                session_.append_locked(dtv::userland::ByteView{packet, 188U});
-                if (session_.terminal != dtv::userland::detail::StreamTerminal::none) {
-                    terminal = true;
-                    break;
-                }
-            }
+            if (!ready || scan_mode) continue;
+            publish_buffer.insert(publish_buffer.end(), packet, packet + 188U);
         }
         if (decode_failed) {
             fail_acquisition(AcquisitionFailure::packet,
@@ -1047,7 +1042,7 @@ void ReceiverAdapter::pump() noexcept
                     Result applied = Result::success();
                     {
                         std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                        applied = apply_plan_unlocked(&live_, &bootstrap);
+                        applied = apply_plan_unlocked(&live_, &bootstrap, false);
                     }
                     if (!applied) {
                         fail_acquisition(AcquisitionFailure::usb,
@@ -1075,6 +1070,67 @@ void ReceiverAdapter::pump() noexcept
                 }
                 normal_done = true;
             }
+        }
+
+        if (!scan_mode && plan_complete_ && count > 0) {
+            dt295_routes_snapshot snapshot{};
+            dt295_routes_snapshot_get(routes_, &snapshot);
+            if (tuned_system_.load(std::memory_order_acquire) == ReceiverSystem::satellite &&
+                satellite_tsid_valid_.load(std::memory_order_acquire) &&
+                snapshot.have_pat &&
+                snapshot.tsid != satellite_tsid_.load(std::memory_order_acquire)) {
+                fail_acquisition(AcquisitionFailure::satellite_tsid,
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal,
+                                 Error::UNSUPPORTED);
+                break;
+            }
+            if (snapshot.unsupported_tables != 0U) {
+                fail_acquisition(AcquisitionFailure::unsupported,
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal,
+                                 Error::UNSUPPORTED);
+                break;
+            }
+            dt295_route_plan desired{};
+            char route_error[DT295_ROUTE_ERROR]{};
+            if (dt295_routes_build(routes_, 0U, &live_, &desired, route_error) != 0) {
+                fail_acquisition(AcquisitionFailure::plan,
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal,
+                                 Error::INTERNAL);
+                break;
+            }
+            Result applied = Result::success();
+            {
+                std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
+                applied = apply_plan_unlocked(&live_, &desired, true);
+            }
+            if (!applied) {
+                fail_acquisition(applied.error() == Error::UNSUPPORTED
+                                     ? AcquisitionFailure::plan
+                                     : AcquisitionFailure::usb,
+                                 applied.error() == Error::UNSUPPORTED
+                                     ? dtv::userland::detail::StreamTerminal::bridge_fatal
+                                     : dtv::userland::detail::StreamTerminal::usb_error,
+                                 applied.error());
+                break;
+            }
+            if (!publish_buffer.empty()) {
+                std::lock_guard<std::mutex> lock(session_.mutex);
+                if (stream_attached_ && session_.attached &&
+                    session_.terminal == dtv::userland::detail::StreamTerminal::none &&
+                    session_.incarnation == attachment_incarnation_ &&
+                    same_identity(session_.identity, attachment_)) {
+                    for (std::size_t at = 0U; at + 188U <= publish_buffer.size(); at += 188U) {
+                        session_.append_locked(dtv::userland::ByteView{
+                            publish_buffer.data() + at, 188U});
+                        if (session_.terminal != dtv::userland::detail::StreamTerminal::none) {
+                            terminal = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            publish_buffer.clear();
+            if (terminal) break;
         }
 
         if (!scan_mode && !plan_complete_ && count > 0) {
@@ -1108,7 +1164,7 @@ void ReceiverAdapter::pump() noexcept
                 Result applied = Result::success();
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                    applied = apply_plan_unlocked(&live_, &bootstrap);
+                    applied = apply_plan_unlocked(&live_, &bootstrap, false);
                 }
                 if (!applied) {
                     fail_acquisition(AcquisitionFailure::usb,

@@ -518,7 +518,7 @@ static void actual_table_update(uint8_t packet[188], unsigned version, unsigned 
         pmt[n++] = 0x09; pmt[n++] = 4; pmt[n++] = 0; pmt[n++] = 5;
         pmt[n++] = 0xe9; pmt[n++] = 0x02;
     }
-    pmt[n++] = 0x1b; pmt[n++] = 0xe1; pmt[n++] = 0x01;
+    pmt[n++] = mode == 4 ? 0x24 : 0x1b; pmt[n++] = 0xe1; pmt[n++] = 0x01;
     pmt[n++] = 0xf0; pmt[n++] = 0;
     pmt[n++] = 0x0f; pmt[n++] = 0xe1; pmt[n++] = 0x02;
     pmt[n++] = 0xf0; pmt[n++] = 0;
