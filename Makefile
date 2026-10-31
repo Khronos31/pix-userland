@@ -8,7 +8,7 @@ WARN = -std=c11 -Wall -Wextra -Wpedantic
 USB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libusb-1.0)
 USB_LIBS ?= $(shell $(PKG_CONFIG) --libs libusb-1.0)
 CORE = src/pid_filter.o src/control.o src/channel.o src/crypto.o src/platform.o src/protocol.o src/transport.o
-OBJ = src/usb_selector.o src/usb_listing.o $(CORE) src/diagnostic.o src/main.o src/usb_libusb.o src/usb_log.o src/dt295.o src/dt295_crypto.o src/dt295_routes.o src/dt295_stream.o src/ts_output.o src/dt295_capture.o
+OBJ = src/usb_selector.o src/usb_listing.o $(CORE) src/diagnostic.o src/main.o src/usb_libusb.o src/usb_log.o src/dt295.o src/dt295_crypto.o src/dt295_routes.o src/dt295_stream.o src/ts_output.o src/dt295_capture.o src/dt295_live_policy.o
 .PHONY: all clean test
 # Legacy standalone C CLI, kept for internal diagnostics and tests only. It is not a release
 # program: pixd, pixctl and pix-ts are built by core-integration/CMakeLists.txt.
@@ -41,7 +41,7 @@ tests/test-usb-restart: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o
 tests/test-usb-config-order: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o src/usb_selector.o src/platform.o
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) -DPIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY $(LDFLAGS) -o $@ $^ $(USB_LIBS) $(OS_LIBS)
 
-tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c
+tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_live_policy.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $(filter-out src/dt295_capture.c,$^) $(OS_LIBS)
 tests/test-dt295-protocol: tests/test_dt295_protocol.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
 	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)

@@ -114,7 +114,8 @@ add_library(pix_dt295_c_backend STATIC
     "${PIX_SOURCE_DIR}/src/dt295_routes.c"
     "${PIX_SOURCE_DIR}/src/dt295_stream.c"
     "${PIX_SOURCE_DIR}/src/ts_output.c"
-    "${PIX_SOURCE_DIR}/src/dt295_capture.c")
+    "${PIX_SOURCE_DIR}/src/dt295_capture.c"
+    "${PIX_SOURCE_DIR}/src/dt295_live_policy.c")
 target_compile_definitions(pix_dt295_c_backend PRIVATE
     _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
 if(WIN32)
