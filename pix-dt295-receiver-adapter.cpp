@@ -669,11 +669,19 @@ void ReceiverAdapter::pump() noexcept
     std::uint8_t chunk[65536U];
     std::uint64_t last_renew = clock_.monotonic_ms();
     const std::uint64_t generation = acquisition_generation_.load(std::memory_order_acquire);
-    const auto acquisition_valid = [&]() noexcept {
+    const std::uint64_t tune_generation =
+        tune_generation_.load(std::memory_order_acquire);
+    const auto acquisition_alive = [&]() noexcept {
         return !pump_stop_.load(std::memory_order_acquire) &&
                acquisition_phase_.load(std::memory_order_acquire) !=
                    AcquisitionPhase::terminal &&
-               acquisition_generation_.load(std::memory_order_acquire) == generation;
+               acquisition_generation_.load(std::memory_order_acquire) == generation &&
+               tune_generation_.load(std::memory_order_acquire) == tune_generation;
+    };
+    const auto acquisition_preparing = [&]() noexcept {
+        return acquisition_alive() &&
+               acquisition_phase_.load(std::memory_order_acquire) ==
+                   AcquisitionPhase::preparing;
     };
     while (!pump_stop_.load(std::memory_order_acquire)) {
         if (stream_ == nullptr) break;
@@ -741,7 +749,7 @@ void ReceiverAdapter::pump() noexcept
         if (offset != 0U)
             residue.erase(residue.begin(), residue.begin() + static_cast<std::ptrdiff_t>(offset));
         if (terminal) break;
-        if (!acquisition_valid()) break;
+        if (!acquisition_alive()) break;
 
         if (!plan_complete_ && count > 0) {
             dt295_routes_snapshot snapshot{};
@@ -770,7 +778,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::INTERNAL);
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 Result applied = Result::success();
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -801,7 +809,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::UNSUPPORTED);
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 char error[256]{};
                 size_t drained = 0U;
                 bool stopped = true;
@@ -815,7 +823,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::USB_IO);
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 const auto halted = halt_unlocked();
                 if (!halted) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -823,7 +831,7 @@ void ReceiverAdapter::pump() noexcept
                                      halted.error());
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 bool prepared = false;
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -835,7 +843,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::USB_IO);
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 bool started_device = false;
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -847,7 +855,7 @@ void ReceiverAdapter::pump() noexcept
                                      Error::USB_IO);
                     break;
                 }
-                if (!acquisition_valid()) break;
+                if (!acquisition_preparing()) break;
                 const auto restarted = start_stream_unlocked();
                 if (!restarted) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -857,7 +865,7 @@ void ReceiverAdapter::pump() noexcept
                 }
                 {
                     std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
-                    if (!acquisition_valid()) break;
+                    if (!acquisition_preparing()) break;
                     live_ = plan;
                     plan_complete_ = true;
                     residue.clear();
