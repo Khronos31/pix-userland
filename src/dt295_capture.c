@@ -447,11 +447,6 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             break;
         remainder = total - length;
         memmove(data, data + length, remainder);
-        if (emitted && (e = ts_output_submit(output, out, emitted, NULL))) {
-            rc = output_exit(e);
-            snprintf(error, sizeof(error), "TS enqueue: %s", strerror(e));
-            break;
-        }
         dt295_routes_snapshot snapshot;
         dt295_routes_snapshot_get(tables, &snapshot);
         if (cfg->system != PIXY_TERRESTRIAL && snapshot.have_pat &&
@@ -547,6 +542,11 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
             recording = 1;
             record_start = last_input = now_ms();
             ts_check_init(check);
+        }
+        if (emitted && (e = ts_output_submit(output, out, emitted, NULL))) {
+            rc = output_exit(e);
+            snprintf(error, sizeof(error), "TS enqueue: %s", strerror(e));
+            break;
         }
         now = now_ms();
         if (now >= next_status) {
