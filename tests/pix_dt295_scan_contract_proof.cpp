@@ -45,6 +45,9 @@ std::atomic<bool> g_suppress_input{false};
 std::atomic<unsigned> g_stream_starts{0};
 std::atomic<unsigned> g_stream_stops{0};
 std::atomic<unsigned> g_join_calls{0};
+std::atomic<unsigned> g_creates{0};
+std::atomic<unsigned> g_device_stops{0};
+std::atomic<bool> g_fail_device_stop{false};
 bool g_first = true;
 unsigned g_cc_si[3] = {0U, 0U, 0U};
 unsigned g_cc_video = 0U;
@@ -621,6 +624,133 @@ int case_waiting_readers(const std::vector<std::uint8_t> &assets)
     return 0;
 }
 
+int case_terminal_attach(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "terminal attach open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "terminal attach tune");
+    Lease scan{}, other{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "terminal attach begin");
+    g_read_fail.store(1, std::memory_order_release);
+    SiRead result{};
+    std::vector<std::uint8_t> si;
+    for (unsigned n = 0U; n < 3000U && !result.terminal; ++n)
+        CHECK(read_si(rig.adapter, scan, si, &result, std::chrono::milliseconds(10)));
+    CHECK(result.terminal && result.reason == SiEndReason::usb);
+    const auto started = rig.adapter.start_capture(0U, ReceiverSystem::terrestrial);
+    const auto begun = rig.adapter.begin_scan(&other);
+    const unsigned creates = g_creates.load();
+    const unsigned joins = g_join_calls.load();
+    dtv::userland::detail::Attachment attachment{};
+    attachment.owner_client_id = 11U;
+    attachment.lease_id = attachment.attachment_id = 103U;
+    attachment.receiver = 0U;
+    attachment.system = ReceiverSystem::terrestrial;
+    const auto attached = rig.adapter.attach(attachment);
+    std::fprintf(stderr,
+                 "u1-terminal-attach: start_ok=%d begin_ok=%d attach_ok=%d create_delta=%u join_delta=%u\n",
+                 static_cast<int>(static_cast<bool>(started)),
+                 static_cast<int>(static_cast<bool>(begun)),
+                 static_cast<int>(static_cast<bool>(attached)),
+                 g_creates.load() - creates, g_join_calls.load() - joins);
+    CHECK(!started && !begun && !attached);
+    CHECK(attached.error() == dtv::userland::Error::BUSY);
+    CHECK(g_creates.load() == creates);
+    CHECK(g_join_calls.load() == joins);
+    CHECK_RESULT(rig.adapter.end_scan(scan), "terminal attach end");
+    CHECK_RESULT(rig.adapter.close(0U), "terminal attach close");
+    return 0;
+}
+
+int case_physical_stop_retry(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "physical stop open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "physical stop tune");
+    Lease scan{}, other{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "physical stop begin");
+    g_fail_device_stop.store(true, std::memory_order_release);
+    const unsigned before = g_device_stops.load();
+    const auto first = rig.adapter.end_scan(scan);
+    const auto second = rig.adapter.end_scan(scan);
+    const unsigned retries = g_device_stops.load() - before;
+    const auto next = rig.adapter.begin_scan(&other);
+    std::fprintf(stderr,
+                 "u1-physical-stop: first_ok=%d first_error=%u second_ok=%d stop_calls=%u next_ok=%d\n",
+                 static_cast<int>(static_cast<bool>(first)),
+                 static_cast<unsigned>(first ? 0U : static_cast<unsigned>(first.error())),
+                 static_cast<int>(static_cast<bool>(second)), retries,
+                 static_cast<int>(static_cast<bool>(next)));
+    CHECK(!first && first.error() == dtv::userland::Error::USB_IO);
+    CHECK(second);
+    CHECK(retries == 2U);
+    CHECK(next);
+    CHECK_RESULT(rig.adapter.end_scan(other), "physical stop next end");
+    CHECK_RESULT(rig.adapter.close(0U), "physical stop close");
+    return 0;
+}
+
+int case_refusal_count(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 4);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "count open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "count tune");
+    Lease first{}, second{}, third{};
+    CHECK_RESULT(rig.adapter.begin_scan(&first), "count first begin");
+    CHECK(!rig.adapter.start_capture(0U, ReceiverSystem::terrestrial));
+    CHECK(!rig.adapter.start_capture(0U, ReceiverSystem::terrestrial));
+    CHECK_RESULT(rig.adapter.end_scan(first), "count first end");
+    CHECK_RESULT(rig.adapter.begin_scan(&second), "count second begin");
+    std::vector<std::uint8_t> si;
+    SiRead result{};
+    for (unsigned n = 0U; n < 2U; ++n) {
+        CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "count compensation");
+        CHECK(read_si(rig.adapter, second, si, &result, std::chrono::milliseconds(100)));
+        CHECK(!result.terminal);
+    }
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "count direct stop");
+    CHECK(read_si(rig.adapter, second, si, &result, std::chrono::milliseconds(100)));
+    CHECK(result.terminal && result.reason == SiEndReason::stop);
+    CHECK_RESULT(rig.adapter.end_scan(second), "count second end");
+    CHECK_RESULT(rig.adapter.begin_scan(&third), "count third begin");
+    CHECK(!rig.adapter.start_capture(0U, ReceiverSystem::terrestrial));
+    CHECK_RESULT(rig.adapter.end_scan(third), "count third end");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                 "count normal start");
+    const unsigned before = g_device_stops.load();
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                 "count normal stop");
+    CHECK(g_device_stops.load() == before + 1U);
+    CHECK_RESULT(rig.adapter.close(0U), "count close");
+    return 0;
+}
+
+int case_close_retry(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "close retry open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "close retry tune");
+    Lease scan{};
+    CHECK_RESULT(rig.adapter.begin_scan(&scan), "close retry begin");
+    g_fail_device_stop.store(true, std::memory_order_release);
+    CHECK(!rig.adapter.close(0U));
+    CHECK_RESULT(rig.adapter.close(0U), "close retry second");
+    return 0;
+}
+
 int case_close_shutdown_terminal(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0, 2);
@@ -770,6 +900,23 @@ extern "C" int __wrap_dt295_stream_stop(dt295_stream *, unsigned)
     g_stream_stops.fetch_add(1U, std::memory_order_acq_rel);
     return 0;
 }
+extern "C" int __real_dt295_stop(dt295 *, size_t *, char *, size_t);
+extern "C" int __wrap_dt295_stop(dt295 *device, size_t *drained, char *error,
+                                  size_t error_size)
+{
+    g_device_stops.fetch_add(1U, std::memory_order_acq_rel);
+    if (g_fail_device_stop.exchange(false, std::memory_order_acq_rel))
+        return LIBUSB_ERROR_IO;
+    return __real_dt295_stop(device, drained, error, error_size);
+}
+extern "C" int __real_pthread_create(pthread_t *, const pthread_attr_t *,
+                                     void *(*)(void *), void *);
+extern "C" int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes,
+                                     void *(*entry)(void *), void *argument)
+{
+    g_creates.fetch_add(1U, std::memory_order_acq_rel);
+    return __real_pthread_create(thread, attributes, entry, argument);
+}
 extern "C" int __wrap_dt295_stream_destroy(dt295_stream *) { return 0; }
 extern "C" int __real_pthread_join(pthread_t, void **);
 extern "C" int __wrap_pthread_join(pthread_t thread, void **value)
@@ -815,6 +962,10 @@ int main(int argc, char **argv)
     CHECK(run("late-core-cleanup", [&] { return case_late_core_cleanup(assets); }));
     CHECK(run("terminal-handoff", [&] { return case_terminal_handoff(assets); }));
     CHECK(run("late-tsid", [&] { return case_late_tsid(assets); }));
+    CHECK(run("terminal-attach", [&] { return case_terminal_attach(assets); }));
+    CHECK(run("physical-stop", [&] { return case_physical_stop_retry(assets); }));
+    CHECK(run("refusal-count", [&] { return case_refusal_count(assets); }));
+    CHECK(run("close-retry", [&] { return case_close_retry(assets); }));
     CHECK(run("waiting-readers", [&] { return case_waiting_readers(assets); }));
     CHECK(run("close-shutdown", [&] { return case_close_shutdown_terminal(assets); }));
 

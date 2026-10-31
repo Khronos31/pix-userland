@@ -224,12 +224,12 @@ ReceiverAdapter::Result ReceiverAdapter::scan_release_owner(SiEndReason reason) 
     pump_scan_ = false;
     normal_capture_active_ = false;
     const auto stopped = stop_receiver_unlocked();
-    if (stream_ != nullptr) return stopped;  // ABANDONED: keep the same owner
+    if (!stopped || stream_ != nullptr) return stopped;  // keep owner for retry
     {
         std::lock_guard<std::mutex> lock(si_mutex_);
         scan_owner_ = 0U;
     }
-    return stopped;
+    return Result::success();
 }
 
 ReceiverAdapter::Result ReceiverAdapter::begin_scan(ScanLease* out) noexcept
@@ -1220,8 +1220,9 @@ ReceiverAdapter::Result ReceiverAdapter::attach(const Attachment& attachment) no
     if (stream_attached_) return Result::failure(Error::BUSY);
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        if (scan_active_) return Result::failure(Error::BUSY);
+        if (scan_active_ || scan_owner_ != 0U) return Result::failure(Error::BUSY);
     }
+    if (pump_joinable_) return Result::failure(Error::BUSY);
     Result streaming = Result::success();
     {
         std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -1241,6 +1242,7 @@ ReceiverAdapter::Result ReceiverAdapter::attach(const Attachment& attachment) no
     }
     pump_stop_.store(false, std::memory_order_release);
     pump_error_.store(0, std::memory_order_release);
+    pump_scan_ = false;
     stream_attached_ = true;
     if (pthread_create(&pump_thread_, nullptr, pump_entry, this) != 0) {
         pump_stop_.store(true, std::memory_order_release);
