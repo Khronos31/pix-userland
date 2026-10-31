@@ -203,11 +203,11 @@ void ReceiverAdapter::scan_terminate(SiEndReason reason) noexcept
     si_changed_.notify_all();
 }
 
-ReceiverAdapter::Result ReceiverAdapter::stop_scan_and_join(SiEndReason reason) noexcept
+ReceiverAdapter::Result ReceiverAdapter::scan_release_owner(SiEndReason reason) noexcept
 {
     {
         std::lock_guard<std::mutex> lock(si_mutex_);
-        if (!scan_active_) return Result::success();
+        if (scan_owner_ == 0U) return Result::success();
         scan_active_ = false;
         si_terminal_ = true;
         si_reason_ = reason;
@@ -223,7 +223,13 @@ ReceiverAdapter::Result ReceiverAdapter::stop_scan_and_join(SiEndReason reason) 
     }
     pump_scan_ = false;
     normal_capture_active_ = false;
-    return Result::success();
+    const auto stopped = stop_receiver_unlocked();
+    if (stream_ != nullptr) return stopped;  // ABANDONED: keep the same owner
+    {
+        std::lock_guard<std::mutex> lock(si_mutex_);
+        scan_owner_ = 0U;
+    }
+    return stopped;
 }
 
 ReceiverAdapter::Result ReceiverAdapter::begin_scan(ScanLease* out) noexcept
@@ -234,9 +240,10 @@ ReceiverAdapter::Result ReceiverAdapter::begin_scan(ScanLease* out) noexcept
     if (recovery_failed_) return Result::failure(Error::USB_IO);
     {
         std::lock_guard<std::mutex> lock(si_mutex_);
-        if (scan_active_) return Result::failure(Error::BUSY);
+        if (scan_active_ || scan_owner_ != 0U) return Result::failure(Error::BUSY);
     }
-    if (stream_attached_ || normal_capture_active_ || streaming_ || stream_ != nullptr)
+    if (pump_joinable_ || stream_attached_ || normal_capture_active_ || streaming_ ||
+        stream_ != nullptr)
         return Result::failure(Error::BUSY);
     Result streaming = Result::success();
     {
@@ -258,15 +265,13 @@ ReceiverAdapter::Result ReceiverAdapter::begin_scan(ScanLease* out) noexcept
         si_terminal_ = false;
         si_reason_ = SiEndReason::none;
         scan_active_ = true;
+        scan_owner_ = lease.scan_id;
     }
-    normal_refused_by_scan_ = false;
     pump_scan_ = true;
     pump_stop_.store(false, std::memory_order_release);
     pump_error_.store(0, std::memory_order_release);
     if (pthread_create(&pump_thread_, nullptr, pump_entry, this) != 0) {
-        scan_terminate(SiEndReason::usb);
-        pump_scan_ = false;
-        (void)stop_receiver_unlocked();
+        (void)scan_release_owner(SiEndReason::usb);
         return Result::failure(Error::INTERNAL);
     }
     pump_joinable_ = true;
@@ -337,13 +342,12 @@ ReceiverAdapter::Result ReceiverAdapter::end_scan(const ScanLease& lease) noexce
         if (lease.scan_id != scan_id_ ||
             lease.tune_generation != scan_tune_generation_)
             return Result::failure(Error::NOT_FOUND);
+        if (scan_owner_ == 0U) return Result::success();
     }
-    const auto stopped_scan = stop_scan_and_join(SiEndReason::scan_end);
+    const auto stopped_scan = scan_release_owner(SiEndReason::scan_end);
     if (!stopped_scan) return stopped_scan;
-    normal_refused_by_scan_ = false;
-    const auto stopped = stop_receiver_unlocked();
     end_session_for_acquisition(dtv::userland::detail::StreamTerminal::stopped);
-    return stopped;
+    return Result::success();
 }
 
 bool ReceiverAdapter::selects_satellite_stream_before_tune() const noexcept { return false; }
@@ -431,13 +435,13 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         plan_generation_.store(0U, std::memory_order_release);
     }
 
-    bool scan_running = false;
+    bool scan_owned = false;
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        scan_running = scan_active_;
+        scan_owned = scan_owner_ != 0U;
     }
-    if (scan_running) {
-        const auto stopped_scan = stop_scan_and_join(SiEndReason::retune);
+    if (scan_owned) {
+        const auto stopped_scan = scan_release_owner(SiEndReason::retune);
         if (!stopped_scan) return TuneResult::failure(stopped_scan.error());
     }
 
@@ -614,16 +618,15 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (stream_attached_) return Result::failure(Error::BUSY);
-    bool scan_running = false;
+    bool scan_owned = false;
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        scan_running = scan_active_;
+        scan_owned = scan_owner_ != 0U;
     }
-    if (scan_running) {
-        const auto stopped_scan = stop_scan_and_join(SiEndReason::stop);
+    if (scan_owned) {
+        const auto stopped_scan = scan_release_owner(SiEndReason::stop);
         if (!stopped_scan) return stopped_scan;
     }
-    normal_refused_by_scan_ = false;
     if (streaming_ || stream_ != nullptr) {
         const auto stopped = stop_receiver_unlocked();
         if (!stopped) return stopped;
@@ -635,6 +638,7 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
     }
     satellite_tuned_ = false;
     satellite_tsid_valid_.store(false, std::memory_order_release);
+    unconsumed_normal_refusals_ = 0U;
     {
         std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
         acquisition_phase_.store(AcquisitionPhase::idle, std::memory_order_release);
@@ -691,8 +695,8 @@ ReceiverAdapter::Result ReceiverAdapter::start_capture(ReceiverId receiver, Rece
     if (!opened_) return Result::failure(Error::NOT_FOUND);
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        if (scan_active_) {
-            normal_refused_by_scan_ = true;
+        if (scan_active_ || scan_owner_ != 0U) {
+            ++unconsumed_normal_refusals_;
             return Result::failure(Error::BUSY);
         }
     }
@@ -711,6 +715,7 @@ ReceiverAdapter::Result ReceiverAdapter::start_capture(ReceiverId receiver, Rece
         pump_joinable_ = true;
     }
     normal_capture_active_ = true;
+    unconsumed_normal_refusals_ = 0U;
     return Result::success();
 }
 
@@ -718,18 +723,19 @@ ReceiverAdapter::Result ReceiverAdapter::stop_capture(ReceiverId receiver, Recei
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
     if (!supports(receiver, system)) return Result::failure(Error::INVALID_ARGUMENT);
-    bool scan_running = false;
+    if (unconsumed_normal_refusals_ != 0U && !normal_capture_active_) {
+        --unconsumed_normal_refusals_;
+        return Result::success();
+    }
+    bool scan_owned = false;
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        scan_running = scan_active_;
+        scan_owned = scan_owner_ != 0U;
     }
-    if (scan_running) {
-        if (normal_refused_by_scan_) {
-            normal_refused_by_scan_ = false;
-            return Result::success();
-        }
-        const auto stopped_scan = stop_scan_and_join(SiEndReason::stop);
+    if (scan_owned) {
+        const auto stopped_scan = scan_release_owner(SiEndReason::stop);
         if (!stopped_scan) return stopped_scan;
+        return Result::success();
     }
     pump_stop_.store(true, std::memory_order_release);
     if (pump_joinable_) {
@@ -740,6 +746,7 @@ ReceiverAdapter::Result ReceiverAdapter::stop_capture(ReceiverId receiver, Recei
     const auto stopped = stop_receiver_unlocked();
     end_session_for_acquisition(dtv::userland::detail::StreamTerminal::stopped);
     normal_capture_active_ = false;
+    unconsumed_normal_refusals_ = 0U;
     return stopped;
 }
 
@@ -986,6 +993,21 @@ void ReceiverAdapter::pump() noexcept
             residue.erase(residue.begin(), residue.begin() + static_cast<std::ptrdiff_t>(offset));
         if (terminal) break;
         if (!scan_mode && !acquisition_alive()) break;
+
+        if (scan_mode && count > 0) {
+            dt295_routes_snapshot snapshot{};
+            dt295_routes_snapshot_get(routes_, &snapshot);
+            if (tuned_system_.load(std::memory_order_acquire) == ReceiverSystem::satellite &&
+                satellite_tsid_valid_.load(std::memory_order_acquire) &&
+                snapshot.have_pat &&
+                snapshot.tsid != satellite_tsid_.load(std::memory_order_acquire)) {
+                fail_acquisition(AcquisitionFailure::satellite_tsid,
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal,
+                                 Error::UNSUPPORTED);
+                scan_terminate(SiEndReason::transport);
+                break;
+            }
+        }
 
         if (scan_mode && !normal_done && count > 0) {
             dt295_routes_snapshot snapshot{};
@@ -1314,16 +1336,16 @@ ReceiverAdapter::Result ReceiverAdapter::release_final(const Attachment& attachm
 ReceiverAdapter::Result ReceiverAdapter::shutdown() noexcept
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
-    bool scan_running = false;
+    bool scan_owned = false;
     {
         std::lock_guard<std::mutex> si_lock(si_mutex_);
-        scan_running = scan_active_;
+        scan_owned = scan_owner_ != 0U;
     }
-    if (scan_running) {
-        const auto stopped_scan = stop_scan_and_join(SiEndReason::shutdown);
+    if (scan_owned) {
+        const auto stopped_scan = scan_release_owner(SiEndReason::shutdown);
         if (!stopped_scan) return stopped_scan;
     }
-    normal_refused_by_scan_ = false;
+    unconsumed_normal_refusals_ = 0U;
     pump_stop_.store(true, std::memory_order_release);
     if (pump_joinable_) {
         (void)pthread_join(pump_thread_, nullptr);

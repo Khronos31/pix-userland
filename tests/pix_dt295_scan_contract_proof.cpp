@@ -13,6 +13,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <pthread.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,7 +41,10 @@ std::mutex g_stream_mutex;
 std::atomic<int> g_mode{0};
 std::atomic<int> g_si_per_read{4};
 std::atomic<int> g_read_fail{0};
+std::atomic<bool> g_suppress_input{false};
 std::atomic<unsigned> g_stream_starts{0};
+std::atomic<unsigned> g_stream_stops{0};
+std::atomic<unsigned> g_join_calls{0};
 bool g_first = true;
 unsigned g_cc_si[3] = {0U, 0U, 0U};
 unsigned g_cc_video = 0U;
@@ -100,6 +104,7 @@ void reset_stream(int mode, int si_per_read)
     g_mode.store(mode, std::memory_order_release);
     g_si_per_read.store(si_per_read, std::memory_order_release);
     g_read_fail.store(0, std::memory_order_release);
+    g_suppress_input.store(false, std::memory_order_release);
     g_first = true;
     g_cc_si[0] = g_cc_si[1] = g_cc_si[2] = 0U;
     g_cc_video = 0U;
@@ -402,6 +407,220 @@ int case_lease_generation_and_stop(const std::vector<std::uint8_t> &assets)
     return 0;
 }
 
+int case_stale_end_normal(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 4);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "stale open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "stale tune");
+    Lease lease{};
+    CHECK_RESULT(rig.adapter.begin_scan(&lease), "stale begin");
+    CHECK_RESULT(rig.adapter.end_scan(lease), "stale end");
+    reset_stream(0, 4);
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "stale normal start");
+    dtv::userland::detail::Attachment attachment{};
+    attachment.owner_client_id = 11U;
+    attachment.lease_id = attachment.attachment_id = 101U;
+    attachment.receiver = 0U;
+    attachment.system = ReceiverSystem::terrestrial;
+    CHECK_RESULT(rig.adapter.attach(attachment), "stale normal attach");
+    for (unsigned n = 0U; n < 3000U; ++n) {
+        if (rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready);
+    const unsigned stops = g_stream_stops.load();
+    const unsigned joins = g_join_calls.load();
+    CHECK_RESULT(rig.adapter.end_scan(lease), "stale old end");
+    std::uint8_t buffer[188U * 16U];
+    const auto read = rig.adapter.read(attachment,
+        dtv::userland::MutableByteView{buffer, sizeof(buffer)},
+        std::chrono::milliseconds(100));
+    CHECK(read && !read.value().eof);
+    CHECK(g_stream_stops.load() == stops);
+    CHECK(g_join_calls.load() == joins);
+    CHECK(rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready);
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "stale normal stop");
+    CHECK_RESULT(rig.adapter.detach(attachment), "stale detach");
+    CHECK_RESULT(rig.adapter.close(0U), "stale close");
+    return 0;
+}
+
+int case_late_core_cleanup(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 4);
+    Rig rig(assets, 8U);
+    const dtv::userland::detail::ReceiverId receivers[] = {0U};
+    Tokens tokens;
+    dtv::userland::detail::ReceiverEngine engine(
+        rig.adapter, receivers, 1U, tokens, rig.clock, nullptr, nullptr, &rig.adapter);
+    CHECK(Adapter::configure(engine, 0U, 7U));
+    auto owner = engine.acquire(12U, 0U);
+    CHECK(owner);
+    dtv::userland::detail::HzTuneRequest tune{};
+    tune.lease_id = owner.value().lease_id;
+    tune.system = ReceiverSystem::terrestrial;
+    tune.requested_hz = 473142857U;
+    tune.timeout_ms = 1000U;
+    auto admitted = engine.try_admit_tune(12U, tune, rig.clock.monotonic_ms());
+    CHECK(admitted);
+    CHECK(engine.execute_admitted_tune(admitted.value()));
+    const auto status = engine.status();
+    CHECK(status);
+    Lease first{}, second{};
+    CHECK_RESULT(rig.adapter.begin_scan(&first), "late core first");
+    const auto started = engine.start_stream_v1(12U, owner.value().lease_id,
+        status.value().tune_metadata[0].current_revision, rig.clock.monotonic_ms(), 5000U);
+    CHECK(started);
+    const auto ticket = engine.reserve_attach_v1(12U, owner.value().lease_id,
+        started.value().epoch, started.value().stream_id, started.value().token,
+        rig.clock.monotonic_ms());
+    CHECK(ticket);
+    const auto prepared = engine.prepare_attach_v1(ticket.value());
+    CHECK(!prepared && prepared.error() == dtv::userland::Error::BUSY);
+    CHECK_RESULT(rig.adapter.end_scan(first), "late core end first");
+    CHECK_RESULT(rig.adapter.begin_scan(&second), "late core second");
+    const unsigned stops = g_stream_stops.load();
+    CHECK_RESULT(engine.run_stream_cleanup_v1(ticket.value()), "late core cleanup");
+    std::vector<std::uint8_t> si;
+    SiRead read{};
+    CHECK(read_si(rig.adapter, second, si, &read, std::chrono::milliseconds(500)));
+    CHECK(!read.terminal);
+    CHECK(g_stream_stops.load() == stops);
+    CHECK_RESULT(rig.adapter.end_scan(second), "late core end second");
+    CHECK_RESULT(rig.adapter.close(0U), "late core close");
+    return 0;
+}
+
+int case_terminal_handoff(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(0, 0);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "handoff open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "handoff tune");
+    Lease lease{};
+    CHECK_RESULT(rig.adapter.begin_scan(&lease), "handoff begin");
+    g_read_fail.store(1, std::memory_order_release);
+    SiRead si_read{};
+    std::vector<std::uint8_t> si;
+    for (unsigned n = 0U; n < 3000U && !si_read.terminal; ++n)
+        CHECK(read_si(rig.adapter, lease, si, &si_read, std::chrono::milliseconds(10)));
+    CHECK(si_read.terminal && si_read.reason == SiEndReason::usb);
+    const unsigned joins = g_join_calls.load();
+    CHECK_RESULT(rig.adapter.end_scan(lease), "handoff end");
+    CHECK(g_join_calls.load() == joins + 1U);
+    reset_stream(0, 4);
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "handoff normal start");
+    dtv::userland::detail::Attachment attachment{};
+    attachment.owner_client_id = 11U;
+    attachment.lease_id = attachment.attachment_id = 102U;
+    attachment.receiver = 0U;
+    attachment.system = ReceiverSystem::terrestrial;
+    CHECK_RESULT(rig.adapter.attach(attachment), "handoff normal attach");
+    for (unsigned n = 0U; n < 3000U; ++n) {
+        if (rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::ready);
+    std::uint8_t buffer[188U * 16U];
+    const auto read = rig.adapter.read(attachment,
+        dtv::userland::MutableByteView{buffer, sizeof(buffer)},
+        std::chrono::milliseconds(100));
+    CHECK(read && read.value().bytes > 0U);
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "handoff stop");
+    CHECK_RESULT(rig.adapter.detach(attachment), "handoff detach");
+    CHECK_RESULT(rig.adapter.close(0U), "handoff close");
+    return 0;
+}
+
+int case_late_tsid(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(4, 4);
+    g_suppress_input.store(true, std::memory_order_release);
+    Rig rig(assets, 8U);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "late tsid open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
+                 "late tsid tune");
+    CHECK_RESULT(rig.adapter.select_satellite_tsid(0U, 16400U, 1000U), "late tsid select");
+    Lease lease{};
+    CHECK_RESULT(rig.adapter.begin_scan(&lease), "late tsid begin");
+    rig.clock.advance(30001U);
+    for (unsigned n = 0U; n < 3000U; ++n) {
+        if (rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::terminal) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(rig.adapter.acquisition().failure == Adapter::AcquisitionFailure::deadline);
+    g_suppress_input.store(false, std::memory_order_release);
+    SiRead read{};
+    std::vector<std::uint8_t> si;
+    bool rejected = false;
+    for (unsigned n = 0U; n < 3000U && !rejected; ++n) {
+        CHECK(read_si(rig.adapter, lease, si, &read, std::chrono::milliseconds(10)));
+        rejected = read.terminal && read.reason == SiEndReason::transport;
+    }
+    CHECK(rejected);
+    CHECK(rig.adapter.acquisition().phase == Adapter::AcquisitionPhase::terminal);
+    CHECK_RESULT(rig.adapter.end_scan(lease), "late tsid end");
+    CHECK_RESULT(rig.adapter.close(0U), "late tsid close");
+    return 0;
+}
+
+int case_waiting_readers(const std::vector<std::uint8_t> &assets)
+{
+    for (unsigned action = 0U; action < 6U; ++action) {
+        reset_stream(0, 0);
+        Rig rig(assets, 8U);
+        CHECK(rig.adapter.ready());
+        CHECK_RESULT(rig.adapter.open(0U), "waiter open");
+        CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial,
+                                           473142857ULL, 1000U),
+                     "waiter tune");
+        Lease lease{};
+        CHECK_RESULT(rig.adapter.begin_scan(&lease), "waiter begin");
+        std::atomic<bool> entered{false};
+        SiRead result{};
+        bool read_ok = false;
+        std::thread reader([&] {
+            std::vector<std::uint8_t> si;
+            entered.store(true, std::memory_order_release);
+            read_ok = read_si(rig.adapter, lease, si, &result,
+                              std::chrono::milliseconds(1500));
+        });
+        while (!entered.load(std::memory_order_acquire)) std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        const auto started = std::chrono::steady_clock::now();
+        bool ok = true;
+        switch (action) {
+        case 0U: ok = static_cast<bool>(rig.adapter.end_scan(lease)); break;
+        case 1U: ok = static_cast<bool>(
+            rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial)); break;
+        case 2U: ok = static_cast<bool>(rig.adapter.close(0U)); break;
+        case 3U: ok = static_cast<bool>(rig.adapter.shutdown()); break;
+        case 4U: rig.adapter.mark_disconnected(0U); break;
+        case 5U: ok = static_cast<bool>(rig.adapter.program_hz(
+            0U, ReceiverSystem::terrestrial, 479142857ULL, 1000U)); break;
+        default: break;
+        }
+        reader.join();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        std::fprintf(stderr,
+                     "waiter action=%u terminal=%d timeout=%d bytes=%zu reason=%u elapsed_ms=%lld\n",
+                     action, static_cast<int>(result.terminal),
+                     static_cast<int>(result.timed_out), result.bytes,
+                     static_cast<unsigned>(result.reason),
+                     static_cast<long long>(elapsed));
+        CHECK(ok && read_ok && result.terminal && !result.timed_out &&
+              result.bytes == 0U && elapsed < 1000);
+    }
+    return 0;
+}
+
 int case_close_shutdown_terminal(const std::vector<std::uint8_t> &assets)
 {
     reset_stream(0, 2);
@@ -500,6 +719,10 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
         g_read_fail.fetch_sub(1, std::memory_order_acq_rel);
         return LIBUSB_ERROR_IO;
     }
+    if (g_suppress_input.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return 0;
+    }
     std::lock_guard<std::mutex> lock(g_stream_mutex);
     auto *output = static_cast<std::uint8_t *>(buffer);
     std::size_t length = 0U;
@@ -542,10 +765,20 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     return static_cast<int>(length);
 }
 
-extern "C" int __wrap_dt295_stream_stop(dt295_stream *, unsigned) { return 0; }
+extern "C" int __wrap_dt295_stream_stop(dt295_stream *, unsigned)
+{
+    g_stream_stops.fetch_add(1U, std::memory_order_acq_rel);
+    return 0;
+}
 extern "C" int __wrap_dt295_stream_destroy(dt295_stream *) { return 0; }
+extern "C" int __real_pthread_join(pthread_t, void **);
+extern "C" int __wrap_pthread_join(pthread_t thread, void **value)
+{
+    g_join_calls.fetch_add(1U, std::memory_order_acq_rel);
+    return __real_pthread_join(thread, value);
+}
 
-int main()
+int main(int argc, char **argv)
 {
     char directory[] = "/tmp/pix-dt295-scan-XXXXXX";
     if (mkdtemp(directory) == nullptr) {
@@ -561,15 +794,29 @@ int main()
     assets_file.close();
     if (assets.empty()) return 1;
 
-    CHECK(case_exclusion_and_core_compensation(assets) == 0);
-    CHECK(case_stop_terminates_si(assets) == 0);
-    CHECK(case_semantic_failure_si_continues(assets) == 0);
-    CHECK(case_deadline_si_continues(assets) == 0);
-    CHECK(case_none_and_machine_failure(assets) == 0);
-    CHECK(case_tsid_terminates_si(assets) == 0);
-    CHECK(case_overflow_loss_epoch(assets) == 0);
-    CHECK(case_lease_generation_and_stop(assets) == 0);
-    CHECK(case_close_shutdown_terminal(assets) == 0);
+    const std::string only = argc > 1 ? argv[1] : std::string();
+    const auto run = [&](const char *name, const auto &body) {
+        if (!only.empty() && only != name) return true;
+        if (body() != 0) {
+            std::fprintf(stderr, "CASE failed: %s\n", name);
+            return false;
+        }
+        return true;
+    };
+    CHECK(run("exclusion-core", [&] { return case_exclusion_and_core_compensation(assets); }));
+    CHECK(run("stop-terminates", [&] { return case_stop_terminates_si(assets); }));
+    CHECK(run("semantic-failure", [&] { return case_semantic_failure_si_continues(assets); }));
+    CHECK(run("deadline", [&] { return case_deadline_si_continues(assets); }));
+    CHECK(run("none-machine", [&] { return case_none_and_machine_failure(assets); }));
+    CHECK(run("tsid", [&] { return case_tsid_terminates_si(assets); }));
+    CHECK(run("overflow", [&] { return case_overflow_loss_epoch(assets); }));
+    CHECK(run("lease-generation", [&] { return case_lease_generation_and_stop(assets); }));
+    CHECK(run("stale-end-normal", [&] { return case_stale_end_normal(assets); }));
+    CHECK(run("late-core-cleanup", [&] { return case_late_core_cleanup(assets); }));
+    CHECK(run("terminal-handoff", [&] { return case_terminal_handoff(assets); }));
+    CHECK(run("late-tsid", [&] { return case_late_tsid(assets); }));
+    CHECK(run("waiting-readers", [&] { return case_waiting_readers(assets); }));
+    CHECK(run("close-shutdown", [&] { return case_close_shutdown_terminal(assets); }));
 
     dt295_actual_fixture_close();
     (void)unlink(assets_path.c_str());

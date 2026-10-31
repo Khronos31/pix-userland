@@ -163,7 +163,7 @@ private:
     void end_session_for_acquisition(dtv::userland::detail::StreamTerminal) noexcept;
     void scan_append_packet(const std::uint8_t packet[188]) noexcept;
     void scan_terminate(SiEndReason reason) noexcept;
-    Result stop_scan_and_join(SiEndReason reason) noexcept;
+    Result scan_release_owner(SiEndReason reason) noexcept;
 
     Clock& clock_;
     ReceiverId receiver_;
@@ -198,7 +198,7 @@ private:
     std::atomic<std::uint64_t> plan_generation_{0U};
     dtv::userland::detail::PacketStreamSession session_;
     bool normal_capture_active_ = false;
-    bool normal_refused_by_scan_ = false;
+    std::size_t unconsumed_normal_refusals_ = 0U;
     bool pump_scan_ = false;
     std::atomic<std::uint64_t> scan_id_next_{0U};
     std::mutex operation_mutex_;
@@ -211,6 +211,7 @@ private:
     std::size_t si_head_ = 0U;
     std::size_t si_count_ = 0U;
     bool scan_active_ = false;
+    std::uint64_t scan_owner_ = 0U;
     bool si_terminal_ = false;
     SiEndReason si_reason_ = SiEndReason::none;
     std::uint64_t scan_id_ = 0U;

@@ -243,7 +243,8 @@ target_link_options(pix_dt295_scan_contract_proof PRIVATE
     -Wl,--wrap=libusb_interrupt_transfer
     -Wl,--wrap=random_bytes
     -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
-    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy)
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=pthread_join)
 add_test(NAME pix_dt295_scan_contract_proof
     COMMAND pix_dt295_scan_contract_proof)
 endif()
