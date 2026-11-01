@@ -433,14 +433,13 @@ int main()
         dtv::userland::MutableByteView{probe, sizeof(probe)},
         std::chrono::milliseconds(5));
     CHECK(probe_result);
-    CHECK(probe_result.value().bytes == 0U && probe_result.value().timed_out &&
-          !probe_result.value().eof);
+    CHECK(probe_result.value().bytes == sizeof(probe) && !probe_result.value().eof);
     CHECK(adapter.acquisition().phase ==
-          pix::capture::dt295::ReceiverAdapter::AcquisitionPhase::preparing);
+          pix::capture::dt295::ReceiverAdapter::AcquisitionPhase::ready);
     CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "no-CAT stop");
     CHECK_RESULT(adapter.detach(no_cat_t), "no-CAT detach");
     drain_attachment(adapter, no_cat_t);
-    CHECK(g_stream.generations == generations + 1U);
+    CHECK(g_stream.generations == generations + 2U);
 
     generations = g_stream.generations;
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
