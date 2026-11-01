@@ -1704,6 +1704,12 @@ int dt295_renew_if_due(dt295 *d, int *renewed, char *e, size_t en) {
     seterr(e, en, "");
     return 0;
 }
+int dt295_renewal_due_ms(const dt295 *d, uint64_t *due_ms) {
+    if (!d || !due_ms || !d->has_session || !d->renewal_counter || d->cleanup_only)
+        return -1;
+    *due_ms = d->renewal_due;
+    return 0;
+}
 
 int dt295_stop(dt295 *d, size_t *drained, char *e, size_t en) {
     if (drained)

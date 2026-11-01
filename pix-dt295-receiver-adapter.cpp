@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -24,6 +25,12 @@ constexpr std::uint64_t kChannelSpacingHz = 6000000U;
 constexpr unsigned kFirstChannel = 13U;
 constexpr unsigned kLastChannel = 62U;
 constexpr std::uint64_t kAcquisitionDeadlineMs = 30000U;
+
+bool minimal_diagnostic_enabled() noexcept
+{
+    const char* value = std::getenv("PIX_DIAG_MINIMAL");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
 
 unsigned channel_for_hz(std::uint64_t hz) noexcept
 {
@@ -764,17 +771,26 @@ ReceiverAdapter::Result ReceiverAdapter::stop_capture(ReceiverId receiver, Recei
 ReceiverAdapter::Result ReceiverAdapter::stop_receiver_unlocked() noexcept
 {
     Result outcome = Result::success();
+    int device_stop_result = 0;
+    bool device_stop_attempted = false;
     {
         std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
         if (device_ != nullptr && dt295_has_session(device_)) {
             char error[256]{};
             size_t drained = 0U;
-            if (dt295_stop(device_, &drained, error, sizeof(error)) != 0)
+            device_stop_attempted = true;
+            device_stop_result = dt295_stop(device_, &drained, error, sizeof(error));
+            if (device_stop_result != 0)
                 outcome = Result::failure(Error::USB_IO);
         }
     }
     const auto halted = halt_unlocked();
     if (!halted && outcome) outcome = halted;
+    if (minimal_diagnostic_enabled())
+        std::fprintf(stderr,
+                     "PIX_DIAG receiver_stop device_stop_attempted=%d device_stop_rc=%d stream_result=%s\n",
+                     device_stop_attempted ? 1 : 0, device_stop_result,
+                     halted ? "success" : "failure");
     streaming_ = false;
     {
         std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
@@ -787,11 +803,31 @@ ReceiverAdapter::Result ReceiverAdapter::stop_receiver_unlocked() noexcept
 
 ReceiverAdapter::Result ReceiverAdapter::halt_unlocked() noexcept
 {
-    if (stream_ == nullptr) return Result::success();
-    int rc = dt295_stream_stop(stream_, 3000U);
-    if (rc == DT295_STREAM_ABANDONED) rc = dt295_stream_stop(stream_, 3000U);
-    if (rc != 0) return Result::failure(Error::USB_IO);
-    if (dt295_stream_destroy(stream_) != 0) return Result::failure(Error::USB_IO);
+    if (stream_ == nullptr) {
+        if (minimal_diagnostic_enabled())
+            std::fprintf(stderr, "PIX_DIAG stream_release present=0\n");
+        return Result::success();
+    }
+    const int stop_rc = dt295_stream_stop(stream_, 3000U);
+    int retry_rc = -1;
+    int rc = stop_rc;
+    if (stop_rc == DT295_STREAM_ABANDONED) {
+        retry_rc = dt295_stream_stop(stream_, 3000U);
+        rc = retry_rc;
+    }
+    if (rc != 0) {
+        if (minimal_diagnostic_enabled())
+            std::fprintf(stderr,
+                         "PIX_DIAG stream_release stop_rc=%d retry_rc=%d destroy_rc=not_run\n",
+                         stop_rc, retry_rc);
+        return Result::failure(Error::USB_IO);
+    }
+    const int destroy_rc = dt295_stream_destroy(stream_);
+    if (minimal_diagnostic_enabled())
+        std::fprintf(stderr,
+                     "PIX_DIAG stream_release stop_rc=%d retry_rc=%d destroy_rc=%d\n",
+                     stop_rc, retry_rc, destroy_rc);
+    if (destroy_rc != 0) return Result::failure(Error::USB_IO);
     stream_ = nullptr;
     return Result::success();
 }
@@ -919,8 +955,10 @@ void ReceiverAdapter::fail_acquisition(AcquisitionFailure failure,
 
 void ReceiverAdapter::pump() noexcept
 {
+    const bool diagnostic = minimal_diagnostic_enabled();
     const bool scan_mode = pump_scan_;
     bool normal_done = false;
+    std::uint64_t usb_read_bytes = 0U;
     std::vector<std::uint8_t> residue;
     residue.reserve(65536U + 188U);
     std::vector<std::uint8_t> publish_buffer;
@@ -950,6 +988,22 @@ void ReceiverAdapter::pump() noexcept
         if (acquisition_phase_.load(std::memory_order_acquire) ==
                 AcquisitionPhase::preparing && !normal_done &&
             clock_.monotonic_ms() - acquisition_started_ms_ >= kAcquisitionDeadlineMs) {
+            const std::uint64_t now_ms = clock_.monotonic_ms();
+            std::uint64_t renewal_due_ms = 0U;
+            int renewal_due_result = -1;
+            if (diagnostic) {
+                {
+                    std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
+                    renewal_due_result = dt295_renewal_due_ms(device_, &renewal_due_ms);
+                }
+                std::fprintf(stderr,
+                             "PIX_DIAG acquisition_deadline at_ms=%llu elapsed_ms=%llu phase=preparing renewal_due_valid=%d renewal_due_ms=%llu usb_read_bytes=%llu\n",
+                             static_cast<unsigned long long>(now_ms),
+                             static_cast<unsigned long long>(now_ms - acquisition_started_ms_),
+                             renewal_due_result == 0 ? 1 : 0,
+                             static_cast<unsigned long long>(renewal_due_ms),
+                             static_cast<unsigned long long>(usb_read_bytes));
+            }
             fail_acquisition(AcquisitionFailure::deadline,
                              dtv::userland::detail::StreamTerminal::sync_error,
                              Error::TIMEOUT);
@@ -968,6 +1022,7 @@ void ReceiverAdapter::pump() noexcept
             if (scan_mode) scan_terminate(SiEndReason::usb);
             break;
         }
+        if (count > 0) usb_read_bytes += static_cast<std::uint64_t>(count);
         if (count > 0) residue.insert(residue.end(), chunk, chunk + count);
 
         std::size_t offset = 0U;
@@ -1324,10 +1379,35 @@ void ReceiverAdapter::pump() noexcept
         if (now >= last_renew && now - last_renew >= 1000U) {
             int renewed = 0;
             char error[256]{};
+            int renewal_result = 0;
+            std::uint64_t renewal_due_before_ms = 0U;
+            std::uint64_t renewal_due_after_ms = 0U;
+            int renewal_due_before_result = -1;
+            int renewal_due_after_result = -1;
+            std::uint64_t renewal_at_ms = 0U;
+            std::uint64_t renewal_done_ms = 0U;
             {
                 std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                (void)dt295_renew_if_due(device_, &renewed, error, sizeof(error));
+                if (diagnostic)
+                    renewal_due_before_result =
+                        dt295_renewal_due_ms(device_, &renewal_due_before_ms);
+                renewal_at_ms = clock_.monotonic_ms();
+                renewal_result = dt295_renew_if_due(device_, &renewed, error, sizeof(error));
+                renewal_done_ms = clock_.monotonic_ms();
+                if (diagnostic)
+                    renewal_due_after_result =
+                        dt295_renewal_due_ms(device_, &renewal_due_after_ms);
             }
+            if (diagnostic && (renewal_result != 0 || renewed != 0))
+                std::fprintf(stderr,
+                             "PIX_DIAG renewal at_ms=%llu done_ms=%llu result=%s due_before_valid=%d due_before_ms=%llu due_after_valid=%d due_after_ms=%llu\n",
+                             static_cast<unsigned long long>(renewal_at_ms),
+                             static_cast<unsigned long long>(renewal_done_ms),
+                             renewal_result == 0 ? "success" : "failure",
+                             renewal_due_before_result == 0 ? 1 : 0,
+                             static_cast<unsigned long long>(renewal_due_before_ms),
+                             renewal_due_after_result == 0 ? 1 : 0,
+                             static_cast<unsigned long long>(renewal_due_after_ms));
             last_renew = now;
         }
     }
@@ -1394,7 +1474,12 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
             return Result::failure(Error::INTERNAL);
         pump_joinable_ = false;
     }
+    const int pump_error = pump_error_.load(std::memory_order_acquire);
     const auto stopped = stop_receiver_unlocked();
+    if (minimal_diagnostic_enabled())
+        std::fprintf(stderr,
+                     "PIX_DIAG stop_attached pump_error=%d usb_stop_result=%s\n",
+                     pump_error, stopped ? "success" : "failure");
     stream_attached_ = false;
     normal_capture_active_ = false;
     {
@@ -1407,7 +1492,6 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
         }
     }
     if (!stopped) return stopped;
-    const int pump_error = pump_error_.load(std::memory_order_acquire);
     if (pump_error != 0 && pump_error != static_cast<int>(Error::OK))
         return Result::failure(static_cast<Error>(pump_error));
     return Result::success();

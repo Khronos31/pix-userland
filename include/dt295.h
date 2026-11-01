@@ -104,6 +104,7 @@ int dt295_reprepare_plan(dt295 *device, const dt295_route_plan *plan, char *erro
 int dt295_route_write(dt295 *device, const dt295_route_op *op, char *error, size_t error_size);
 int dt295_start(dt295 *device, char *error, size_t error_size);
 int dt295_renew_if_due(dt295 *device, int *renewed, char *error, size_t error_size);
+int dt295_renewal_due_ms(const dt295 *device, uint64_t *due_ms);
 int dt295_stop(dt295 *device, size_t *drained_bytes, char *error, size_t error_size);
 int dt295_shutdown(dt295 *device, char *error, size_t error_size);
 
