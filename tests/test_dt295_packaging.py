@@ -246,6 +246,19 @@ class TestDT295Packaging(unittest.TestCase):
                               commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
 
 
+  def test_verifier_rejects_grant_only_change(self):
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root, commit = make_release(Path(temp), self)
+      original = (ROOT / "LICENSE").read_text()
+      wrong = original.replace(
+          "either version 2 of the\nLicense, or (at your option) any later version.",
+          "version 2 of the\nLicense only; no later version is permitted.")
+      self.assertNotEqual(wrong, original)
+      self._rewrite(root, "linux-x86_64",
+                    lambda members: members.update({"LICENSE": wrong.encode()}))
+      with self.assertRaisesRegex(ValueError, "PIX GPL-2.0-or-later grant"):
+        self._verify(root, commit)
+
   def _rewrite(self, root, target, edit):
     path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz"
     prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"

@@ -19,6 +19,10 @@ _final_spec.loader.exec_module(finalize)
 SOURCE_LIBUSB_SHA256 = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
 GPL2_SHA256 = "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
 PIX_SOURCE_LICENSE = "GPL-2.0-or-later"
+PIX_SOURCE_GRANT = b"""The PIX-maintained source files in this repository are free software: you can
+redistribute them and/or modify them under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 2 of the
+License, or (at your option) any later version."""
 CORE_PIN = pack.CORE_LOCK
 SOURCE_ONLY_KEYS = {"repository_commit", "repository_tree", "dtv_userland_core_tree", "libusb_sha256"}
 FIRMWARE_MANIFEST = read_manifest()
@@ -222,8 +226,8 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
                 raise ValueError(f"Missing license notice: {target}/{required}")
         license_text = contents[prefix + "LICENSE"]
         gpl2_text = contents[prefix + "licenses/GPL-2.0.txt"]
-        if PIX_SOURCE_LICENSE.encode() not in license_text or gpl2_text not in license_text:
-            raise ValueError(f"Invalid PIX GPL-2.0-or-later notice or GPLv2 text: {target}")
+        if PIX_SOURCE_LICENSE.encode() not in license_text or PIX_SOURCE_GRANT not in license_text or gpl2_text not in license_text:
+            raise ValueError(f"Invalid PIX GPL-2.0-or-later grant or GPLv2 text: {target}")
         if hashlib.sha256(gpl2_text).hexdigest() != GPL2_SHA256:
             raise ValueError(f"GPLv2 text mismatch: {target}")
         if target != "source":
