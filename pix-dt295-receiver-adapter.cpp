@@ -25,6 +25,12 @@ constexpr unsigned kFirstChannel = 13U;
 constexpr unsigned kLastChannel = 62U;
 constexpr std::uint64_t kAcquisitionDeadlineMs = 30000U;
 
+bool minimal_diagnostic_enabled() noexcept
+{
+    const char* value = std::getenv("PIX_DIAG_MINIMAL");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
 unsigned channel_for_hz(std::uint64_t hz) noexcept
 {
     unsigned best = 0U;
@@ -923,8 +929,16 @@ void ReceiverAdapter::fail_acquisition(AcquisitionFailure failure,
 
 void ReceiverAdapter::pump() noexcept
 {
+    const bool diagnostic = minimal_diagnostic_enabled();
     const bool scan_mode = pump_scan_;
     bool normal_done = false;
+    bool pat_seen = false;
+    bool bootstrap_attempted = false;
+    bool bootstrap_applied = false;
+    bool plan_attempted = false;
+    bool plan_started = false;
+    std::uint64_t usb_input_bytes = 0U;
+    std::uint64_t restored_packets = 0U;
     std::vector<std::uint8_t> residue;
     residue.reserve(65536U + 188U);
     std::vector<std::uint8_t> publish_buffer;
@@ -972,6 +986,8 @@ void ReceiverAdapter::pump() noexcept
             if (scan_mode) scan_terminate(SiEndReason::usb);
             break;
         }
+        if (diagnostic && count > 0)
+            usb_input_bytes += static_cast<std::uint64_t>(count);
         if (count > 0) residue.insert(residue.end(), chunk, chunk + count);
 
         std::size_t offset = 0U;
@@ -990,6 +1006,7 @@ void ReceiverAdapter::pump() noexcept
                     break;
                 }
             }
+            if (diagnostic) ++restored_packets;
             dt295_routes_feed(routes_, packet);
             if (scan_mode) scan_append_packet(packet);
             if (!ready || scan_mode) continue;
@@ -1010,6 +1027,7 @@ void ReceiverAdapter::pump() noexcept
         if (scan_mode && count > 0) {
             dt295_routes_snapshot snapshot{};
             dt295_routes_snapshot_get(routes_, &snapshot);
+            if (diagnostic && snapshot.have_pat) pat_seen = true;
             if (tuned_system_.load(std::memory_order_acquire) == ReceiverSystem::satellite &&
                 satellite_tsid_valid_.load(std::memory_order_acquire) &&
                 snapshot.have_pat &&
@@ -1128,6 +1146,7 @@ void ReceiverAdapter::pump() noexcept
         if (!scan_mode && !plan_complete_ && count > 0) {
             dt295_routes_snapshot snapshot{};
             dt295_routes_snapshot_get(routes_, &snapshot);
+            if (diagnostic && snapshot.have_pat) pat_seen = true;
             if (plan_started_ && plan_tsid_valid_ && snapshot.have_pat &&
                 snapshot.tsid != plan_tsid_) {
                 std::fprintf(stderr,
@@ -1159,6 +1178,7 @@ void ReceiverAdapter::pump() noexcept
                                        ReceiverSystem::satellite || snapshot.have_cat);
             bool planned = false;
             if (may_plan) {
+                if (diagnostic) plan_attempted = true;
                 dt295_route_plan plan{};
                 char route_error[DT295_ROUTE_ERROR]{};
                 if (dt295_routes_build(routes_, 0U, plan_started_ ? &live_ : nullptr,
@@ -1238,6 +1258,7 @@ void ReceiverAdapter::pump() noexcept
                             if (!acquisition_alive()) break;
                             live_ = plan;
                             plan_started_ = true;
+                            if (diagnostic) plan_started = true;
                             plan_complete_ = snapshot.ready;
                             plan_tsid_ = snapshot.tsid;
                             plan_tsid_valid_ = snapshot.have_pat;
@@ -1282,6 +1303,10 @@ void ReceiverAdapter::pump() noexcept
                 }
             }
             if (!planned && !snapshot.ready && snapshot.have_pat) {
+                if (diagnostic) {
+                    pat_seen = true;
+                    bootstrap_attempted = true;
+                }
                 dt295_route_plan bootstrap{};
                 char route_error[DT295_ROUTE_ERROR]{};
                 if (dt295_routes_bootstrap_plan(routes_, &live_, &bootstrap, route_error) != 0) {
@@ -1302,6 +1327,7 @@ void ReceiverAdapter::pump() noexcept
                                      applied.error());
                     break;
                 }
+                if (diagnostic) bootstrap_applied = true;
             }
         }
 
@@ -1334,6 +1360,19 @@ void ReceiverAdapter::pump() noexcept
             }
             last_renew = now;
         }
+    }
+    if (diagnostic) {
+        std::fprintf(stderr,
+                     "PIX_DIAG_STAGE input_bytes=%llu restored_188_packets=%llu residue_bytes=%zu pat_seen=%d bootstrap_attempted=%d bootstrap_applied=%d plan_attempted=%d plan_started=%d phase=%u failure=%u plan_generation=%llu\n",
+                     static_cast<unsigned long long>(usb_input_bytes),
+                     static_cast<unsigned long long>(restored_packets), residue.size(),
+                     pat_seen ? 1 : 0, bootstrap_attempted ? 1 : 0,
+                     bootstrap_applied ? 1 : 0, plan_attempted ? 1 : 0,
+                     plan_started ? 1 : 0,
+                     static_cast<unsigned>(acquisition_phase_.load(std::memory_order_acquire)),
+                     static_cast<unsigned>(acquisition_failure_.load(std::memory_order_acquire)),
+                     static_cast<unsigned long long>(
+                         plan_generation_.load(std::memory_order_acquire)));
     }
 }
 
