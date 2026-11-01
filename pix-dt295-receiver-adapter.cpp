@@ -1362,11 +1362,15 @@ void ReceiverAdapter::pump() noexcept
         }
     }
     if (diagnostic) {
+        dt295_routes_snapshot snapshot{};
+        dt295_routes_snapshot_get(routes_, &snapshot);
         std::fprintf(stderr,
-                     "PIX_DIAG_STAGE input_bytes=%llu restored_188_packets=%llu residue_bytes=%zu pat_seen=%d bootstrap_attempted=%d bootstrap_applied=%d plan_attempted=%d plan_started=%d phase=%u failure=%u plan_generation=%llu\n",
+                     "PIX_DIAG_STAGE input_bytes=%llu restored_188_packets=%llu residue_bytes=%zu pat_seen=%d have_cat=%u missing_pmts=%u ready=%u bootstrap_attempted=%d bootstrap_applied=%d plan_attempted=%d plan_started=%d phase=%u failure=%u plan_generation=%llu\n",
                      static_cast<unsigned long long>(usb_input_bytes),
                      static_cast<unsigned long long>(restored_packets), residue.size(),
-                     pat_seen ? 1 : 0, bootstrap_attempted ? 1 : 0,
+                     pat_seen ? 1 : 0, static_cast<unsigned>(snapshot.have_cat),
+                     static_cast<unsigned>(snapshot.missing_pmts),
+                     static_cast<unsigned>(snapshot.ready), bootstrap_attempted ? 1 : 0,
                      bootstrap_applied ? 1 : 0, plan_attempted ? 1 : 0,
                      plan_started ? 1 : 0,
                      static_cast<unsigned>(acquisition_phase_.load(std::memory_order_acquire)),
