@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Offline DT295 independent SI scan contract proof. */
 #include "pix-dt295-receiver-adapter.h"
 

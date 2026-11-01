@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Offline DT295 retirement proof. Real dt295_stream.c event thread; the libusb
  * boundary is synthetic so late cancel callbacks can be delivered after the
  * adapter is gone. */

@@ -94,12 +94,12 @@ CIに実機は接続していないため、CI成功は各OSでの受信を保�
 
 GitHub 自動生成の Source code アーカイブおよび対応ソースパッケージは、標準バンドル、マニフェスト、メタデータ、保存 IV を含みます。固定バージョンの Core / libusb ソーススナップショットが必要なネットワークなしのソース再ビルドには対応ソースパッケージを使用します。通常の build と Release は暗号化素材を必要とせず、リポジトリにも保存しません。`tools/assets-bundle.py` は別途保管された暗号化 bundle を手動でseal/openするためのユーティリティとして残します。復号鍵は `PIX_ASSETS_KEY` 環境変数から渡し、Git やログに出力しません。使用例は `python3 tools/assets-bundle.py seal firmware/dt181.bin /path/to/private/assets.enc` および `python3 tools/assets-bundle.py open /path/to/private/assets.enc /path/to/output` です。
 
-メーカー由来のバンドルは本プロジェクトの MIT License の対象外です。`firmware/metadata/dt295-satellite-generation.json` に標準ハッシュと正規入力の来歴を記録していますが、これは第三者の再配布権を付与するものではありません。適用される第三者条件に従ってください。raw キャプチャ、録画 TS、セッションデータや未使用のドライバ・アーカイブは Git や Release に追加しません。テストデータには合成 fixture を使用します。
+メーカー由来のバンドルはPIXのGPL-2.0-or-later source licenseの対象外です。`firmware/metadata/dt295-satellite-generation.json` に標準ハッシュと正規入力の来歴を記録していますが、これは第三者の再配布権を付与するものではありません。適用される第三者条件に従ってください。raw キャプチャ、録画 TS、セッションデータや未使用のドライバ・アーカイブは Git や Release に追加しません。テストデータには合成 fixture を使用します。
 
 ## 再ビルドと再リンク
 
 `release-info.json` にコミット・バージョン・対象・静的libusb・assets同梱の有無・固定Coreのコミットを記録します。
-`build-info.txt` はコンパイラと固定Coreのコミットなどの情報です。ルートの自作ソースはMIT、libusbはLGPL-2.1以降です。静的リンクされるCoreのhost adapterの一部はGPL-2.0-onlyで、各ソースのSPDX表記と同梱の `COPYING` に従います。
+`build-info.txt` はコンパイラと固定Coreのコミットなどの情報です。ルートのPIX-maintained sourceはGPL-2.0-or-later、libusbはLGPL-2.1以降です。静的リンクされるCoreのhost adapterの一部はGPL-2.0-onlyで、各ソースのSPDX表記と同梱の `COPYING` に従います。
 その他は `THIRD_PARTY_NOTICES.md` と `licenses/` を参照してください。
 
 sourceアーカイブにはCoreの固定sourceが `third_party/dtv-userland-core/` に含まれ、`core-integration/CMakeLists.txt` が自動でそれを使います（取得は不要）。

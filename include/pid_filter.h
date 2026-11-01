@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef PIX_PID_FILTER_H
 #define PIX_PID_FILTER_H
 #include <stdint.h>

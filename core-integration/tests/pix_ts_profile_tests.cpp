@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <dtv/host_ts/px4_ts_core.h>
 #include <dtv/userland/host_runtime/control_socket.h>
 #include <dtv/userland/identity.h>

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #ifndef PIX_FIRMWARE_BUNDLE_H
 #define PIX_FIRMWARE_BUNDLE_H
 

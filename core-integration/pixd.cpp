@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include "pix_runtime.h"
 
 #include <dtv/userland/host_listener_context/enclosure_context.h>

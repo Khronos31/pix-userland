@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Exercise the real backend lifetime logic with deterministic USB completions.
  * Device discovery/claiming are never invoked. */
 #include <assert.h>

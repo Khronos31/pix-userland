@@ -338,10 +338,10 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
 
 ## ライセンス・権利表記
 
-- 本プロジェクトの自作ソースコードには **MIT License** を適用しています（詳細は [LICENSE](LICENSE) を参照してください）。
+- PIXが管理する今後のソースコードは **GNU General Public License version 2 or later (GPL-2.0-or-later)** です（全文は [LICENSE](LICENSE)、旧MIT全文は [licenses/PIX-ORIGINAL-MIT.txt](licenses/PIX-ORIGINAL-MIT.txt) を参照してください）。過去にMITで受領したcopyの許諾を撤回しません。
 - 静的リンクおよび同梱される各コンポーネントには、それぞれのライセンスが適用されます。
   - **libusb**: LGPL-2.1-or-later（詳細は `COPYING.libusb` を参照してください）
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
   - **musl libc**（Linux ポータブルバイナリ）: musl の配布条件（MIT 互換）
   - 各ライブラリの権利表示および詳細は `THIRD_PARTY_NOTICES.md` および `licenses/` を確認してください。
-- 配布バイナリに組み込まれる `dt181.bin` と `dt295.bin` はメーカー由来の機器データを含み、本プロジェクトの MIT License は適用されません。DT295 の衛星レジスターテーブルは PIXELA StationTV X 更新データ内のドライバファイルから生成しています。Git 追跡やバンドル化によって権利が付与されるものではなく、適用される第三者条件に従ってください。Source code アーカイブおよび対応ソースパッケージには標準 `.bin`、マニフェスト、来歴メタデータ、保存 IV が含まれます。再生成のみに使用する暗号化入力 `.private/assets.enc` は両アーカイブに含まれません。
+- 配布バイナリに組み込まれる `dt181.bin` と `dt295.bin` はメーカー由来の機器データを含み、PIXのGPL-2.0-or-later source licenseは適用されません。DT295 の衛星レジスターテーブルは PIXELA StationTV X 更新データ内のドライバファイルから生成しています。Git 追跡やバンドル化によって権利が付与されるものではなく、適用される第三者条件に従ってください。Source code アーカイブおよび対応ソースパッケージには標準 `.bin`、マニフェスト、来歴メタデータ、保存 IV が含まれます。再生成のみに使用する暗号化入力 `.private/assets.enc` は両アーカイブに含まれません。

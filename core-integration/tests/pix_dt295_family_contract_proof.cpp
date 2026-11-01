@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Offline PIX Family DT295 public-entry proof. */
 #include "pix_runtime.h"
 

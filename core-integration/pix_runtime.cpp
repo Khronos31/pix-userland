@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include "pix_runtime.h"
 #if defined(PIX_EMBEDDED_ASSETS)
 #include "pix_embedded_assets.h"

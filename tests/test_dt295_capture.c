@@ -5,7 +5,7 @@ int main(void) {
     return 0;
 }
 #else
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Exercise the real capture orchestrator and routing watcher with synthetic
  * broadcast tables and injected protocol/USB/output. No libusb discovery. */
 #define DT295_CAPTURE_TESTING

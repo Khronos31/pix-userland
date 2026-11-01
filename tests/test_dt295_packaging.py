@@ -66,8 +66,10 @@ SYNTHETIC_LIBUSB = b"synthetic libusb source"
 def source_members(commit):
     """Synthetic corresponding-source closure whose manifest matches its archive."""
     files = {
-        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "LICENSE": (ROOT / "LICENSE").read_bytes(), "COPYING.libusb": b"copying",
         "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "licenses/GPL-2.0.txt": (ROOT / "licenses/GPL-2.0.txt").read_bytes(),
+        "licenses/PIX-ORIGINAL-MIT.txt": (ROOT / "licenses/PIX-ORIGINAL-MIT.txt").read_bytes(),
         "core-integration/CMakeLists.txt": b"project()",
         "core-integration/dtv-userland-core.revision": verify.CORE_PIN.encode() + b"\n",
         "core-integration/pixd.cpp": b"pixd", "core-integration/tools/pixctl.cpp": b"pixctl",
@@ -119,8 +121,10 @@ def binary_members(target, commit):
             "private": False, "libusb_linkage": "static", "device_assets": False,
             "dtv_userland_core_commit": verify.CORE_PIN,
         }).encode() + b"\n",
-        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "LICENSE": (ROOT / "LICENSE").read_bytes(), "COPYING.libusb": b"copying",
         "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "licenses/GPL-2.0.txt": (ROOT / "licenses/GPL-2.0.txt").read_bytes(),
+        "licenses/PIX-ORIGINAL-MIT.txt": (ROOT / "licenses/PIX-ORIGINAL-MIT.txt").read_bytes(),
         "build-info.txt": f"dtv-userland-core {verify.CORE_PIN}\n".encode(),
         "licenses/dtv-userland-core-LICENSE": b"mit",
         "licenses/dtv-userland-core-host_ts-COPYING": b"gpl",
@@ -278,6 +282,11 @@ class TestDT295Packaging(unittest.TestCase):
       "build-info": (lambda members: members.update({"build-info.txt": b"no pin\n"}), "Core pin"),
       "license": (lambda members: members.pop("licenses/dtv-userland-core-LICENSE"), "Core license"),
       "copying": (lambda members: members.pop("licenses/dtv-userland-core-host_ts-COPYING"), "Core license"),
+      "original-mit": (lambda members: members.pop("licenses/PIX-ORIGINAL-MIT.txt"), "PIX-ORIGINAL-MIT"),
+      "original-mit-changed": (lambda members: members.update({"licenses/PIX-ORIGINAL-MIT.txt": b"changed"}), "Original MIT"),
+      "gpl2": (lambda members: members.pop("licenses/GPL-2.0.txt"), "GPL-2.0"),
+      "gpl2-changed": (lambda members: members.update({"licenses/GPL-2.0.txt": b"changed"}), "GPLv2 text"),
+      "pix-license": (lambda members: members.update({"LICENSE": b"not a license"}), "PIX GPL"),
     }
     for name, (edit, message) in cases.items():
       with self.subTest(case=name), __import__("tempfile").TemporaryDirectory() as temp:

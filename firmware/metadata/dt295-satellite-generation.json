@@ -38,5 +38,5 @@
     "bytes": 144,
     "different_bytes": 33
   },
-  "license_note": "Manufacturer-derived data; not covered by the PIX MIT license. Consult the applicable PIXELA license and obtain any permissions required for redistribution."
+  "license_note": "Manufacturer-derived data; not covered by the PIX GPL-2.0-or-later source license. Consult the applicable PIXELA license and obtain any permissions required for redistribution."
 }
