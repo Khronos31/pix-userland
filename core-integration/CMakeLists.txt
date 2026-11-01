@@ -218,7 +218,7 @@ target_link_options(pix_dt295_acquisition_proof PRIVATE
     -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
     -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
     -Wl,--wrap=dt295_reprepare_plan
-    -Wl,--wrap=dt295_routes_feed)
+    -Wl,--wrap=dt295_routes_feed -Wl,--wrap=dt295_route_write)
 add_test(NAME pix_dt295_acquisition_proof
     COMMAND pix_dt295_acquisition_proof)
 
