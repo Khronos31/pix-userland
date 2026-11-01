@@ -453,8 +453,17 @@ int case_deadline_and_retune(const std::vector<std::uint8_t> &assets)
     CHECK(deadline_final && deadline_final.value().terminal == static_cast<std::uint8_t>(
               dtv::userland::detail::StreamTerminal::sync_error));
     const unsigned old_acquisition = rig.adapter.acquisition().acquisition_generation;
-    CHECK_RESULT(rig.adapter.detach(attachment), "deadline detach");
-    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "deadline stop");
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                 "deadline stop before detach");
+    const auto stopped_deadline_final = rig.adapter.final_snapshot(attachment);
+    CHECK(stopped_deadline_final && stopped_deadline_final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::sync_error));
+    const auto detached_after_stop = rig.adapter.detach(attachment);
+    CHECK_RESULT(detached_after_stop, "deadline detach after stop");
+    const auto detached_deadline_final = rig.adapter.final_snapshot(attachment);
+    CHECK(detached_deadline_final && detached_deadline_final.value().terminal ==
+              static_cast<std::uint8_t>(
+                  dtv::userland::detail::StreamTerminal::sync_error));
     const auto idle = rig.adapter.acquisition();
     CHECK(idle.phase == Phase::idle);
     CHECK(idle.failure == Failure::none);
@@ -472,7 +481,7 @@ int case_deadline_and_retune(const std::vector<std::uint8_t> &assets)
     CHECK(rig.adapter.acquisition().acquisition_generation > old_acquisition);
     std::vector<std::uint8_t> output;
     CHECK(collect_until_bytes(rig.adapter, next, output));
-    (void)rig.adapter.detach(next);
+    CHECK_RESULT(rig.adapter.detach(next), "retune detach");
     CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "retune stop");
     CHECK_RESULT(rig.adapter.close(0U), "retune close");
     return 0;
