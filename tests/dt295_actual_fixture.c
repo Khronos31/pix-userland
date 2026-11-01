@@ -661,6 +661,24 @@ unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[4][188], int
         actual_table(packets[3], 0x110, 2, 2, pmt2, sizeof(pmt2));
         return 4;
     }
+    if (mode == 7 || mode == 8) {
+        const uint8_t pat2[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10};
+        const uint8_t pat3[] = {
+            0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10, 0, 3, 0xe1, 0x20
+        };
+        const uint8_t data_pmt[] = {0xe1, 0x02, 0xf0, 0, 0x0d, 0xe3, 0x00, 0xf0, 0};
+        const uint8_t *pat = mode == 7 ? pat3 : pat2;
+        const size_t pat_size = mode == 7 ? sizeof(pat3) : sizeof(pat2);
+        actual_table(packets[0], 0, 0, 1, pat, pat_size);
+        actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+        if (mode == 7) {
+            actual_table(packets[2], 0x100, 2, 1, pmt, sizeof(pmt));
+            actual_table(packets[3], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
+            return 4;
+        }
+        actual_table(packets[2], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
+        return 3;
+    }
     const unsigned tsid = mode == 4 ? 0x4011u : pipeline_bootstrap_tsid;
     actual_table(packets[0], 0, 0, tsid, pat, sizeof(pat));
     if (mode == 5) return 1;

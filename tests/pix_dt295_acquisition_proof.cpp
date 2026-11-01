@@ -29,6 +29,7 @@ void dt295_actual_fixture_recording_packet(uint8_t packet[188], unsigned continu
 void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 int __real_dt295_reprepare_plan(dt295 *, const dt295_route_plan *, char *, std::size_t);
 int __real_dt295_routes_feed(dt295_routes *, const uint8_t packet[188]);
+int __real_dt295_route_write(dt295 *, const dt295_route_op *, char *, std::size_t);
 }
 
 namespace {
@@ -55,6 +56,8 @@ std::atomic<bool> g_arm_restart_block{false};
 std::atomic<int> g_race_remaining{0};
 std::atomic<int> g_race_stage{0};
 std::atomic<bool> g_release_first{false};
+std::atomic<bool> g_partial_pmt_sent{false};
+std::atomic<bool> g_data_route_written{false};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
     std::atomic<std::uint64_t> offset_ms{0U};
@@ -121,6 +124,8 @@ void reset_stream(int mode)
     g_race_remaining.store(0, std::memory_order_release);
     g_race_stage.store(0, std::memory_order_release);
     g_release_first.store(false, std::memory_order_release);
+    g_partial_pmt_sent.store(false, std::memory_order_release);
+    g_data_route_written.store(false, std::memory_order_release);
     g_bootstrap_sent = false;
     g_split_phase = 0;
     g_continuity = 0U;
@@ -279,6 +284,76 @@ int case_split_gate(const std::vector<std::uint8_t> &assets)
     (void)rig.adapter.detach(attachment);
     CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "split stop");
     CHECK_RESULT(rig.adapter.close(0U), "split close");
+    return 0;
+}
+
+int case_partial_start_and_late_pmt(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(7);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "partial open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "partial tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial), "partial start");
+    const unsigned initial_generation = g_generation.load();
+    const Attachment attachment = attachment_for(20U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "partial attach");
+    CHECK(wait_phase(rig.adapter, Phase::ready));
+    CHECK(g_generation.load() > initial_generation);
+    CHECK(!g_data_route_written.load(std::memory_order_acquire));
+
+    g_release_split.store(true, std::memory_order_release);
+    for (unsigned attempt = 0U; attempt < 2000U &&
+         !g_data_route_written.load(std::memory_order_acquire); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_data_route_written.load(std::memory_order_acquire));
+    bool saw_primary = false;
+    bool saw_late_data = false;
+    std::uint8_t output[188U * 64U];
+    for (unsigned attempt = 0U; attempt < 40U && !saw_late_data; ++attempt) {
+        std::size_t bytes = 0U;
+        bool eof = false, timed_out = false;
+        CHECK(read_any(rig.adapter, attachment, output, sizeof(output), &bytes, &eof,
+                       &timed_out));
+        for (std::size_t offset = 0U; offset + 188U <= bytes; offset += 188U) {
+            const auto *packet = output + offset;
+            const unsigned pid = static_cast<unsigned>(((packet[1] & 0x1fU) << 8) | packet[2]);
+            saw_primary |= pid == 0x101U;
+            saw_late_data |= pid == 0x0300U;
+        }
+        if (eof) break;
+    }
+    CHECK(saw_primary);
+    CHECK(saw_late_data);
+    (void)rig.adapter.detach(attachment);
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "partial stop");
+    CHECK_RESULT(rig.adapter.close(0U), "partial close");
+    return 0;
+}
+
+int case_primary_pmt_missing(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(8);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "primary PMT open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "primary PMT tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                 "primary PMT start");
+    const Attachment attachment = attachment_for(21U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "primary PMT attach");
+    CHECK(wait_phase(rig.adapter, Phase::preparing));
+    CHECK(rig.adapter.acquisition().plan_generation == 0U);
+    rig.clock.advance(30001U);
+    CHECK(expect_terminal(rig.adapter, attachment, Failure::deadline,
+                          static_cast<std::uint8_t>(
+                              dtv::userland::detail::StreamTerminal::sync_error)));
+    (void)rig.adapter.detach(attachment);
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                 "primary PMT stop");
+    CHECK_RESULT(rig.adapter.close(0U), "primary PMT close");
     return 0;
 }
 
@@ -777,9 +852,19 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     auto *output = static_cast<std::uint8_t *>(buffer);
     std::size_t length = 0U;
     const unsigned generation = g_generation.load(std::memory_order_acquire);
-    const int mode = g_use_mode.load(std::memory_order_acquire)
-                         ? g_mode.load(std::memory_order_acquire)
+    const int configured_mode = g_mode.load(std::memory_order_acquire);
+    const int mode = configured_mode == 7 || g_use_mode.load(std::memory_order_acquire)
+                         ? configured_mode
                          : 0;
+    if (mode == 7 && g_bootstrap_sent &&
+        g_release_split.load(std::memory_order_acquire) &&
+        !g_partial_pmt_sent.exchange(true, std::memory_order_acq_rel)) {
+        uint8_t packets[4][188];
+        (void)dt295_actual_fixture_acquisition_bootstrap(packets, mode);
+        std::memcpy(output + length, packets[3], 188U);
+        dt295_actual_fixture_encrypt(output + length);
+        length += 188U;
+    }
     if (!g_bootstrap_sent) {
         uint8_t packets[4][188];
         const unsigned count =
@@ -807,7 +892,8 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
             g_split_phase = 2;
             g_bootstrap_sent = true;
         } else {
-            for (unsigned index = 0U; index < count; ++index) append_bootstrap(index);
+            const unsigned initial_count = mode == 7 ? 3U : count;
+            for (unsigned index = 0U; index < initial_count; ++index) append_bootstrap(index);
             g_bootstrap_sent = true;
         }
     }
@@ -816,6 +902,10 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
              index < 16U && length + 188U <= capacity; ++index) {
             uint8_t packet[188];
             dt295_actual_fixture_recording_packet(packet, g_continuity++);
+            if (mode == 7 && g_data_route_written.load(std::memory_order_acquire)) {
+                packet[1] = 0x03;
+                packet[2] = 0x00;
+            }
             packet[4] = static_cast<std::uint8_t>(0x40U | (generation & 0x3fU));
             dt295_actual_fixture_encrypt(packet);
             std::memcpy(output + length, packet, 188U);
@@ -826,6 +916,14 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     if (sequence != nullptr) *sequence += length / 188U;
     if (completed_ns != nullptr) *completed_ns = 1U;
     return static_cast<int>(length);
+}
+
+extern "C" int __wrap_dt295_route_write(dt295 *device, const dt295_route_op *op,
+                                          char *error, std::size_t error_size)
+{
+    if (op != nullptr && op->enabled && op->pid == 0x0300U)
+        g_data_route_written.store(true, std::memory_order_release);
+    return __real_dt295_route_write(device, op, error, error_size);
 }
 
 extern "C" int __wrap_dt295_routes_feed(dt295_routes *routes, const uint8_t packet[188])
@@ -883,6 +981,8 @@ int main(int argc, char **argv)
 
     CHECK(run("ready", [&] { return case_ready(assets); }));
     CHECK(run("split", [&] { return case_split_gate(assets); }));
+    CHECK(run("partial-start", [&] { return case_partial_start_and_late_pmt(assets); }));
+    CHECK(run("primary-pmt-missing", [&] { return case_primary_pmt_missing(assets); }));
     CHECK(run("deadline", [&] { return case_deadline_and_retune(assets); }));
     CHECK(run("unsupported", [&] {
         return case_failure(assets, 3, Failure::unsupported,

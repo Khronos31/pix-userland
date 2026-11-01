@@ -183,6 +183,7 @@ private:
     bool recovery_failed_ = false;
     bool streaming_ = false;
     bool plan_complete_ = false;
+    bool plan_started_ = false;
     bool key_retained_ = false;
     bool satellite_tuned_ = false;
     std::atomic<bool> satellite_tsid_valid_{false};
