@@ -1394,6 +1394,8 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
             return Result::failure(Error::INTERNAL);
         pump_joinable_ = false;
     }
+    const auto acquisition_failure = acquisition_failure_.load(std::memory_order_acquire);
+    const int pump_error = pump_error_.load(std::memory_order_acquire);
     const auto stopped = stop_receiver_unlocked();
     stream_attached_ = false;
     normal_capture_active_ = false;
@@ -1407,8 +1409,9 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
         }
     }
     if (!stopped) return stopped;
-    const int pump_error = pump_error_.load(std::memory_order_acquire);
-    if (pump_error != 0 && pump_error != static_cast<int>(Error::OK))
+    if (pump_error != 0 && pump_error != static_cast<int>(Error::OK) &&
+        !(acquisition_failure == AcquisitionFailure::deadline &&
+          pump_error == static_cast<int>(Error::TIMEOUT)))
         return Result::failure(static_cast<Error>(pump_error));
     return Result::success();
 }

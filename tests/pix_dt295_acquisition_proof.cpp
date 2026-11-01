@@ -64,6 +64,7 @@ std::atomic<bool> g_data_route3_written{false};
 std::atomic<unsigned> g_reprepare_calls{0U};
 std::atomic<unsigned> g_stream_stop_calls{0U};
 std::atomic<unsigned> g_stream_destroy_calls{0U};
+std::atomic<bool> g_stream_stop_fail{false};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
     std::atomic<std::uint64_t> offset_ms{0U};
@@ -136,6 +137,7 @@ void reset_stream(int mode)
     g_reprepare_calls.store(0U, std::memory_order_release);
     g_stream_stop_calls.store(0U, std::memory_order_release);
     g_stream_destroy_calls.store(0U, std::memory_order_release);
+    g_stream_stop_fail.store(false, std::memory_order_release);
     g_bootstrap_sent = false;
     g_split_phase = 0;
     g_continuity = 0U;
@@ -447,8 +449,11 @@ int case_deadline_and_retune(const std::vector<std::uint8_t> &assets)
     CHECK(expect_terminal(rig.adapter, attachment, Failure::deadline,
                           static_cast<std::uint8_t>(
                               dtv::userland::detail::StreamTerminal::sync_error)));
+    const auto deadline_final = rig.adapter.final_snapshot(attachment);
+    CHECK(deadline_final && deadline_final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::sync_error));
     const unsigned old_acquisition = rig.adapter.acquisition().acquisition_generation;
-    (void)rig.adapter.detach(attachment);
+    CHECK_RESULT(rig.adapter.detach(attachment), "deadline detach");
     CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "deadline stop");
     const auto idle = rig.adapter.acquisition();
     CHECK(idle.phase == Phase::idle);
@@ -470,6 +475,35 @@ int case_deadline_and_retune(const std::vector<std::uint8_t> &assets)
     (void)rig.adapter.detach(next);
     CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial), "retune stop");
     CHECK_RESULT(rig.adapter.close(0U), "retune close");
+    return 0;
+}
+
+int case_deadline_cleanup_failure(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(5);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "deadline failure open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "deadline failure tune");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                 "deadline failure start");
+    const Attachment attachment = attachment_for(14U);
+    CHECK_RESULT(rig.adapter.attach(attachment), "deadline failure attach");
+    CHECK(wait_phase(rig.adapter, Phase::preparing));
+    rig.clock.advance(30001U);
+    CHECK(expect_terminal(rig.adapter, attachment, Failure::deadline,
+                          static_cast<std::uint8_t>(
+                              dtv::userland::detail::StreamTerminal::sync_error)));
+    g_stream_stop_fail.store(true, std::memory_order_release);
+    const auto detached = rig.adapter.detach(attachment);
+    CHECK(!detached && detached.error() == dtv::userland::Error::USB_IO);
+    const auto final = rig.adapter.final_snapshot(attachment);
+    CHECK(final && final.value().terminal == static_cast<std::uint8_t>(
+              dtv::userland::detail::StreamTerminal::sync_error));
+    CHECK_RESULT(rig.adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                 "deadline failure retry stop");
+    CHECK_RESULT(rig.adapter.close(0U), "deadline failure close");
     return 0;
 }
 
@@ -1043,6 +1077,8 @@ extern "C" int __wrap_dt295_routes_feed(dt295_routes *routes, const uint8_t pack
 extern "C" int __wrap_dt295_stream_stop(dt295_stream *, unsigned)
 {
     g_stream_stop_calls.fetch_add(1U, std::memory_order_acq_rel);
+    if (g_stream_stop_fail.exchange(false, std::memory_order_acq_rel))
+        return LIBUSB_ERROR_IO;
     return 0;
 }
 extern "C" int __wrap_dt295_stream_destroy(dt295_stream *)
@@ -1098,6 +1134,9 @@ int main(int argc, char **argv)
     CHECK(run("partial-tsid-change", [&] { return case_partial_completion_policy(assets, 11); }));
     CHECK(run("codec-update-before-final", [&] { return case_partial_completion_policy(assets, 12); }));
     CHECK(run("deadline", [&] { return case_deadline_and_retune(assets); }));
+    CHECK(run("deadline-cleanup-failure", [&] {
+        return case_deadline_cleanup_failure(assets);
+    }));
     CHECK(run("unsupported", [&] {
         return case_failure(assets, 3, Failure::unsupported,
                             static_cast<std::uint8_t>(
