@@ -631,9 +631,8 @@ void dt295_actual_fixture_shared_bootstrap(uint8_t packets[4][188])
     actual_table(packets[3], 0x110, 2, 2, pmt, n);
 }
 
-/* Modes: 0 normal, 1 shared (two ECMs), 2 no supported A/V, 3 unsupported
- * table on the PAT PID, 4 satellite TSID mismatch, 5 PAT only. Returns count. */
-unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[4][188], int mode)
+/* Modes 0-5 cover the original acquisition cases; modes 7-12 cover partial plans. */
+unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[5][188], int mode)
 {
     const uint8_t pat[] = {0, 1, 0xe1, 0x00};
     const uint8_t cat[] = {0x09, 4, 0, 5, 0xe9, 1};
@@ -661,19 +660,24 @@ unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[4][188], int
         actual_table(packets[3], 0x110, 2, 2, pmt2, sizeof(pmt2));
         return 4;
     }
-    if (mode == 7 || mode == 8) {
+    if (mode == 7 || mode == 8 || mode == 9 || mode == 10 || mode == 11 || mode == 12) {
         const uint8_t pat2[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10};
         const uint8_t pat3[] = {
             0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10, 0, 3, 0xe1, 0x20
         };
         const uint8_t data_pmt[] = {0xe1, 0x02, 0xf0, 0, 0x0d, 0xe3, 0x00, 0xf0, 0};
-        const uint8_t *pat = mode == 7 ? pat3 : pat2;
-        const size_t pat_size = mode == 7 ? sizeof(pat3) : sizeof(pat2);
+        const uint8_t data_pmt3[] = {0xe1, 0x03, 0xf0, 0, 0x0d, 0xe3, 0x01, 0xf0, 0};
+        const uint8_t *pat = mode == 8 ? pat2 : pat3;
+        const size_t pat_size = mode == 8 ? sizeof(pat2) : sizeof(pat3);
         actual_table(packets[0], 0, 0, 1, pat, pat_size);
         actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
-        if (mode == 7) {
+        if (mode != 8) {
             actual_table(packets[2], 0x100, 2, 1, pmt, sizeof(pmt));
             actual_table(packets[3], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
+            if (mode == 9 || mode == 10) {
+                actual_table(packets[4], 0x120, 2, 3, data_pmt3, sizeof(data_pmt3));
+                return 5;
+            }
             return 4;
         }
         actual_table(packets[2], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
@@ -691,6 +695,18 @@ unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[4][188], int
         return 4;
     }
     return 3;
+}
+
+void dt295_actual_fixture_acquisition_codec_update(uint8_t packet[188])
+{
+    actual_table_update(packet, 2U, 1U, 4U);
+}
+
+void dt295_actual_fixture_acquisition_tsid_change(uint8_t packet[188])
+{
+    const uint8_t pat[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10, 0, 3, 0xe1, 0x20};
+    actual_table(packet, 0, 0, 2, pat, sizeof(pat));
+    packet[3] = 0x11;
 }
 
 void dt295_actual_fixture_shared_update_packet(uint8_t packet[188], unsigned program,

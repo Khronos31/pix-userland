@@ -456,6 +456,8 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     plan_complete_ = false;
     plan_started_ = false;
+    plan_tsid_valid_ = false;
+    plan_tsid_ = 0U;
     std::memset(&live_, 0, sizeof(live_));
     dt295_routes_reset(routes_);
     dt295_routes_set_satellite(routes_, system == ReceiverSystem::satellite ? 1 : 0);
@@ -872,6 +874,8 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     streaming_ = true;
     plan_complete_ = false;
     plan_started_ = false;
+    plan_tsid_valid_ = false;
+    plan_tsid_ = 0U;
     pump_error_.store(0, std::memory_order_release);
     {
         std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
@@ -1120,6 +1124,17 @@ void ReceiverAdapter::pump() noexcept
         if (!scan_mode && !plan_complete_ && count > 0) {
             dt295_routes_snapshot snapshot{};
             dt295_routes_snapshot_get(routes_, &snapshot);
+            if (plan_started_ && plan_tsid_valid_ && snapshot.have_pat &&
+                snapshot.tsid != plan_tsid_) {
+                std::fprintf(stderr,
+                             "DT295 acquisition plan terminal: PAT TSID changed during partial plan (%u -> %u)\n",
+                             static_cast<unsigned>(plan_tsid_),
+                             static_cast<unsigned>(snapshot.tsid));
+                fail_acquisition(AcquisitionFailure::unsupported,
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal,
+                                 Error::UNSUPPORTED);
+                break;
+            }
             if (tuned_system_.load(std::memory_order_acquire) == ReceiverSystem::satellite &&
                 satellite_tsid_valid_.load(std::memory_order_acquire) &&
                 snapshot.have_pat &&
@@ -1150,7 +1165,7 @@ void ReceiverAdapter::pump() noexcept
                     break;
                 }
                 if (plan.has_primary) {
-                    if (!plan_complete_ && (snapshot.ready || !plan_started_)) {
+                    if (!plan_started_) {
                         unsigned ecms = 0U;
                         for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
                             if (plan.routes[i].enabled && plan.routes[i].is_ecm) ++ecms;
@@ -1220,12 +1235,18 @@ void ReceiverAdapter::pump() noexcept
                             live_ = plan;
                             plan_started_ = true;
                             plan_complete_ = snapshot.ready;
+                            plan_tsid_ = snapshot.tsid;
+                            plan_tsid_valid_ = snapshot.have_pat;
                             residue.clear();
                             plan_generation_.fetch_add(1U, std::memory_order_acq_rel);
                             acquisition_phase_.store(AcquisitionPhase::ready,
                                                      std::memory_order_release);
                         }
-                    } else if (!snapshot.ready && plan_started_) {
+                        std::fprintf(stderr,
+                                     "DT295 acquisition plan started: state=%s missing_pmts=%u\n",
+                                     snapshot.ready ? "complete" : "partial",
+                                     static_cast<unsigned>(plan.missing_pmts));
+                    } else if (plan_started_) {
                         Result applied = Result::success();
                         {
                             std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
@@ -1240,6 +1261,12 @@ void ReceiverAdapter::pump() noexcept
                                                  : dtv::userland::detail::StreamTerminal::usb_error,
                                              applied.error());
                             break;
+                        }
+                        if (snapshot.ready && !plan_complete_) {
+                            plan_complete_ = true;
+                            std::fprintf(stderr,
+                                         "DT295 acquisition plan complete: missing_pmts=%u\n",
+                                         static_cast<unsigned>(plan.missing_pmts));
                         }
                     }
                     planned = true;
