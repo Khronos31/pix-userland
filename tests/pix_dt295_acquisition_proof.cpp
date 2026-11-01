@@ -115,6 +115,9 @@ Attachment attachment_for(std::uint64_t id,
     return attachment;
 }
 
+// Keep packet corruption separate from the partial-PMT fixture modes (7-12).
+constexpr int kCorruptSyncMode = -1;
+
 void reset_stream(int mode)
 {
     std::lock_guard<std::mutex> lock(g_stream_mutex);
@@ -501,7 +504,8 @@ int case_failure(const std::vector<std::uint8_t> &assets, int mode, Failure fail
     }
     CHECK(expect_terminal(rig.adapter, attachment, failure, raw_terminal));
     CHECK(rig.adapter.acquisition().phase == Phase::terminal);
-    (void)rig.adapter.detach(attachment);
+    const auto detach_result = rig.adapter.detach(attachment);
+    CHECK_RESULT(detach_result, "failed stream still detaches cleanly");
     CHECK_RESULT(rig.adapter.stop_capture(0U,
                  satellite ? ReceiverSystem::satellite : ReceiverSystem::terrestrial),
                  "failure stop");
@@ -965,7 +969,7 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     if (!g_bootstrap_sent) {
         uint8_t packets[5][188];
         const unsigned count =
-            dt295_actual_fixture_acquisition_bootstrap(packets, mode == 6 ? 0 : mode);
+            dt295_actual_fixture_acquisition_bootstrap(packets, (mode == 6 || mode == kCorruptSyncMode) ? 0 : mode);
         auto append_bootstrap = [&](unsigned index) {
             std::memcpy(output + length, packets[index], 188U);
             dt295_actual_fixture_encrypt(output + length);
@@ -1012,6 +1016,7 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
         }
     }
     if (length == 0U) return 0;
+    if (mode == kCorruptSyncMode) output[0] = 0; // Corrupt the TS sync byte after encryption.
     if (sequence != nullptr) *sequence += length / 188U;
     if (completed_ns != nullptr) *completed_ns = 1U;
     return static_cast<int>(length);
@@ -1102,6 +1107,11 @@ int main(int argc, char **argv)
         return case_failure(assets, 3, Failure::unsupported,
                             static_cast<std::uint8_t>(
                                 dtv::userland::detail::StreamTerminal::bridge_fatal), false);
+    }));
+    CHECK(run("packet", [&] {
+        return case_failure(assets, kCorruptSyncMode, Failure::packet,
+                            static_cast<std::uint8_t>(
+                                dtv::userland::detail::StreamTerminal::sync_error), false);
     }));
     CHECK(run("plan", [&] {
         return case_failure(assets, 2, Failure::plan,

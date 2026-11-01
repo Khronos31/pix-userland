@@ -158,11 +158,13 @@ static int ca_descriptors(const uint8_t *p, size_t n, uint16_t *ecm, uint16_t *a
                         return -2;
                     all[(*all_n)++] = pid;
                 }
-                if (tag == 0x09 && system == 0x0005) {
-                    if (*ecm && *ecm != pid)
-                        return -3;
-                    *ecm = pid;
-                }
+            }
+            if (tag == 0x09 && system == 0x0005) {
+                if (*ecm && *ecm != pid)
+                    return -3;
+                /* Retain 0x1fff until inheritance is resolved: an explicit
+                 * non-scrambled ES must not inherit the program ECM. */
+                *ecm = pid;
             }
         }
         i += (size_t)len + 2;
@@ -335,6 +337,7 @@ static int parse_pmt(dt295_routes *r, uint16_t pid, uint16_t program, const sect
                 if (out.stream[ix].pid == espid)
                     break;
             uint16_t binding = explicit_ecm ? explicit_ecm : out.program_ecm;
+            if (binding == 0x1fff) binding = 0;
             if (ix < out.streams) {
                 if (out.stream[ix].type != type || out.stream[ix].ecm_pid != binding)
                     return -1;
@@ -348,6 +351,7 @@ static int parse_pmt(dt295_routes *r, uint16_t pid, uint16_t program, const sect
     }
     if (!have_pcr)
         return -1;
+    if (out.program_ecm == 0x1fff) out.program_ecm = 0;
     out.ca_count = (uint16_t)allca_n;
     memcpy(out.ca_pid, allca, allca_n * sizeof(allca[0]));
     pmt_info *old = pmt_for_program(r, program);

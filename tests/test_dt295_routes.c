@@ -531,7 +531,84 @@ static void test_satellite_readiness_without_cat(void) {
     assert(s.ready);
     dt295_routes_destroy(r);
 }
+
+/* A clear data PID shared by services must not inherit the program ECM when
+ * its own CA descriptor explicitly specifies 0x1fff. */
+static size_t make_pmt_shared_ca(uint8_t *b, uint16_t program, uint16_t program_ecm,
+                                 uint16_t explicit_ecm) {
+    uint16_t video = 0x100 + program, audio = 0x110 + program;
+    uint8_t data[64] = {0xe0 | (video >> 8), video, 0xf0, program_ecm ? 6 : 0};
+    size_t n = 4;
+    if (program_ecm) {
+        uint8_t ca[] = {9, 4, 0, 5, 0xe0 | (program_ecm >> 8), program_ecm};
+        memcpy(data + n, ca, sizeof(ca)); n += sizeof(ca);
+    }
+    uint8_t av[] = {2, 0xe0 | (video >> 8), video, 0xf0, 0,
+                   15, 0xe0 | (audio >> 8), audio, 0xf0, 0};
+    memcpy(data + n, av, sizeof(av)); n += sizeof(av);
+    uint8_t es[] = {13, 0xfe, 1, 0xf0, explicit_ecm ? 6 : 0}; /* PID 7681 */
+    memcpy(data + n, es, sizeof(es)); n += sizeof(es);
+    if (explicit_ecm) {
+        uint8_t ca[] = {9, 4, 0, 5, 0xe0 | (explicit_ecm >> 8), explicit_ecm};
+        memcpy(data + n, ca, sizeof(ca)); n += sizeof(ca);
+    }
+    return make_table(b, 2, program, 0, 0, 0, data, n);
+}
+
+static void test_ca_override(void) {
+    const struct { uint16_t program_ecm, explicit_ecm; int valid; } cases[] = {
+        {0x1ed, 0x1fff, 1}, /* Explicit clear ES overrides scrambled program. */
+        {0x1fff, 0, 1},     /* Explicit clear program needs no ECM route. */
+        {0x1ed, 0, 0},      /* Absent ES descriptor inherits the program ECM. */
+        {0x1ed, 0x1ee, 0},  /* A real shared-PID binding conflict stays invalid. */
+    };
+    for (unsigned reverse = 0; reverse < 2; ++reverse) {
+        for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+            dt295_routes *r = dt295_routes_create();
+            assert(r);
+            uint8_t b[TEST_SECTION_MAX];
+            const uint8_t pat[] = {0, 1, 0xe2, 0, 0, 2, 0xe2, 1};
+            size_t n = make_table(b, 0, 0x1234, 0, 0, 0, pat, sizeof(pat));
+            feed_section(r, 0, b, n);
+            n = make_empty_cat(b, 0); feed_section(r, 1, b, n);
+            for (unsigned j = 0; j < 2; ++j) {
+                unsigned program = reverse ? 2 - j : j + 1;
+                n = make_pmt_shared_ca(b, program,
+                    program == 1 ? cases[c].program_ecm : 0,
+                    program == 1 ? cases[c].explicit_ecm : 0);
+                feed_section(r, 0x1ff + program, b, n);
+            }
+            dt295_route_plan plan;
+            char error[DT295_ROUTE_ERROR];
+            int result = dt295_routes_build(r, 0, NULL, &plan, error);
+            if (!cases[c].valid) {
+                assert(result != 0);
+            } else {
+                assert(result == 0 && plan.ready);
+                const dt295_route *data = NULL, *video = NULL, *ecm = NULL;
+                for (unsigned i = 0; i < 64; ++i) {
+                    const dt295_route *route = &plan.routes[i];
+                    if (!route->enabled) continue;
+                    assert(route->pid != 0x1fff);
+                    if (route->pid == 7681) data = route;
+                    if (route->pid == 0x101) video = route;
+                    if (route->pid == 0x1ed) ecm = route;
+                }
+                assert(data && video && !data->ecm_slot && !data->is_ecm);
+                if (cases[c].program_ecm == 0x1ed)
+                    assert(ecm && ecm->is_ecm && video->ecm_slot == ecm->slot);
+                else
+                    assert(!ecm && !video->ecm_slot);
+                dt295_route_op ops[DT295_ROUTE_OP_LIMIT]; size_t count;
+                assert(dt295_routes_initial_ops(&plan, ops, &count, error) == 0);
+            }
+            dt295_routes_destroy(r);
+        }
+    }
+}
+
 int main(void) {
+    test_ca_override();
     test_satellite_readiness_without_cat();
     test_completeness_versions_and_planning();
     test_stable_bootstrap_slots();
