@@ -877,6 +877,7 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     plan_tsid_valid_ = false;
     plan_tsid_ = 0U;
     pump_error_.store(0, std::memory_order_release);
+    deadline_timeout_pending_.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
         acquisition_failure_.store(AcquisitionFailure::none, std::memory_order_release);
@@ -913,6 +914,9 @@ void ReceiverAdapter::fail_acquisition(AcquisitionFailure failure,
         acquisition_failure_.store(failure, std::memory_order_release);
         acquisition_phase_.store(AcquisitionPhase::terminal, std::memory_order_release);
         pump_error_.store(static_cast<int>(error), std::memory_order_release);
+        deadline_timeout_pending_.store(
+            failure == AcquisitionFailure::deadline && error == Error::TIMEOUT,
+            std::memory_order_release);
     }
     end_session_for_acquisition(terminal);
 }
@@ -1394,6 +1398,9 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
             return Result::failure(Error::INTERNAL);
         pump_joinable_ = false;
     }
+    const bool deadline_timeout_pending =
+        deadline_timeout_pending_.exchange(false, std::memory_order_acq_rel);
+    const int pump_error = pump_error_.load(std::memory_order_acquire);
     const auto stopped = stop_receiver_unlocked();
     stream_attached_ = false;
     normal_capture_active_ = false;
@@ -1407,8 +1414,9 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
         }
     }
     if (!stopped) return stopped;
-    const int pump_error = pump_error_.load(std::memory_order_acquire);
-    if (pump_error != 0 && pump_error != static_cast<int>(Error::OK))
+    if (pump_error != 0 && pump_error != static_cast<int>(Error::OK) &&
+        !(deadline_timeout_pending &&
+          pump_error == static_cast<int>(Error::TIMEOUT)))
         return Result::failure(static_cast<Error>(pump_error));
     return Result::success();
 }

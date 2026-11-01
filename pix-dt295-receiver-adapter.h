@@ -226,6 +226,7 @@ private:
     std::uint64_t si_epoch_ = 0U;
     std::atomic<bool> pump_stop_{false};
     std::atomic<int> pump_error_{0};
+    std::atomic<bool> deadline_timeout_pending_{false};
     pthread_t pump_thread_{};
     bool pump_joinable_ = false;
 };
