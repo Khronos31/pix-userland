@@ -940,6 +940,27 @@ void ReceiverAdapter::pump() noexcept
     std::uint64_t usb_input_bytes = 0U;
     std::uint64_t bootstrap_input_bytes = 0U;
     std::uint64_t bootstrap_applied_ms = 0U;
+    std::uint64_t pump_read_calls = 0U;
+    std::uint64_t pump_read_positive = 0U;
+    std::uint64_t pump_read_zero = 0U;
+    std::uint64_t pump_read_negative = 0U;
+    std::uint64_t pump_read_first_ms = 0U;
+    std::uint64_t pump_read_last_ms = 0U;
+    std::uint64_t pump_read_last_positive_ms = 0U;
+    int pump_read_last_count = 0;
+    dt295_stream_stats bootstrap_stream_before{};
+    dt295_stream_stats bootstrap_stream_after{};
+    std::uint64_t bootstrap_plan_started_ms = 0U;
+    std::uint64_t bootstrap_plan_ended_ms = 0U;
+    std::uint64_t bootstrap_apply_started_ms = 0U;
+    std::uint64_t bootstrap_apply_ended_ms = 0U;
+    AcquisitionPhase bootstrap_plan_phase_before = AcquisitionPhase::idle;
+    AcquisitionPhase bootstrap_plan_phase_after = AcquisitionPhase::idle;
+    AcquisitionPhase bootstrap_phase_before = AcquisitionPhase::idle;
+    AcquisitionPhase bootstrap_phase_after = AcquisitionPhase::idle;
+    int bootstrap_plan_error = -1;
+    int bootstrap_apply_error = -1;
+    bool bootstrap_snapshot_taken = false;
     std::uint64_t restored_packets = 0U;
     std::vector<std::uint8_t> residue;
     residue.reserve(65536U + 188U);
@@ -980,6 +1001,21 @@ void ReceiverAdapter::pump() noexcept
         std::uint64_t completed_ns = 0U;
         const int count = dt295_stream_read(stream_, chunk, pump_chunk_.size(), &sequence,
                                             &completed_ns, 50U);
+        if (diagnostic) {
+            const std::uint64_t read_ms = clock_.monotonic_ms();
+            if (pump_read_calls == 0U) pump_read_first_ms = read_ms;
+            pump_read_last_ms = read_ms;
+            ++pump_read_calls;
+            pump_read_last_count = count;
+            if (count > 0) {
+                ++pump_read_positive;
+                pump_read_last_positive_ms = read_ms;
+            } else if (count == 0) {
+                ++pump_read_zero;
+            } else {
+                ++pump_read_negative;
+            }
+        }
         if (count < 0) {
             if (count == DT295_STREAM_ABANDONED || count == DT295_STREAM_CLOSED) break;
             fail_acquisition(AcquisitionFailure::usb,
@@ -1311,7 +1347,20 @@ void ReceiverAdapter::pump() noexcept
                 }
                 dt295_route_plan bootstrap{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_bootstrap_plan(routes_, &live_, &bootstrap, route_error) != 0) {
+                if (diagnostic) {
+                    bootstrap_plan_started_ms = clock_.monotonic_ms();
+                    bootstrap_plan_phase_before =
+                        acquisition_phase_.load(std::memory_order_acquire);
+                }
+                const int bootstrap_plan_rc =
+                    dt295_routes_bootstrap_plan(routes_, &live_, &bootstrap, route_error);
+                if (diagnostic) {
+                    bootstrap_plan_ended_ms = clock_.monotonic_ms();
+                    bootstrap_plan_phase_after =
+                        acquisition_phase_.load(std::memory_order_acquire);
+                    bootstrap_plan_error = bootstrap_plan_rc;
+                }
+                if (bootstrap_plan_rc != 0) {
                     fail_acquisition(AcquisitionFailure::plan,
                                      dtv::userland::detail::StreamTerminal::bridge_fatal,
                                      Error::INTERNAL);
@@ -1319,9 +1368,23 @@ void ReceiverAdapter::pump() noexcept
                 }
                 if (!acquisition_preparing()) break;
                 Result applied = Result::success();
+                if (diagnostic) {
+                    dt295_stream_snapshot(stream_, &bootstrap_stream_before);
+                    bootstrap_phase_before =
+                        acquisition_phase_.load(std::memory_order_acquire);
+                    bootstrap_apply_started_ms = clock_.monotonic_ms();
+                    bootstrap_snapshot_taken = true;
+                }
                 {
                     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
                     applied = apply_plan_unlocked(&live_, &bootstrap, false);
+                }
+                if (diagnostic) {
+                    bootstrap_apply_ended_ms = clock_.monotonic_ms();
+                    bootstrap_phase_after =
+                        acquisition_phase_.load(std::memory_order_acquire);
+                    dt295_stream_snapshot(stream_, &bootstrap_stream_after);
+                    bootstrap_apply_error = applied ? 0 : static_cast<int>(applied.error());
                 }
                 if (!applied) {
                     fail_acquisition(AcquisitionFailure::usb,
@@ -1369,6 +1432,8 @@ void ReceiverAdapter::pump() noexcept
     }
     if (diagnostic) {
         dt295_routes_snapshot snapshot{};
+        dt295_stream_stats stream_snapshot{};
+        if (stream_ != nullptr) dt295_stream_snapshot(stream_, &stream_snapshot);
         dt295_routes_snapshot_get(routes_, &snapshot);
         const std::uint64_t diagnostic_ended_ms = clock_.monotonic_ms();
         std::fprintf(stderr,
@@ -1396,6 +1461,83 @@ void ReceiverAdapter::pump() noexcept
                      static_cast<unsigned>(acquisition_failure_.load(std::memory_order_acquire)),
                      static_cast<unsigned long long>(
                          plan_generation_.load(std::memory_order_acquire)));
+        std::fprintf(stderr,
+                     "PIX_DIAG_STREAM pump_calls=%llu pump_positive=%llu pump_zero=%llu pump_negative=%llu pump_first_ms=%llu pump_last_ms=%llu pump_last_positive_ms=%llu pump_last_count=%d bootstrap_plan_start_ms=%llu bootstrap_plan_end_ms=%llu bootstrap_plan_phase_before=%u bootstrap_plan_phase_after=%u bootstrap_plan_error=%d bootstrap_snapshot=%u bootstrap_phase_before=%u bootstrap_phase_after=%u bootstrap_apply_start_ms=%llu bootstrap_apply_end_ms=%llu bootstrap_apply_error=%d before_submitted=%llu before_completed=%llu before_completed_bytes=%llu before_delivered=%llu before_delivered_bytes=%llu before_pending=%llu before_active=%llu before_peak_pending=%llu before_timeouts=%llu before_cancellations=%llu before_late_callbacks=%llu before_late_actual_bytes=%llu before_last_completion_ns=%llu before_max_gap_ns=%llu before_first_error=%d before_first_error_ns=%llu before_error_status=%llu before_error_actual=%llu before_stopping=%d before_thread_done=%d after_submitted=%llu after_completed=%llu after_completed_bytes=%llu after_delivered=%llu after_delivered_bytes=%llu after_pending=%llu after_active=%llu after_peak_pending=%llu after_timeouts=%llu after_cancellations=%llu after_late_callbacks=%llu after_late_actual_bytes=%llu after_last_completion_ns=%llu after_max_gap_ns=%llu after_first_error=%d after_first_error_ns=%llu after_error_status=%llu after_error_actual=%llu after_stopping=%d after_thread_done=%d final_submitted=%llu final_completed=%llu final_completed_bytes=%llu final_delivered=%llu final_delivered_bytes=%llu final_pending=%llu final_active=%llu final_peak_pending=%llu final_timeouts=%llu final_cancellations=%llu final_late_callbacks=%llu final_late_actual_bytes=%llu final_last_completion_ns=%llu final_max_gap_ns=%llu final_first_error=%d final_first_error_ns=%llu final_error_status=%llu final_error_actual=%llu final_stopping=%d final_thread_done=%d\n",
+                     static_cast<unsigned long long>(pump_read_calls),
+                     static_cast<unsigned long long>(pump_read_positive),
+                     static_cast<unsigned long long>(pump_read_zero),
+                     static_cast<unsigned long long>(pump_read_negative),
+                     static_cast<unsigned long long>(pump_read_first_ms),
+                     static_cast<unsigned long long>(pump_read_last_ms),
+                     static_cast<unsigned long long>(pump_read_last_positive_ms),
+                     pump_read_last_count,
+                     static_cast<unsigned long long>(bootstrap_plan_started_ms),
+                     static_cast<unsigned long long>(bootstrap_plan_ended_ms),
+                     static_cast<unsigned>(bootstrap_plan_phase_before),
+                     static_cast<unsigned>(bootstrap_plan_phase_after), bootstrap_plan_error,
+                     bootstrap_snapshot_taken ? 1U : 0U,
+                     static_cast<unsigned>(bootstrap_phase_before),
+                     static_cast<unsigned>(bootstrap_phase_after),
+                     static_cast<unsigned long long>(bootstrap_apply_started_ms),
+                     static_cast<unsigned long long>(bootstrap_apply_ended_ms),
+                     bootstrap_apply_error,
+                     static_cast<unsigned long long>(bootstrap_stream_before.submitted),
+                     static_cast<unsigned long long>(bootstrap_stream_before.completed),
+                     static_cast<unsigned long long>(bootstrap_stream_before.completed_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_before.delivered),
+                     static_cast<unsigned long long>(bootstrap_stream_before.delivered_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_before.pending_blocks),
+                     static_cast<unsigned long long>(bootstrap_stream_before.active_transfers),
+                     static_cast<unsigned long long>(bootstrap_stream_before.peak_pending_blocks),
+                     static_cast<unsigned long long>(bootstrap_stream_before.timeouts),
+                     static_cast<unsigned long long>(bootstrap_stream_before.cancellations),
+                     static_cast<unsigned long long>(bootstrap_stream_before.late_callbacks),
+                     static_cast<unsigned long long>(bootstrap_stream_before.late_actual_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_before.last_completion_ns),
+                     static_cast<unsigned long long>(bootstrap_stream_before.max_completion_gap_ns),
+                     bootstrap_stream_before.first_error,
+                     static_cast<unsigned long long>(bootstrap_stream_before.first_error_ns),
+                     static_cast<unsigned long long>(bootstrap_stream_before.last_error_status),
+                     static_cast<unsigned long long>(bootstrap_stream_before.last_error_actual),
+                     bootstrap_stream_before.stopping, bootstrap_stream_before.thread_done,
+                     static_cast<unsigned long long>(bootstrap_stream_after.submitted),
+                     static_cast<unsigned long long>(bootstrap_stream_after.completed),
+                     static_cast<unsigned long long>(bootstrap_stream_after.completed_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_after.delivered),
+                     static_cast<unsigned long long>(bootstrap_stream_after.delivered_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_after.pending_blocks),
+                     static_cast<unsigned long long>(bootstrap_stream_after.active_transfers),
+                     static_cast<unsigned long long>(bootstrap_stream_after.peak_pending_blocks),
+                     static_cast<unsigned long long>(bootstrap_stream_after.timeouts),
+                     static_cast<unsigned long long>(bootstrap_stream_after.cancellations),
+                     static_cast<unsigned long long>(bootstrap_stream_after.late_callbacks),
+                     static_cast<unsigned long long>(bootstrap_stream_after.late_actual_bytes),
+                     static_cast<unsigned long long>(bootstrap_stream_after.last_completion_ns),
+                     static_cast<unsigned long long>(bootstrap_stream_after.max_completion_gap_ns),
+                     bootstrap_stream_after.first_error,
+                     static_cast<unsigned long long>(bootstrap_stream_after.first_error_ns),
+                     static_cast<unsigned long long>(bootstrap_stream_after.last_error_status),
+                     static_cast<unsigned long long>(bootstrap_stream_after.last_error_actual),
+                     bootstrap_stream_after.stopping, bootstrap_stream_after.thread_done,
+                     static_cast<unsigned long long>(stream_snapshot.submitted),
+                     static_cast<unsigned long long>(stream_snapshot.completed),
+                     static_cast<unsigned long long>(stream_snapshot.completed_bytes),
+                     static_cast<unsigned long long>(stream_snapshot.delivered),
+                     static_cast<unsigned long long>(stream_snapshot.delivered_bytes),
+                     static_cast<unsigned long long>(stream_snapshot.pending_blocks),
+                     static_cast<unsigned long long>(stream_snapshot.active_transfers),
+                     static_cast<unsigned long long>(stream_snapshot.peak_pending_blocks),
+                     static_cast<unsigned long long>(stream_snapshot.timeouts),
+                     static_cast<unsigned long long>(stream_snapshot.cancellations),
+                     static_cast<unsigned long long>(stream_snapshot.late_callbacks),
+                     static_cast<unsigned long long>(stream_snapshot.late_actual_bytes),
+                     static_cast<unsigned long long>(stream_snapshot.last_completion_ns),
+                     static_cast<unsigned long long>(stream_snapshot.max_completion_gap_ns),
+                     stream_snapshot.first_error,
+                     static_cast<unsigned long long>(stream_snapshot.first_error_ns),
+                     static_cast<unsigned long long>(stream_snapshot.last_error_status),
+                     static_cast<unsigned long long>(stream_snapshot.last_error_actual),
+                     stream_snapshot.stopping, stream_snapshot.thread_done);
     }
 }
 
