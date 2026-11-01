@@ -14,13 +14,11 @@ PARTICULAR PURPOSE. See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with
 this repository. If not, see <https://www.gnu.org/licenses/>.
 
-The original MIT license text for the project is preserved byte-for-byte in
-licenses/PIX-ORIGINAL-MIT.txt. Third-party components, including the fixed
-dtv-userland-core snapshot, libusb, toolchain/runtime components, and the
-manufacturer-derived firmware bundles, retain their respective licenses and
-notices; see THIRD_PARTY_NOTICES.md and licenses/. The GPL-2.0-or-later grant
-applies to the PIX-maintained source only and does not relicense third-party
-material.
+Third-party components, including the fixed dtv-userland-core snapshot,
+libusb, toolchain/runtime components, and the manufacturer-derived firmware
+bundles, retain their respective licenses and notices; see
+THIRD_PARTY_NOTICES.md and licenses/. The GPL-2.0-or-later grant applies to
+the PIX-maintained source only and does not relicense third-party material.
 
 The complete GNU General Public License version 2 text follows.
 

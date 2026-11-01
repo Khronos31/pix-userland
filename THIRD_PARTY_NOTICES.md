@@ -1,6 +1,6 @@
 # License and third-party notices
 
-The PIX-maintained source from this revision onward is licensed under GPL-2.0-or-later; see LICENSE. The original MIT text is preserved byte-for-byte in licenses/PIX-ORIGINAL-MIT.txt. Linking the libraries below does not relicense their code under the PIX license. The license files in `licenses/` apply to their respective components, not indiscriminately to the whole application.
+The PIX-maintained source from this revision onward is licensed under GPL-2.0-or-later; see LICENSE. Linking the libraries below does not relicense their code under the PIX license. The license files in `licenses/` apply to their respective components, not indiscriminately to the whole application.
 
 | Component | Use | Terms / notice |
 |---|---|---|

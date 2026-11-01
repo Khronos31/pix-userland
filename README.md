@@ -338,7 +338,7 @@ libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`p
 
 ## ライセンス・権利表記
 
-- PIXが管理する今後のソースコードは **GNU General Public License version 2 or later (GPL-2.0-or-later)** です（全文は [LICENSE](LICENSE)、旧MIT全文は [licenses/PIX-ORIGINAL-MIT.txt](licenses/PIX-ORIGINAL-MIT.txt) を参照してください）。過去にMITで受領したcopyの許諾を撤回しません。
+- PIXが管理する今後のソースコードは **GNU General Public License version 2 or later (GPL-2.0-or-later)** です（全文は [LICENSE](LICENSE) を参照してください）。
 - 静的リンクおよび同梱される各コンポーネントには、それぞれのライセンスが適用されます。
   - **libusb**: LGPL-2.1-or-later（詳細は `COPYING.libusb` を参照してください）
   - **dtv-userland-core**: ルートは MIT、一部の host adapter は GPL-2.0-only（各ソースの SPDX 表記に従います）。配布バイナリには静的リンクされ、`licenses/dtv-userland-core-*` に Core の `LICENSE`・`COPYING`・`PROVENANCE.json` を同梱します
