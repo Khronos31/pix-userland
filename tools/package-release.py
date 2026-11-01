@@ -20,8 +20,8 @@ SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','lic
 SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.txt', 'core-integration/dtv-userland-core.revision',
                 'packaging/pix-termux',
                 'firmware/dt181.bin', 'firmware/dt295.bin', 'firmware/preserved/verified-ts-iv.bin'}
-DT181_PROVENANCE = 'StationTV/Pixela device data; not covered by the PIX MIT license'
-DT295_PROVENANCE = 'Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX MIT license'
+DT181_PROVENANCE = 'StationTV/Pixela device data; not covered by the PIX GPL-2.0-or-later source license'
+DT295_PROVENANCE = 'Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX GPL-2.0-or-later source license'
 
 def git_value(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
@@ -133,7 +133,7 @@ def package(target, binary_dir=None, core_source_root=None, output_dir=None):
         build_info = next(data for name, data, _ in members if name == 'build-info.txt')
         metadata['embedded_assets'] = embedded_build_metadata(build_info, manifest, manifest_bytes)
         metadata['device_assets'] = True
-    required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','docs/releases.md','packaging/pix-usb-permissions','packaging/pix-termux'}
+    required = {'LICENSE','COPYING.libusb','THIRD_PARTY_NOTICES.md','licenses/musl-COPYRIGHT.txt','licenses/GPL-2.0.txt','docs/releases.md','packaging/pix-usb-permissions','packaging/pix-termux'}
     if target == 'source':
         required |= {'core-integration/CMakeLists.txt','core-integration/dtv-userland-core.revision','core-integration/pixd.cpp','core-integration/tools/pixctl.cpp','core-integration/tools/pix_ts.cpp','tools/build-windows.sh','include/os.h','src/dt181_capture_host.c','pix-dt181-consumer.cpp','core-integration/tests/windows_os_thread_proof.c','tests/test_windows_runtime.py','firmware/dt181.bin','firmware/dt295.bin','firmware/manifest.json','firmware/metadata/dt181-source.json','firmware/metadata/dt295-preservation.json','firmware/metadata/dt295-satellite-generation.json','firmware/preserved/verified-ts-iv.bin'}
     assert required <= {name for name, _, _ in members}, 'Missing package documentation or licenses'

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "usb_listing.h"
 #include <string.h>
 static void json_serial(FILE *out, const usb_device_info *device) {

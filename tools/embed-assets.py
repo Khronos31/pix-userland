@@ -45,12 +45,12 @@ def generate(dt181_path, dt295_path, output_directory, source_revision,
         "toolchain": toolchain,
         "assets": {
             "dt181": {
-                "provenance": "StationTV/Pixela device data; not covered by the PIX MIT license",
+                "provenance": "StationTV/Pixela device data; not covered by the PIX GPL-2.0-or-later source license",
                 "file": {"name": expected["dt181"]["file"], "size": len(dt181),
                          "sha256": hashlib.sha256(dt181).hexdigest()},
             },
             "dt295": {
-                "provenance": "Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX MIT license",
+                "provenance": "Manufacturer-derived terrestrial and satellite runtime bundle; not covered by the PIX GPL-2.0-or-later source license",
                 "file": {"name": expected["dt295"]["file"], "size": len(dt295),
                          "sha256": hashlib.sha256(dt295).hexdigest()},
             },

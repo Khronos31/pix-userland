@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Reuse the accepted protocol emulator and asset builder without running its
  * standalone proof entrypoint. */
 #define main dt295_protocol_fixture_unused_main

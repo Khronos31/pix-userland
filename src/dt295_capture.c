@@ -1,7 +1,7 @@
 #ifndef _DARWIN_C_SOURCE
 #define _DARWIN_C_SOURCE
 #endif
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "dt295_capture.h"
 #include "dt295.h"
 #include "dt295_live_policy.h"

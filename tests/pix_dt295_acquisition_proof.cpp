@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Offline DT295 normal acquisition gate proof. */
 #include "pix-dt295-receiver-adapter.h"
 

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "usb_selector.h"
 #include <limits.h>
 #include <stdio.h>

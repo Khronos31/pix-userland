@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <dtv/host_ts/px4_ts_core.h>
 #include "pix_ts_profile.h"
 #ifdef _WIN32

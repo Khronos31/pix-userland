@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <libusb.h>
 #include <stdint.h>
 #include <stdlib.h>

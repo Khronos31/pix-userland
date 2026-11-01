@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef PIX_CHANNEL_H
 #define PIX_CHANNEL_H
 #include "pixy.h"

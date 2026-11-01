@@ -66,8 +66,9 @@ SYNTHETIC_LIBUSB = b"synthetic libusb source"
 def source_members(commit):
     """Synthetic corresponding-source closure whose manifest matches its archive."""
     files = {
-        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "LICENSE": (ROOT / "LICENSE").read_bytes(), "COPYING.libusb": b"copying",
         "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "licenses/GPL-2.0.txt": (ROOT / "licenses/GPL-2.0.txt").read_bytes(),
         "core-integration/CMakeLists.txt": b"project()",
         "core-integration/dtv-userland-core.revision": verify.CORE_PIN.encode() + b"\n",
         "core-integration/pixd.cpp": b"pixd", "core-integration/tools/pixctl.cpp": b"pixctl",
@@ -119,8 +120,9 @@ def binary_members(target, commit):
             "private": False, "libusb_linkage": "static", "device_assets": False,
             "dtv_userland_core_commit": verify.CORE_PIN,
         }).encode() + b"\n",
-        "LICENSE": b"license", "COPYING.libusb": b"copying",
+        "LICENSE": (ROOT / "LICENSE").read_bytes(), "COPYING.libusb": b"copying",
         "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
+        "licenses/GPL-2.0.txt": (ROOT / "licenses/GPL-2.0.txt").read_bytes(),
         "build-info.txt": f"dtv-userland-core {verify.CORE_PIN}\n".encode(),
         "licenses/dtv-userland-core-LICENSE": b"mit",
         "licenses/dtv-userland-core-host_ts-COPYING": b"gpl",
@@ -244,6 +246,19 @@ class TestDT295Packaging(unittest.TestCase):
                               commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
 
 
+  def test_verifier_rejects_grant_only_change(self):
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root, commit = make_release(Path(temp), self)
+      original = (ROOT / "LICENSE").read_text()
+      wrong = original.replace(
+          "either version 2 of the\nLicense, or (at your option) any later version.",
+          "version 2 of the\nLicense only; no later version is permitted.")
+      self.assertNotEqual(wrong, original)
+      self._rewrite(root, "linux-x86_64",
+                    lambda members: members.update({"LICENSE": wrong.encode()}))
+      with self.assertRaisesRegex(ValueError, "PIX GPL-2.0-or-later grant"):
+        self._verify(root, commit)
+
   def _rewrite(self, root, target, edit):
     path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz"
     prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
@@ -278,6 +293,9 @@ class TestDT295Packaging(unittest.TestCase):
       "build-info": (lambda members: members.update({"build-info.txt": b"no pin\n"}), "Core pin"),
       "license": (lambda members: members.pop("licenses/dtv-userland-core-LICENSE"), "Core license"),
       "copying": (lambda members: members.pop("licenses/dtv-userland-core-host_ts-COPYING"), "Core license"),
+      "gpl2": (lambda members: members.pop("licenses/GPL-2.0.txt"), "GPL-2.0"),
+      "gpl2-changed": (lambda members: members.update({"licenses/GPL-2.0.txt": b"changed"}), "GPLv2 text"),
+      "pix-license": (lambda members: members.update({"LICENSE": b"not a license"}), "PIX GPL"),
     }
     for name, (edit, message) in cases.items():
       with self.subTest(case=name), __import__("tempfile").TemporaryDirectory() as temp:
