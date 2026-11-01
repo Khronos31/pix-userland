@@ -938,6 +938,8 @@ void ReceiverAdapter::pump() noexcept
     bool plan_attempted = false;
     bool plan_started = false;
     std::uint64_t usb_input_bytes = 0U;
+    std::uint64_t bootstrap_input_bytes = 0U;
+    std::uint64_t bootstrap_applied_ms = 0U;
     std::uint64_t restored_packets = 0U;
     std::vector<std::uint8_t> residue;
     residue.reserve(65536U + 188U);
@@ -1327,7 +1329,11 @@ void ReceiverAdapter::pump() noexcept
                                      applied.error());
                     break;
                 }
-                if (diagnostic) bootstrap_applied = true;
+                if (diagnostic) {
+                    bootstrap_applied = true;
+                    bootstrap_input_bytes = usb_input_bytes;
+                    bootstrap_applied_ms = clock_.monotonic_ms();
+                }
             }
         }
 
@@ -1364,14 +1370,27 @@ void ReceiverAdapter::pump() noexcept
     if (diagnostic) {
         dt295_routes_snapshot snapshot{};
         dt295_routes_snapshot_get(routes_, &snapshot);
+        const std::uint64_t diagnostic_ended_ms = clock_.monotonic_ms();
         std::fprintf(stderr,
-                     "PIX_DIAG_STAGE input_bytes=%llu restored_188_packets=%llu residue_bytes=%zu pat_seen=%d have_cat=%u missing_pmts=%u ready=%u bootstrap_attempted=%d bootstrap_applied=%d plan_attempted=%d plan_started=%d phase=%u failure=%u plan_generation=%llu\n",
+                     "PIX_DIAG_STAGE input_bytes=%llu restored_188_packets=%llu residue_bytes=%zu pid1_packets=%u pid1_sections_complete=%u pid1_crc_rejected=%u pid1_invalid_rejected=%u pid1_unsupported_rejected=%u cat_tables_accepted=%u pat_seen=%d have_cat=%u missing_pmts=%u ready=%u bootstrap_attempted=%d bootstrap_applied=%d bootstrap_input_bytes=%llu post_bootstrap_input_bytes=%llu bootstrap_elapsed_ms=%llu plan_attempted=%d plan_started=%d phase=%u failure=%u plan_generation=%llu\n",
                      static_cast<unsigned long long>(usb_input_bytes),
                      static_cast<unsigned long long>(restored_packets), residue.size(),
+                     static_cast<unsigned>(snapshot.pid1_packets),
+                     static_cast<unsigned>(snapshot.pid1_sections_complete),
+                     static_cast<unsigned>(snapshot.pid1_crc_rejected),
+                     static_cast<unsigned>(snapshot.pid1_invalid_rejected),
+                     static_cast<unsigned>(snapshot.pid1_unsupported_rejected),
+                     static_cast<unsigned>(snapshot.cat_tables_accepted),
                      pat_seen ? 1 : 0, static_cast<unsigned>(snapshot.have_cat),
                      static_cast<unsigned>(snapshot.missing_pmts),
                      static_cast<unsigned>(snapshot.ready), bootstrap_attempted ? 1 : 0,
-                     bootstrap_applied ? 1 : 0, plan_attempted ? 1 : 0,
+                     bootstrap_applied ? 1 : 0,
+                     static_cast<unsigned long long>(bootstrap_input_bytes),
+                     static_cast<unsigned long long>(bootstrap_applied
+                         ? usb_input_bytes - bootstrap_input_bytes : 0U),
+                     static_cast<unsigned long long>(bootstrap_applied
+                         ? diagnostic_ended_ms - bootstrap_applied_ms : 0U),
+                     plan_attempted ? 1 : 0,
                      plan_started ? 1 : 0,
                      static_cast<unsigned>(acquisition_phase_.load(std::memory_order_acquire)),
                      static_cast<unsigned>(acquisition_failure_.load(std::memory_order_acquire)),

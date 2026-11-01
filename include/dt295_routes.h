@@ -54,6 +54,8 @@ typedef struct {
     uint16_t missing_pmts;
     uint8_t ready;
     uint32_t invalid_sections, continuity_errors, unsupported_tables;
+    uint32_t pid1_packets, pid1_sections_complete, pid1_crc_rejected;
+    uint32_t pid1_invalid_rejected, pid1_unsupported_rejected, cat_tables_accepted;
 } dt295_routes_snapshot;
 
 /* The watcher owns bounded memory; create returns NULL on allocation failure. */

@@ -242,6 +242,8 @@ static void test_completeness_versions_and_planning(void) {
     feed_pat(r, 0, 1, 1, 2, 0x110);
     dt295_routes_snapshot_get(r, &s);
     assert(s.have_pat && s.have_cat && s.missing_pmts == 2 && !s.ready);
+    assert(s.pid1_packets == 1 && s.pid1_sections_complete == 1 &&
+           s.cat_tables_accepted == 1);
     feed_pat(r, 31, 0, 1, 9, 0x120); /* delayed previous version is ignored */
     feed_pat(r, 30, 0, 1, 9, 0x120); /* older versions cannot roll the route map back */
     feed_pat(r, 16, 0, 1, 9, 0x120); /* half-cycle ordering is unknown and fails closed */
@@ -482,6 +484,12 @@ static void test_bad_crc_same_version_and_capacity(void) {
     dt295_routes_snapshot_get(r, &s);
     assert(s.program_count == 1 && s.programs[0].program == 1 && s.invalid_sections >= 2);
     assert(s.unsupported_tables > unsupported_before);
+    n = make_cat(b, 1, 0x1ef);
+    b[n - 1] ^= 1;
+    feed_section(r, 1, b, n);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.pid1_packets == 1 && s.pid1_sections_complete == 1 &&
+           s.pid1_crc_rejected == 1 && s.cat_tables_accepted == 0);
     dt295_route_plan base = {0}, desired;
     base.routes[4] = (dt295_route){4, 1, 0, 0, 0, 0};
     base.route_count = 1;

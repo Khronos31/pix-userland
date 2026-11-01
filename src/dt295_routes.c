@@ -61,6 +61,8 @@ struct dt295_routes {
     uint16_t cat_pid[CA_LIMIT];
     uint16_t cat_count;
     uint32_t invalid_sections, continuity_errors, unsupported_tables;
+    uint32_t pid1_packets, pid1_sections_complete, pid1_crc_rejected;
+    uint32_t pid1_invalid_rejected, pid1_unsupported_rejected, cat_tables_accepted;
 };
 
 static uint16_t be16(const uint8_t *p) {
@@ -372,13 +374,20 @@ static void apply_complete(dt295_routes *r, table_state *t) {
     else
         rc = parse_pmt(r, t->pid, t->ext, &t->pending);
     if (rc) {
-        if (rc == -2 || rc == -3)
+        if (rc == -2 || rc == -3) {
             r->unsupported_tables++;
-        else
+            if (t->tid == 1)
+                r->pid1_unsupported_rejected++;
+        } else {
             r->invalid_sections++;
+            if (t->tid == 1)
+                r->pid1_invalid_rejected++;
+        }
         memset(&t->pending, 0, sizeof(t->pending));
         return;
     }
+    if (t->tid == 1)
+        r->cat_tables_accepted++;
     t->previous_version = t->committed.version;
     t->have_previous = t->committed.valid;
     t->committed = t->pending;
@@ -387,19 +396,32 @@ static void apply_complete(dt295_routes *r, table_state *t) {
 }
 
 static void section_bytes(dt295_routes *r, uint16_t pid, const uint8_t *b, size_t n) {
+    if (pid == 1)
+        r->pid1_sections_complete++;
     if (n < 12 || n > SECTION_MAX || !(b[1] & 0x80) || (b[1] & 0x30) != 0x30 ||
         (b[5] & 0xc0) != 0xc0) {
         r->invalid_sections++;
+        if (pid == 1)
+            r->pid1_invalid_rejected++;
         return;
     }
     size_t declared = 3u + (be16(b + 1) & 0x0fffu);
-    if (declared != n || ts_crc(b, n) != 0 || !(b[5] & 1)) {
+    int crc_valid = ts_crc(b, n) == 0;
+    if (declared != n || !crc_valid || !(b[5] & 1)) {
         r->invalid_sections++;
+        if (pid == 1) {
+            if (!crc_valid)
+                r->pid1_crc_rejected++;
+            else
+                r->pid1_invalid_rejected++;
+        }
         return;
     }
     uint8_t tid = b[0];
     if ((tid == 0 && pid != 0) || (tid == 1 && pid != 1) || (tid != 0 && tid != 1 && tid != 2)) {
         r->unsupported_tables++;
+        if (pid == 1)
+            r->pid1_unsupported_rejected++;
         return;
     }
     uint16_t ext = be16(b + 3);
@@ -414,17 +436,23 @@ static void section_bytes(dt295_routes *r, uint16_t pid, const uint8_t *b, size_
     unsigned number = b[6], last = b[7], version = (b[5] >> 1) & 31;
     if (number > last || last >= TABLE_SECTIONS) {
         r->unsupported_tables++;
+        if (pid == 1 && tid == 1)
+            r->pid1_unsupported_rejected++;
         return;
     }
     table_state *t = table_for(r, pid, tid, ext, 1);
     if (!t) {
         r->unsupported_tables++;
+        if (pid == 1 && tid == 1)
+            r->pid1_unsupported_rejected++;
         return;
     }
     if (t->committed.valid && t->committed.version == version) {
         section_set *c = &t->committed;
         if (number > c->last || c->length[number] != n || memcmp(c->data[number], b, n)) {
             r->invalid_sections++;
+            if (pid == 1 && tid == 1)
+                r->pid1_unsupported_rejected++;
             /* Same-version content changes make the committed route map stale. */
             r->unsupported_tables++;
         }
@@ -438,6 +466,8 @@ static void section_bytes(dt295_routes *r, uint16_t pid, const uint8_t *b, size_
          * half-cycle transitions cannot be ordered safely and fail closed. */
         if (!delta || delta >= 16) {
             r->unsupported_tables++;
+            if (pid == 1 && tid == 1)
+                r->pid1_unsupported_rejected++;
             return;
         }
     }
@@ -452,6 +482,8 @@ static void section_bytes(dt295_routes *r, uint16_t pid, const uint8_t *b, size_
         if (p->length[number] != n || memcmp(p->data[number], b, n)) {
             memset(p, 0, sizeof(*p));
             r->invalid_sections++;
+            if (pid == 1 && tid == 1)
+                r->pid1_invalid_rejected++;
         }
         return;
     }
@@ -506,6 +538,8 @@ int dt295_routes_feed(dt295_routes *r, const uint8_t packet[188]) {
     if (packet[0] != 0x47 || (packet[1] & 0x80) || (packet[3] & 0xc0))
         return 0;
     uint16_t pid = (uint16_t)(((packet[1] & 0x1f) << 8) | packet[2]);
+    if (pid == 1)
+        r->pid1_packets++;
     if (pid != 0 && pid != 1) {
         int wanted = 0;
         for (unsigned i = 0; i < r->program_count; ++i)
@@ -595,6 +629,12 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->invalid_sections = r->invalid_sections;
     s->continuity_errors = r->continuity_errors;
     s->unsupported_tables = r->unsupported_tables;
+    s->pid1_packets = r->pid1_packets;
+    s->pid1_sections_complete = r->pid1_sections_complete;
+    s->pid1_crc_rejected = r->pid1_crc_rejected;
+    s->pid1_invalid_rejected = r->pid1_invalid_rejected;
+    s->pid1_unsupported_rejected = r->pid1_unsupported_rejected;
+    s->cat_tables_accepted = r->cat_tables_accepted;
 }
 
 static int plan_add(dt295_route_plan *p, unsigned slot, uint16_t pid, uint16_t ecm_slot,
