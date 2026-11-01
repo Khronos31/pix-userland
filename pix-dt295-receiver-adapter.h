@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef PIX_DT295_RECEIVER_ADAPTER_H
 #define PIX_DT295_RECEIVER_ADAPTER_H
 
