@@ -919,7 +919,7 @@ void ReceiverAdapter::pump() noexcept
     residue.reserve(65536U + 188U);
     std::vector<std::uint8_t> publish_buffer;
     publish_buffer.reserve(65536U + 188U);
-    std::uint8_t chunk[65536U];
+    std::uint8_t* chunk = pump_chunk_.data();
     std::uint64_t last_renew = clock_.monotonic_ms();
     const std::uint64_t generation = acquisition_generation_.load(std::memory_order_acquire);
     const std::uint64_t tune_generation =
@@ -952,7 +952,7 @@ void ReceiverAdapter::pump() noexcept
         }
         std::uint64_t sequence = 0U;
         std::uint64_t completed_ns = 0U;
-        const int count = dt295_stream_read(stream_, chunk, sizeof(chunk), &sequence,
+        const int count = dt295_stream_read(stream_, chunk, pump_chunk_.size(), &sequence,
                                             &completed_ns, 50U);
         if (count < 0) {
             if (count == DT295_STREAM_ABANDONED || count == DT295_STREAM_CLOSED) break;
