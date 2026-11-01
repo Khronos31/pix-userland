@@ -208,6 +208,7 @@ private:
     mutable std::mutex acquisition_view_mutex_;
     std::mutex si_mutex_;
     std::condition_variable si_changed_;
+    std::array<std::uint8_t, 65536U> pump_chunk_;
     std::vector<std::uint8_t> si_queue_;
     std::size_t si_capacity_ = 1U;
     std::size_t si_head_ = 0U;
