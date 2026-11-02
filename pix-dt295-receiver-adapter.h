@@ -155,7 +155,8 @@ private:
     Result stop_receiver_unlocked() noexcept;
     Result apply_plan_unlocked(dt295_route_plan* current,
                                const dt295_route_plan* desired,
-                               bool live_policy) noexcept;
+                               bool live_policy,
+                               const dt295_routes_snapshot* snapshot = nullptr) noexcept;
     Result ensure_streaming() noexcept;
     void pump() noexcept;
     static void* pump_entry(void*) noexcept;
@@ -186,6 +187,8 @@ private:
     bool plan_started_ = false;
     bool plan_tsid_valid_ = false;
     std::uint16_t plan_tsid_ = 0U;
+    bool plan_initial_snapshot_valid_ = false;
+    dt295_routes_snapshot plan_initial_snapshot_{};
     bool key_retained_ = false;
     bool satellite_tuned_ = false;
     std::atomic<bool> satellite_tsid_valid_{false};

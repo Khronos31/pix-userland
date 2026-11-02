@@ -505,11 +505,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 snprintf(error, sizeof(error), "initial complete plan: %s", route_error);
                 break;
             }
-            unsigned ecms = 0;
-            for (unsigned i = 0; i < 64; i++)
-                if (full.routes[i].enabled && full.routes[i].is_ecm)
-                    ecms++;
-            if (ecms > 1) {
+            if (!dt295_initial_ecm_gate_allowed(&full)) {
                 rc = 8;
                 snprintf(error, sizeof(error),
                          "multiple independent ECMs are outside the verified DT295 scope");

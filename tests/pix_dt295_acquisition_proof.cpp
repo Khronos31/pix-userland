@@ -70,6 +70,9 @@ std::atomic<unsigned> g_saved_pmts_emitted{0U};
 std::atomic<unsigned> g_route_write_calls{0U};
 std::mutex g_saved_plan_mutex;
 dt295_route_plan g_saved_reprepare_plan{};
+dt295_route_plan g_saved_full_plan{};
+dt295_route_plan g_saved_completed_plan{};
+bool g_saved_completion_recording = false;
 int g_saved_mux = DT295_SAVED_CS08;
 std::vector<unsigned> g_saved_order;
 unsigned g_saved_initial_pmts = 0U;
@@ -156,6 +159,9 @@ void reset_stream(int mode)
     {
         std::lock_guard<std::mutex> plan_lock(g_saved_plan_mutex);
         g_saved_reprepare_plan = {};
+        g_saved_full_plan = {};
+        g_saved_completed_plan = {};
+        g_saved_completion_recording = false;
     }
     g_saved_initial_sent = false;
     g_saved_next_pmt = 0U;
@@ -593,12 +599,169 @@ unsigned saved_plan_ecms(const dt295_route_plan &plan)
     return count;
 }
 
+bool saved_cs_full_plan(int mux, dt295_route_plan *plan)
+{
+    dt295_routes *routes = dt295_routes_create();
+    if (!routes) return false;
+    for (unsigned i = 0U; i < DT295_SAVED_CS_PACKET_COUNT; ++i) {
+        std::uint8_t packet[188];
+        if (dt295_saved_cs_packet(mux, i, packet) != 0 ||
+            dt295_routes_feed(routes, packet) != 0) {
+            dt295_routes_destroy(routes);
+            return false;
+        }
+    }
+    dt295_routes_snapshot snapshot{};
+    dt295_routes_snapshot_get(routes, &snapshot);
+    char error[DT295_ROUTE_ERROR]{};
+    const bool ready = snapshot.ready &&
+        dt295_routes_build(routes, 0U, nullptr, plan, error) == 0;
+    dt295_routes_destroy(routes);
+    return ready;
+}
+
+bool same_route_set(const dt295_route_plan &actual, const dt295_route_plan &expected)
+{
+    if (actual.route_count != expected.route_count ||
+        actual.primary_program != expected.primary_program ||
+        actual.has_primary != expected.has_primary)
+        return false;
+    for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i) {
+        const auto &route = expected.routes[i];
+        if (!route.enabled) continue;
+        bool found = false;
+        for (unsigned j = 0U; j < DT295_SLOT_COUNT; ++j) {
+            const auto &candidate = actual.routes[j];
+            if (!candidate.enabled || candidate.pid != route.pid) continue;
+            if (candidate.is_ecm != route.is_ecm) return false;
+            const std::uint16_t expected_ecm = route.ecm_slot
+                ? expected.ecm_pid[route.ecm_slot] : 0U;
+            const std::uint16_t actual_ecm = candidate.ecm_slot
+                ? actual.ecm_pid[candidate.ecm_slot] : 0U;
+            if (expected_ecm != actual_ecm) return false;
+            found = true;
+            break;
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+bool saved_cs_completion_policy_proof(int mux)
+{
+    dt295_routes *routes = dt295_routes_create();
+    if (!routes) return false;
+    dt295_routes_set_satellite(routes, 1);
+    for (unsigned i = 0U; i < 3U; ++i) {
+        std::uint8_t packet[188];
+        if (dt295_saved_cs_packet(mux, i, packet) != 0 || dt295_routes_feed(routes, packet) != 0) {
+            dt295_routes_destroy(routes);
+            return false;
+        }
+    }
+    dt295_routes_snapshot initial{};
+    dt295_routes_snapshot_get(routes, &initial);
+    dt295_route_plan current{};
+    char error[DT295_ROUTE_ERROR]{};
+    if (!initial.have_cat || dt295_routes_build(routes, 0U, nullptr, &current, error) != 0 ||
+        !dt295_primary_has_no_ecm_dependency(&current)) {
+        dt295_routes_destroy(routes);
+        return false;
+    }
+    std::uint8_t packet[188];
+    if (dt295_saved_cs_packet(mux, 3U, packet) != 0 || dt295_routes_feed(routes, packet) != 0) {
+        dt295_routes_destroy(routes);
+        return false;
+    }
+    dt295_routes_snapshot updated{};
+    dt295_routes_snapshot_get(routes, &updated);
+    dt295_route_plan desired{};
+    dt295_route_op ops[DT295_ROUTE_OP_LIMIT]{};
+    std::size_t count = 0U;
+    dt295_route_plan candidate{};
+    bool accepted = dt295_routes_build(routes, 0U, &current, &desired, error) == 0 &&
+        dt295_routes_plan_ops(&current, &desired, ops, &count, error) == 0 &&
+        live_initial_pmt_completion_only(&initial, &updated, &current, &desired,
+                                         ops, count, error, sizeof(error)) == 0 &&
+        dt295_routes_guard(&current, ops, count, &candidate, error) == 0;
+    if (accepted) {
+        dt295_routes_snapshot changed = updated;
+        changed.pmt_version[0] = (uint8_t)((changed.pmt_version[0] + 1U) & 31U);
+        accepted = live_initial_pmt_completion_only(
+            &initial, &changed, &current, &desired, ops, count, error, sizeof(error)) != 0;
+    }
+    if (accepted) {
+        dt295_routes_snapshot changed = updated;
+        changed.programs[1].pmt_pid ^= 1U;
+        accepted = live_initial_pmt_completion_only(
+            &initial, &changed, &current, &desired, ops, count, error, sizeof(error)) != 0;
+    }
+    dt295_route_plan paid_full{};
+    for (unsigned i = 4U; accepted && i < DT295_SAVED_CS_PACKET_COUNT; ++i) {
+        if (dt295_saved_cs_packet(mux, i, packet) != 0 || dt295_routes_feed(routes, packet) != 0)
+            accepted = false;
+    }
+    if (accepted) {
+        const std::uint16_t paid_program = dt295_saved_cs_program(mux, 3U);
+        accepted = dt295_routes_build(routes, paid_program, nullptr, &paid_full, error) == 0 &&
+                   saved_plan_ecms(paid_full) > 1U &&
+                   !dt295_initial_ecm_gate_allowed(&paid_full);
+    }
+    dt295_routes_destroy(routes);
+    if (!accepted) return false;
+
+    routes = dt295_routes_create();
+    if (!routes) return false;
+    for (unsigned i = 0U; i < 3U; ++i) {
+        if (dt295_saved_cs_packet(mux, i, packet) != 0 || dt295_routes_feed(routes, packet) != 0) {
+            dt295_routes_destroy(routes);
+            return false;
+        }
+    }
+    if (dt295_saved_cs_packet(mux, 5U, packet) != 0 || dt295_routes_feed(routes, packet) != 0) {
+        dt295_routes_destroy(routes);
+        return false;
+    }
+    dt295_routes_snapshot paid_initial{};
+    dt295_routes_snapshot_get(routes, &paid_initial);
+    const std::uint16_t paid_program = dt295_saved_cs_program(mux, 3U);
+    dt295_route_plan paid_current{};
+    dt295_route_plan paid_desired{};
+    if (dt295_routes_build(routes, paid_program, nullptr, &paid_current, error) != 0 ||
+        dt295_saved_cs_packet(mux, 4U, packet) != 0 ||
+        dt295_routes_feed(routes, packet) != 0) {
+        dt295_routes_destroy(routes);
+        return false;
+    }
+    dt295_routes_snapshot paid_updated{};
+    dt295_routes_snapshot_get(routes, &paid_updated);
+    count = 0U;
+    const bool rejected_paid =
+        dt295_routes_build(routes, paid_program, &paid_current, &paid_desired, error) == 0 &&
+        dt295_routes_plan_ops(&paid_current, &paid_desired, ops, &count, error) == 0 && count > 0U &&
+        !dt295_primary_has_no_ecm_dependency(&paid_current) &&
+        live_initial_pmt_completion_only(&paid_initial, &paid_updated, &paid_current,
+                                         &paid_desired, ops, count, error,
+                                         sizeof(error)) != 0;
+    dt295_routes_destroy(routes);
+    return rejected_paid;
+}
+
 int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
-                           const std::vector<unsigned> &order, unsigned initial_pmts,
-                           bool initial_gate)
+                           const std::vector<unsigned> &order, unsigned initial_pmts)
 {
     reset_stream(20);
     set_saved_schedule(mux, order, initial_pmts);
+    dt295_route_plan full_plan{};
+    CHECK(saved_cs_full_plan(mux, &full_plan));
+    CHECK(full_plan.primary_program == dt295_saved_cs_target(mux));
+    CHECK(dt295_primary_has_no_ecm_dependency(&full_plan));
+    CHECK(saved_plan_ecms(full_plan) == 3U);
+    CHECK(saved_cs_completion_policy_proof(mux));
+    {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        g_saved_full_plan = full_plan;
+    }
     Rig rig(assets);
     CHECK(rig.adapter.ready());
     CHECK_RESULT(rig.adapter.open(0U), "saved CS open");
@@ -611,43 +774,70 @@ int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
     const Attachment attachment = attachment_for(20U + static_cast<std::uint64_t>(mux), system);
     CHECK_RESULT(rig.adapter.attach(attachment), "saved CS attach");
 
-    if (initial_gate) {
-        CHECK(expect_terminal(
-            rig.adapter, attachment, Failure::multiple_ecm,
-            static_cast<std::uint8_t>(
-                dtv::userland::detail::StreamTerminal::bridge_fatal)));
-        CHECK(g_reprepare_calls.load(std::memory_order_acquire) == 0U);
-        CHECK(g_route_write_calls.load(std::memory_order_acquire) == 0U);
+    unsigned emitted = initial_pmts;
+    unsigned plan_started_emitted = 0U;
+    auto begin_completion_recording = [&] {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        g_saved_completed_plan = g_saved_reprepare_plan;
+        g_saved_completion_recording = true;
+    };
+    if (initial_pmts < 4U && order[0] != 0U) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        CHECK(rig.adapter.acquisition().phase == Phase::preparing);
+        CHECK(rig.adapter.acquisition().plan_generation == 0U);
     } else {
-        const bool reached_ready = wait_phase(rig.adapter, Phase::ready);
-        if (!reached_ready) {
-            const auto state = rig.adapter.acquisition();
-            std::fprintf(stderr, "saved CS initial state phase=%u failure=%u plan_generation=%u\n",
-                         static_cast<unsigned>(state.phase), static_cast<unsigned>(state.failure),
-                         static_cast<unsigned>(state.plan_generation));
-        }
-        CHECK(reached_ready);
-        CHECK(rig.adapter.acquisition().failure == Failure::none);
-        CHECK(rig.adapter.acquisition().plan_generation == 1U);
-        dt295_route_plan plan{};
-        {
-            std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
-            plan = g_saved_reprepare_plan;
-        }
-        const unsigned expected_primary = dt295_saved_cs_program(mux, order[0]);
-        CHECK(plan.has_primary && plan.primary_program == expected_primary);
-        CHECK(plan.missing_pmts == 4U - initial_pmts);
-        CHECK(saved_plan_ecms(plan) == (order[0] == 0U ? 0U : 1U));
-        const unsigned prior_writes = g_route_write_calls.load(std::memory_order_acquire);
+        CHECK(wait_phase(rig.adapter, Phase::ready));
+        plan_started_emitted = initial_pmts;
+        if (initial_pmts < 4U) begin_completion_recording();
+    }
+    while (emitted < order.size()) {
+        const unsigned before_writes = g_route_write_calls.load(std::memory_order_acquire);
         g_release_split.store(true, std::memory_order_release);
         for (unsigned wait = 0U; wait < 3000U &&
-             g_saved_pmts_emitted.load(std::memory_order_acquire) <= initial_pmts; ++wait)
+             g_saved_pmts_emitted.load(std::memory_order_acquire) <= emitted; ++wait)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        CHECK(g_saved_pmts_emitted.load(std::memory_order_acquire) == initial_pmts + 1U);
-        CHECK(expect_terminal(rig.adapter, attachment, Failure::plan,
-                             static_cast<std::uint8_t>(
-                                 dtv::userland::detail::StreamTerminal::bridge_fatal)));
-        CHECK(g_route_write_calls.load(std::memory_order_acquire) == prior_writes);
+        CHECK(g_saved_pmts_emitted.load(std::memory_order_acquire) == emitted + 1U);
+        ++emitted;
+        if (order[emitted - 1U] != 0U &&
+            rig.adapter.acquisition().plan_generation == 0U) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            CHECK(rig.adapter.acquisition().phase == Phase::preparing);
+        }
+        if (rig.adapter.acquisition().plan_generation == 0U)
+            continue;
+        if (plan_started_emitted == 0U) {
+            plan_started_emitted = emitted;
+            if (emitted < 4U) begin_completion_recording();
+        }
+        CHECK(wait_phase(rig.adapter, Phase::ready));
+        CHECK(rig.adapter.acquisition().failure == Failure::none);
+        if (emitted < 4U) {
+            for (unsigned wait = 0U; wait < 3000U &&
+                 g_route_write_calls.load(std::memory_order_acquire) <= before_writes; ++wait)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            CHECK(g_route_write_calls.load(std::memory_order_acquire) > before_writes);
+        }
+    }
+
+    CHECK(wait_phase(rig.adapter, Phase::ready));
+    if (plan_started_emitted == 0U) plan_started_emitted = emitted;
+    CHECK(rig.adapter.acquisition().failure == Failure::none);
+    CHECK(rig.adapter.acquisition().plan_generation == 1U);
+    dt295_route_plan plan{};
+    {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        plan = g_saved_reprepare_plan;
+    }
+    const unsigned target = dt295_saved_cs_target(mux);
+    CHECK(plan.has_primary && plan.primary_program == target);
+    CHECK(plan.missing_pmts == 4U - plan_started_emitted);
+    CHECK(dt295_primary_has_no_ecm_dependency(&plan));
+    CHECK(saved_plan_ecms(plan) == (plan_started_emitted == 4U ? 3U : 0U));
+    {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        g_saved_completion_recording = false;
+        CHECK(same_route_set(plan_started_emitted == 4U ? plan : g_saved_completed_plan,
+                             g_saved_full_plan));
     }
 
     CHECK_RESULT(rig.adapter.detach(attachment), "saved CS detach");
@@ -1202,6 +1392,23 @@ extern "C" int __wrap_dt295_route_write(dt295 *device, const dt295_route_op *op,
                                           char *error, std::size_t error_size)
 {
     g_route_write_calls.fetch_add(1U, std::memory_order_acq_rel);
+    if (g_mode.load(std::memory_order_acquire) == 20 && op != nullptr) {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        if (g_saved_completion_recording && op->enabled &&
+            op->slot < DT295_SLOT_COUNT && !g_saved_completed_plan.routes[op->slot].enabled) {
+            for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i) {
+                const auto &expected = g_saved_full_plan.routes[i];
+                if (!expected.enabled || expected.pid != op->pid) continue;
+                auto route = expected;
+                route.slot = op->slot;
+                route.ecm_slot = op->ecm_slot;
+                g_saved_completed_plan.routes[op->slot] = route;
+                if (route.is_ecm) g_saved_completed_plan.ecm_pid[op->slot] = route.pid;
+                ++g_saved_completed_plan.route_count;
+                break;
+            }
+        }
+    }
     if (op != nullptr && op->enabled && op->pid == 0x0300U)
         g_data_route_written.store(true, std::memory_order_release);
     if (op != nullptr && op->enabled && op->pid == 0x0301U)
@@ -1282,28 +1489,28 @@ int main(int argc, char **argv)
     CHECK(run("partial-start", [&] { return case_partial_start_and_late_pmt(assets); }));
     CHECK(run("primary-pmt-missing", [&] { return case_primary_pmt_missing(assets); }));
     CHECK(run("saved-cs08-same-read", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 4U, true);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 4U);
     }));
     CHECK(run("saved-cs08-free-first", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 1U, false);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 1U);
     }));
     CHECK(run("saved-cs08-paid-first", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 1U, false);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 1U);
     }));
     CHECK(run("saved-cs08-paid-multiple", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 2U, true);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 2U);
     }));
     CHECK(run("saved-cs22-same-read", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 4U, true);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 4U);
     }));
     CHECK(run("saved-cs22-free-first", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 1U, false);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 1U);
     }));
     CHECK(run("saved-cs22-paid-first", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 1U, false);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 1U);
     }));
     CHECK(run("saved-cs22-paid-multiple", [&] {
-        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 2U, true);
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 2U);
     }));
     CHECK(run("partial-completion", [&] { return case_partial_completion_policy(assets, 9); }));
     CHECK(run("codec-final-same-read", [&] { return case_partial_completion_policy(assets, 10); }));

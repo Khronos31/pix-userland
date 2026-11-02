@@ -51,6 +51,8 @@ typedef struct {
     uint16_t tsid;
     uint16_t program_count;
     dt295_pat_program programs[64];
+    uint8_t pmt_present[64], pmt_version[64];
+    uint8_t cat_version_valid, cat_version;
     uint16_t missing_pmts;
     uint8_t ready;
     uint32_t invalid_sections, continuity_errors, unsupported_tables;

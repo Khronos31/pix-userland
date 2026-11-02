@@ -594,6 +594,25 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->tsid = r->tsid;
     s->program_count = r->program_count;
     memcpy(s->programs, r->programs, r->program_count * sizeof(r->programs[0]));
+    for (unsigned i = 0; i < r->program_count; ++i) {
+        for (unsigned j = 0; j < TABLE_LIMIT; ++j) {
+            const table_state *t = &r->table[j];
+            if (t->used && t->tid == 2 && t->pid == r->programs[i].pmt_pid &&
+                t->ext == r->programs[i].program && t->committed.valid) {
+                s->pmt_present[i] = 1;
+                s->pmt_version[i] = t->committed.version;
+                break;
+            }
+        }
+    }
+    for (unsigned i = 0; i < TABLE_LIMIT; ++i) {
+        const table_state *t = &r->table[i];
+        if (t->used && t->tid == 1 && t->committed.valid) {
+            s->cat_version_valid = 1;
+            s->cat_version = t->committed.version;
+            break;
+        }
+    }
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
     s->ready = r->have_pat && s->missing_pmts == 0;
     s->invalid_sections = r->invalid_sections;
