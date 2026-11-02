@@ -680,6 +680,10 @@ int dt295_boot(dt295 *d, char *e, size_t en) {
     uint16_t s;
     if (word(d, 0x82008, &s))
         return fail(d, e, en, "cannot read DT295 firmware state");
+    const char *diagnostic = getenv("PIX_DT295_SETUP_DIAGNOSTICS");
+    if (diagnostic && strcmp(diagnostic, "1") == 0)
+        fprintf(stderr, "DT295_SETUP_DIAG mono_ms=%llu stage=boot.state value=%u\n",
+                (unsigned long long)now_ms(d), (unsigned)s);
     if (s == 0x10) {
         seterr(e, en, "");
         return 0;

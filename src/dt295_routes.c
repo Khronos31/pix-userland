@@ -2,6 +2,7 @@
 #include "dt295_routes.h"
 #include "transport.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,6 +178,55 @@ static pmt_info *pmt_for_program(dt295_routes *r, uint16_t program) {
         if (r->pmts[i].program == program)
             return &r->pmts[i];
     return NULL;
+}
+
+static int snapshot_append(char *out, size_t capacity, size_t *used, const char *format, ...) {
+    if (*used >= capacity)
+        return -1;
+    va_list args;
+    va_start(args, format);
+    int n = vsnprintf(out + *used, capacity - *used, format, args);
+    va_end(args);
+    if (n < 0 || (size_t)n >= capacity - *used)
+        return -1;
+    *used += (size_t)n;
+    return 0;
+}
+
+int dt295_routes_format_pmt_snapshot(const dt295_routes *r, char *out, size_t capacity) {
+    if (!r || !out || !capacity)
+        return -1;
+    size_t used = 0;
+    if (snapshot_append(out, capacity, &used, "["))
+        return -1;
+    for (unsigned i = 0; i < r->pmt_count; ++i) {
+        const pmt_info *p = &r->pmts[i];
+        if (snapshot_append(out, capacity, &used,
+                            "%s{\"program\":%u,\"pmt_pid\":%u,\"pcr_pid\":%u,"
+                            "\"program_ecm_pid\":%u,\"ca_pids\":[",
+                            i ? "," : "", (unsigned)p->program, (unsigned)p->pmt_pid,
+                            (unsigned)p->pcr_pid, (unsigned)p->program_ecm))
+            return -1;
+        for (unsigned j = 0; j < p->ca_count; ++j)
+            if (snapshot_append(out, capacity, &used, "%s%u", j ? "," : "",
+                                (unsigned)p->ca_pid[j]))
+                return -1;
+        if (snapshot_append(out, capacity, &used, "],\"streams\":["))
+            return -1;
+        for (unsigned j = 0; j < p->streams; ++j) {
+            const pmt_stream *s = &p->stream[j];
+            if (snapshot_append(out, capacity, &used,
+                                "%s{\"pid\":%u,\"stream_type\":%u,\"ecm_pid\":%u}",
+                                j ? "," : "", (unsigned)s->pid, (unsigned)s->type,
+                                (unsigned)s->ecm_pid))
+                return -1;
+        }
+        if (snapshot_append(out, capacity, &used, "]}"))
+            return -1;
+    }
+    if (snapshot_append(out, capacity, &used, "]"))
+        return -1;
+    return 0;
 }
 
 static int parse_pat(dt295_routes *r, const section_set *s, uint16_t tsid) {
