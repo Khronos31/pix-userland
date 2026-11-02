@@ -16,6 +16,7 @@ uint16_t dt295_saved_cs_target(int mux);
 uint16_t dt295_saved_cs_program(int mux, unsigned pmt_index);
 int dt295_saved_cs_packet(int mux, unsigned index, uint8_t packet[188]);
 int dt295_saved_cs_primary_ca_packet(int mux, uint8_t packet[188]);
+int dt295_saved_cs_pmt_ecm_update_packet(int mux, uint8_t packet[188]);
 
 #ifdef __cplusplus
 }

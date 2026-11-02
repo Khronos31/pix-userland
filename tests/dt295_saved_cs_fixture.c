@@ -111,3 +111,30 @@ int dt295_saved_cs_primary_ca_packet(int mux, uint8_t packet[188])
     section[updated_length - 1u] = (uint8_t)crc;
     return 0;
 }
+
+int dt295_saved_cs_pmt_ecm_update_packet(int mux, uint8_t packet[188])
+{
+    if (dt295_saved_cs_packet(mux, 3u, packet) != 0)
+        return -1;
+    packet[3] = (uint8_t)((packet[3] & 0xf0u) | 1u);
+    uint8_t *section = packet + 5u;
+    const size_t length = 3u + (((size_t)section[1] & 0x0fu) << 8) + section[2];
+    const uint8_t added[] = {0x06, 0xe7, 0x10, 0xf0, 0x06, 0x09, 0x04,
+                             0x00, 0x05, 0xe7, 0x11};
+    if (length + sizeof(added) > 183u)
+        return -1;
+    memmove(section + length - 4u + sizeof(added), section + length - 4u, 4u);
+    memcpy(section + length - 4u, added, sizeof(added));
+    const size_t updated_length = length + sizeof(added);
+    const size_t section_length = updated_length - 3u;
+    const uint8_t version = (uint8_t)(((section[5] >> 1) + 1u) & 31u);
+    section[1] = (uint8_t)((section[1] & 0xf0u) | ((section_length >> 8) & 0x0fu));
+    section[2] = (uint8_t)section_length;
+    section[5] = (uint8_t)((section[5] & 0xc1u) | (version << 1));
+    const uint32_t crc = mpeg_crc(section, updated_length - 4u);
+    section[updated_length - 4u] = (uint8_t)(crc >> 24);
+    section[updated_length - 3u] = (uint8_t)(crc >> 16);
+    section[updated_length - 2u] = (uint8_t)(crc >> 8);
+    section[updated_length - 1u] = (uint8_t)crc;
+    return 0;
+}

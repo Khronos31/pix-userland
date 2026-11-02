@@ -78,6 +78,9 @@ std::vector<unsigned> g_saved_order;
 unsigned g_saved_initial_pmts = 0U;
 unsigned g_saved_next_pmt = 0U;
 bool g_saved_initial_sent = false;
+bool g_saved_primary_ca = false;
+bool g_saved_pmt_ecm_update = false;
+std::atomic<bool> g_saved_pmt_update_sent{false};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
     std::atomic<std::uint64_t> offset_ms{0U};
@@ -164,6 +167,9 @@ void reset_stream(int mode)
         g_saved_completion_recording = false;
     }
     g_saved_initial_sent = false;
+    g_saved_primary_ca = false;
+    g_saved_pmt_ecm_update = false;
+    g_saved_pmt_update_sent.store(false, std::memory_order_release);
     g_saved_next_pmt = 0U;
     g_bootstrap_sent = false;
     g_split_phase = 0;
@@ -825,6 +831,78 @@ bool saved_cs_primary_dependency_proof(int mux)
     return accepted && private_binding && ecm_route;
 }
 
+int case_saved_cs_primary_dependency_adapter(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(20);
+    set_saved_schedule(DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 4U);
+    g_saved_primary_ca = true;
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "saved CA primary open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::satellite,
+                                         1049480000ULL, 1000U), "saved CA primary tune");
+    CHECK_RESULT(rig.adapter.select_satellite_tsid(0U, 24704U, 1000U),
+                 "saved CA primary TSID");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::satellite),
+                 "saved CA primary start");
+    const Attachment attachment = attachment_for(31U, ReceiverSystem::satellite);
+    CHECK_RESULT(rig.adapter.attach(attachment), "saved CA primary attach");
+    CHECK(expect_terminal(rig.adapter, attachment, Failure::multiple_ecm,
+                          static_cast<std::uint8_t>(
+                              dtv::userland::detail::StreamTerminal::bridge_fatal)));
+    CHECK(g_route_write_calls.load(std::memory_order_acquire) == 0U);
+    CHECK(g_reprepare_calls.load(std::memory_order_acquire) == 0U);
+    (void)rig.adapter.detach(attachment);
+    (void)rig.adapter.stop_capture(0U, ReceiverSystem::satellite);
+    CHECK_RESULT(rig.adapter.close(0U), "saved CA primary close");
+    return 0;
+}
+
+int case_saved_cs_repeat_pmt_update_adapter(const std::vector<std::uint8_t> &assets)
+{
+    reset_stream(20);
+    set_saved_schedule(DT295_SAVED_CS08, {0U, 1U}, 1U);
+    g_saved_pmt_ecm_update = true;
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "saved PMT update open");
+    CHECK_RESULT(rig.adapter.program_hz(0U, ReceiverSystem::satellite,
+                                         1049480000ULL, 1000U), "saved PMT update tune");
+    CHECK_RESULT(rig.adapter.select_satellite_tsid(0U, 24704U, 1000U),
+                 "saved PMT update TSID");
+    CHECK_RESULT(rig.adapter.start_capture(0U, ReceiverSystem::satellite),
+                 "saved PMT update start");
+    const Attachment attachment = attachment_for(32U, ReceiverSystem::satellite);
+    CHECK_RESULT(rig.adapter.attach(attachment), "saved PMT update attach");
+    CHECK(wait_phase(rig.adapter, Phase::ready));
+    const unsigned before_completion = g_route_write_calls.load(std::memory_order_acquire);
+    g_release_split.store(true, std::memory_order_release);
+    for (unsigned wait = 0U; wait < 3000U &&
+         g_saved_pmts_emitted.load(std::memory_order_acquire) < 2U; ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_saved_pmts_emitted.load(std::memory_order_acquire) == 2U);
+    for (unsigned wait = 0U; wait < 3000U &&
+         g_route_write_calls.load(std::memory_order_acquire) == before_completion; ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_route_write_calls.load(std::memory_order_acquire) > before_completion);
+    const unsigned after_completion = g_route_write_calls.load(std::memory_order_acquire);
+    g_release_split.store(true, std::memory_order_release);
+    for (unsigned wait = 0U; wait < 3000U &&
+         !g_saved_pmt_update_sent.load(std::memory_order_acquire); ++wait)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(g_saved_pmt_update_sent.load(std::memory_order_acquire));
+    CHECK(wait_phase(rig.adapter, Phase::terminal));
+    CHECK(rig.adapter.acquisition().failure == Failure::plan);
+    const auto final = rig.adapter.final_snapshot(attachment);
+    CHECK(final && final.value().terminal == static_cast<std::uint8_t>(
+        dtv::userland::detail::StreamTerminal::bridge_fatal));
+    CHECK(g_route_write_calls.load(std::memory_order_acquire) == after_completion);
+    (void)rig.adapter.detach(attachment);
+    (void)rig.adapter.stop_capture(0U, ReceiverSystem::satellite);
+    CHECK_RESULT(rig.adapter.close(0U), "saved PMT update close");
+    return 0;
+}
+
 int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
                            const std::vector<unsigned> &order, unsigned initial_pmts)
 {
@@ -1349,7 +1427,10 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     if (mode == 20) {
         auto append_saved = [&](unsigned index) {
             std::uint8_t packet[188];
-            if (dt295_saved_cs_packet(g_saved_mux, index, packet) != 0) return false;
+            const int packet_result = g_saved_primary_ca && index == 2U
+                ? dt295_saved_cs_primary_ca_packet(g_saved_mux, packet)
+                : dt295_saved_cs_packet(g_saved_mux, index, packet);
+            if (packet_result != 0) return false;
             dt295_actual_fixture_encrypt(packet);
             std::memcpy(output + length, packet, sizeof(packet));
             length += sizeof(packet);
@@ -1373,6 +1454,21 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
             ++g_saved_next_pmt;
             g_saved_pmts_emitted.store(static_cast<unsigned>(g_saved_next_pmt),
                                        std::memory_order_release);
+            *sequence += length / 188U;
+            *completed_ns = 1U;
+            return static_cast<int>(length);
+        }
+        if (g_saved_pmt_ecm_update &&
+            g_saved_next_pmt >= g_saved_order.size() &&
+            !g_saved_pmt_update_sent.load(std::memory_order_acquire) &&
+            g_release_split.exchange(false, std::memory_order_acq_rel)) {
+            std::uint8_t packet[188];
+            if (dt295_saved_cs_pmt_ecm_update_packet(g_saved_mux, packet) != 0)
+                return LIBUSB_ERROR_IO;
+            dt295_actual_fixture_encrypt(packet);
+            std::memcpy(output + length, packet, sizeof(packet));
+            length += sizeof(packet);
+            g_saved_pmt_update_sent.store(true, std::memory_order_release);
             *sequence += length / 188U;
             *completed_ns = 1U;
             return static_cast<int>(length);
@@ -1569,6 +1665,12 @@ int main(int argc, char **argv)
     CHECK(run("primary-pmt-missing", [&] { return case_primary_pmt_missing(assets); }));
     CHECK(run("saved-cs08-same-read", [&] {
         return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 4U);
+    }));
+    CHECK(run("saved-cs08-dependent-primary", [&] {
+        return case_saved_cs_primary_dependency_adapter(assets);
+    }));
+    CHECK(run("saved-cs08-repeat-pmt-update", [&] {
+        return case_saved_cs_repeat_pmt_update_adapter(assets);
     }));
     CHECK(run("saved-cs08-free-first", [&] {
         return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 1U);
