@@ -209,6 +209,28 @@ static void feed_pat(dt295_routes *r, unsigned ver, unsigned sn, unsigned last, 
     size_t n = make_pat(b, ver, sn, last, program, pid);
     feed_section(r, 0, b, n);
 }
+static void feed_pat_tsid(dt295_routes *r, uint16_t tsid, unsigned ver,
+                          uint16_t program, uint16_t pid) {
+    uint8_t b[TEST_SECTION_MAX];
+    uint8_t entry[4] = {(uint8_t)(program >> 8), (uint8_t)program,
+                        (uint8_t)(0xe0 | (pid >> 8)), (uint8_t)pid};
+    size_t n = make_table(b, 0, tsid, ver, 0, 0, entry, sizeof(entry));
+    feed_section(r, 0, b, n);
+}
+static void test_pat_generation_survives_tsid_revisit(void) {
+    memset(continuity, 0, sizeof(continuity));
+    dt295_routes *r = dt295_routes_create();
+    assert(r);
+    dt295_routes_snapshot s;
+    feed_pat_tsid(r, 0x1234, 15, 55, 0x100);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.tsid == 0x1234 && s.pat_generation == 1);
+    feed_pat_tsid(r, 0x1235, 15, 55, 0x100);
+    feed_pat_tsid(r, 0x1234, 16, 55, 0x100);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.tsid == 0x1234 && s.pat_generation == 3);
+    dt295_routes_destroy(r);
+}
 static void bootstrap(dt295_routes *r, dt295_route_plan *live) {
     char error[DT295_ROUTE_ERROR];
     dt295_route_plan plan, candidate;
@@ -627,6 +649,7 @@ static void test_ca_override(void) {
 }
 
 int main(void) {
+    test_pat_generation_survives_tsid_revisit();
     test_ca_override();
     test_readiness_without_cat();
     test_completeness_versions_and_planning();

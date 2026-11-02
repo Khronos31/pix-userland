@@ -138,3 +138,22 @@ int dt295_saved_cs_pmt_ecm_update_packet(int mux, uint8_t packet[188])
     section[updated_length - 1u] = (uint8_t)crc;
     return 0;
 }
+
+int dt295_saved_cs_pat_update_packet(int mux, uint16_t tsid, uint8_t version,
+                                     uint8_t continuity, uint8_t packet[188])
+{
+    if (dt295_saved_cs_packet(mux, 0u, packet) != 0)
+        return -1;
+    packet[3] = (uint8_t)((packet[3] & 0xf0u) | (continuity & 0x0fu));
+    uint8_t *section = packet + 5u;
+    const size_t length = 3u + (((size_t)section[1] & 0x0fu) << 8) + section[2];
+    section[3] = (uint8_t)(tsid >> 8);
+    section[4] = (uint8_t)tsid;
+    section[5] = (uint8_t)((section[5] & 0xc1u) | ((version & 31u) << 1));
+    const uint32_t crc = mpeg_crc(section, length - 4u);
+    section[length - 4u] = (uint8_t)(crc >> 24);
+    section[length - 3u] = (uint8_t)(crc >> 16);
+    section[length - 2u] = (uint8_t)(crc >> 8);
+    section[length - 1u] = (uint8_t)crc;
+    return 0;
+}

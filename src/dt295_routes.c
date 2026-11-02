@@ -55,6 +55,7 @@ struct dt295_routes {
     dt295_pat_program programs[64];
     uint16_t program_count, tsid;
     uint8_t have_pat, have_cat, satellite;
+    uint32_t pat_generation, cat_generation;
     pmt_info pmts[64];
     uint16_t pmt_count;
     uint16_t network_pid[64];
@@ -389,6 +390,10 @@ static void apply_complete(dt295_routes *r, table_state *t) {
     t->committed = t->pending;
     t->committed.valid = 1;
     t->generation++;
+    if (t->tid == 0)
+        r->pat_generation++;
+    else if (t->tid == 1)
+        r->cat_generation++;
     memset(&t->pending, 0, sizeof(t->pending));
 }
 
@@ -594,6 +599,8 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->have_pat = r->have_pat;
     s->have_cat = r->have_cat;
     s->tsid = r->tsid;
+    s->pat_generation = r->pat_generation;
+    s->cat_generation = r->cat_generation;
     s->program_count = r->program_count;
     memcpy(s->programs, r->programs, r->program_count * sizeof(r->programs[0]));
     for (unsigned i = 0; i < r->program_count; ++i) {
@@ -613,10 +620,7 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
         if (t->used && t->tid == 1 && t->committed.valid) {
             s->cat_version_valid = 1;
             s->cat_version = t->committed.version;
-            s->cat_generation = t->generation;
         }
-        if (t->used && t->tid == 0 && t->committed.valid)
-            s->pat_generation = t->generation;
     }
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
     s->ready = r->have_pat && s->missing_pmts == 0;

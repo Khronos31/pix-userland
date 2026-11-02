@@ -80,6 +80,7 @@ unsigned g_saved_next_pmt = 0U;
 bool g_saved_initial_sent = false;
 bool g_saved_primary_ca = false;
 bool g_saved_pmt_ecm_update = false;
+bool g_saved_identity_roundtrip = false;
 std::atomic<bool> g_saved_pmt_update_sent{false};
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
@@ -169,6 +170,7 @@ void reset_stream(int mode)
     g_saved_initial_sent = false;
     g_saved_primary_ca = false;
     g_saved_pmt_ecm_update = false;
+    g_saved_identity_roundtrip = false;
     g_saved_pmt_update_sent.store(false, std::memory_order_release);
     g_saved_next_pmt = 0U;
     g_bootstrap_sent = false;
@@ -858,11 +860,13 @@ int case_saved_cs_primary_dependency_adapter(const std::vector<std::uint8_t> &as
     return 0;
 }
 
-int case_saved_cs_repeat_pmt_update_adapter(const std::vector<std::uint8_t> &assets)
+int case_saved_cs_repeat_pmt_update_adapter(const std::vector<std::uint8_t> &assets,
+                                             bool identity_roundtrip)
 {
     reset_stream(20);
     set_saved_schedule(DT295_SAVED_CS08, {0U, 1U}, 1U);
     g_saved_pmt_ecm_update = true;
+    g_saved_identity_roundtrip = identity_roundtrip;
     Rig rig(assets);
     CHECK(rig.adapter.ready());
     CHECK_RESULT(rig.adapter.open(0U), "saved PMT update open");
@@ -1462,15 +1466,38 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
             g_saved_next_pmt >= g_saved_order.size() &&
             !g_saved_pmt_update_sent.load(std::memory_order_acquire) &&
             g_release_split.exchange(false, std::memory_order_acq_rel)) {
+            auto append_packet = [&](uint8_t packet[188]) {
+                dt295_actual_fixture_encrypt(packet);
+                std::memcpy(output + length, packet, 188U);
+                length += 188U;
+            };
             std::uint8_t packet[188];
-            if (dt295_saved_cs_pmt_ecm_update_packet(g_saved_mux, packet) != 0)
-                return LIBUSB_ERROR_IO;
-            dt295_actual_fixture_encrypt(packet);
-            std::memcpy(output + length, packet, sizeof(packet));
-            length += sizeof(packet);
-            g_saved_pmt_update_sent.store(true, std::memory_order_release);
+            if (g_saved_identity_roundtrip) {
+                if (dt295_saved_cs_pat_update_packet(g_saved_mux, 24705U, 15U, 1U,
+                                                      packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+                if (dt295_saved_cs_pat_update_packet(g_saved_mux, 24704U, 16U, 2U,
+                                                      packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+                if (dt295_saved_cs_packet(g_saved_mux, 1U, packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+                if (dt295_saved_cs_packet(g_saved_mux, 2U, packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+                if (dt295_saved_cs_pmt_ecm_update_packet(g_saved_mux, packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+            } else {
+                if (dt295_saved_cs_pmt_ecm_update_packet(g_saved_mux, packet) != 0)
+                    return LIBUSB_ERROR_IO;
+                append_packet(packet);
+            }
             *sequence += length / 188U;
             *completed_ns = 1U;
+            g_saved_pmt_update_sent.store(true, std::memory_order_release);
             return static_cast<int>(length);
         }
         if (g_saved_next_pmt < g_saved_order.size()) return 0;
@@ -1670,7 +1697,10 @@ int main(int argc, char **argv)
         return case_saved_cs_primary_dependency_adapter(assets);
     }));
     CHECK(run("saved-cs08-repeat-pmt-update", [&] {
-        return case_saved_cs_repeat_pmt_update_adapter(assets);
+        return case_saved_cs_repeat_pmt_update_adapter(assets, false);
+    }));
+    CHECK(run("saved-cs08-tsid-return-pmt-update", [&] {
+        return case_saved_cs_repeat_pmt_update_adapter(assets, true);
     }));
     CHECK(run("saved-cs08-free-first", [&] {
         return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 1U);
