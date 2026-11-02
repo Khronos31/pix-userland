@@ -703,9 +703,13 @@ bool saved_cs_completion_policy_proof(int mux)
     }
     if (accepted) {
         const std::uint16_t paid_program = dt295_saved_cs_program(mux, 3U);
+        dt295_route_plan free_full{};
         accepted = dt295_routes_build(routes, paid_program, nullptr, &paid_full, error) == 0 &&
+                   dt295_routes_build(routes, 0U, nullptr, &free_full, error) == 0 &&
                    saved_plan_ecms(paid_full) > 1U &&
-                   !dt295_initial_ecm_gate_allowed(&paid_full);
+                   !dt295_initial_ecm_gate_allowed(&paid_full, 0U) &&
+                   dt295_initial_ecm_gate_allowed(&free_full, 0U) &&
+                   !dt295_initial_ecm_gate_allowed(&free_full, 1U);
     }
     dt295_routes_destroy(routes);
     if (!accepted) return false;

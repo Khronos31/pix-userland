@@ -44,14 +44,16 @@ int dt295_primary_has_no_ecm_dependency(const dt295_route_plan *plan) {
     return av_routes != 0;
 }
 
-int dt295_initial_ecm_gate_allowed(const dt295_route_plan *plan) {
+int dt295_initial_ecm_gate_allowed(const dt295_route_plan *plan,
+                                   uint32_t invalid_sections) {
     if (!plan)
         return 0;
     unsigned ecms = 0;
     for (unsigned i = 0; i < DT295_SLOT_COUNT; ++i)
         if (plan->routes[i].enabled && plan->routes[i].is_ecm)
             ecms++;
-    return ecms <= 1 || dt295_primary_has_no_ecm_dependency(plan);
+    return ecms <= 1 || (!invalid_sections &&
+                         dt295_primary_has_no_ecm_dependency(plan));
 }
 
 static int same_plan_route(const dt295_route *left, const dt295_route *right) {

@@ -1204,7 +1204,7 @@ void ReceiverAdapter::pump() noexcept
                     primary_order_resolved(snapshot, plan.primary_program);
                 if (plan.has_primary && primary_order_ready) {
                     if (!plan_started_) {
-                        if (!dt295_initial_ecm_gate_allowed(&plan)) {
+                        if (!dt295_initial_ecm_gate_allowed(&plan, snapshot.invalid_sections)) {
                             fail_acquisition(AcquisitionFailure::multiple_ecm,
                                              dtv::userland::detail::StreamTerminal::bridge_fatal,
                                              Error::UNSUPPORTED);
