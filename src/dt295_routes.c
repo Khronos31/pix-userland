@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
     uint8_t tid, used;
     uint16_t pid, ext;
+    uint32_t generation;
     section_set committed, pending;
     uint8_t previous_version, have_previous;
 } table_state;
@@ -54,6 +55,7 @@ struct dt295_routes {
     dt295_pat_program programs[64];
     uint16_t program_count, tsid;
     uint8_t have_pat, have_cat, satellite;
+    uint32_t pat_generation, cat_generation;
     pmt_info pmts[64];
     uint16_t pmt_count;
     uint16_t network_pid[64];
@@ -387,6 +389,11 @@ static void apply_complete(dt295_routes *r, table_state *t) {
     t->have_previous = t->committed.valid;
     t->committed = t->pending;
     t->committed.valid = 1;
+    t->generation++;
+    if (t->tid == 0)
+        r->pat_generation++;
+    else if (t->tid == 1)
+        r->cat_generation++;
     memset(&t->pending, 0, sizeof(t->pending));
 }
 
@@ -592,8 +599,29 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->have_pat = r->have_pat;
     s->have_cat = r->have_cat;
     s->tsid = r->tsid;
+    s->pat_generation = r->pat_generation;
+    s->cat_generation = r->cat_generation;
     s->program_count = r->program_count;
     memcpy(s->programs, r->programs, r->program_count * sizeof(r->programs[0]));
+    for (unsigned i = 0; i < r->program_count; ++i) {
+        for (unsigned j = 0; j < TABLE_LIMIT; ++j) {
+            const table_state *t = &r->table[j];
+            if (t->used && t->tid == 2 && t->pid == r->programs[i].pmt_pid &&
+                t->ext == r->programs[i].program && t->committed.valid) {
+                s->pmt_present[i] = 1;
+                s->pmt_version[i] = t->committed.version;
+                s->pmt_generation[i] = t->generation;
+                break;
+            }
+        }
+    }
+    for (unsigned i = 0; i < TABLE_LIMIT; ++i) {
+        const table_state *t = &r->table[i];
+        if (t->used && t->tid == 1 && t->committed.valid) {
+            s->cat_version_valid = 1;
+            s->cat_version = t->committed.version;
+        }
+    }
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
     s->ready = r->have_pat && s->missing_pmts == 0;
     s->invalid_sections = r->invalid_sections;
@@ -925,6 +953,10 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
     }
     /* Dedicated roles are logical aliases; a shared PID gets one hardware slot. */
     if (primary_pmt) {
+        p.primary_has_ecm_dependency = primary_pmt->program_ecm != 0;
+        for (unsigned i = 0; i < primary_pmt->streams; ++i)
+            if (primary_pmt->stream[i].ecm_pid)
+                p.primary_has_ecm_dependency = 1;
         uint16_t vp = 0, ap = 0;
         uint8_t vt = 0, at = 0;
         for (unsigned i = 0; i < primary_pmt->streams; ++i) {

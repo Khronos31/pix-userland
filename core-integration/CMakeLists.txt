@@ -197,7 +197,8 @@ add_test(NAME pix_dt295_stream_retirement_destructor
 
 add_executable(pix_dt295_acquisition_proof
     "${PIX_SOURCE_DIR}/tests/pix_dt295_acquisition_proof.cpp"
-    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c"
+    "${PIX_SOURCE_DIR}/tests/dt295_saved_cs_fixture.c")
 target_include_directories(pix_dt295_acquisition_proof PRIVATE
     "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
     "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")

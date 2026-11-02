@@ -46,6 +46,16 @@ std::uint64_t center_for_channel(unsigned channel) noexcept
     return kFirstCenterHz + (channel - kFirstChannel) * kChannelSpacingHz;
 }
 
+bool primary_order_resolved(const dt295_routes_snapshot& snapshot,
+                            std::uint16_t primary) noexcept
+{
+    for (unsigned i = 0U; i < snapshot.program_count; ++i) {
+        if (snapshot.programs[i].program == primary) return true;
+        if (!snapshot.pmt_present[i]) return false;
+    }
+    return true;
+}
+
 bool same_identity(const dtv::userland::detail::Attachment& left,
                    const dtv::userland::detail::Attachment& right) noexcept
 {
@@ -458,6 +468,8 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
     plan_started_ = false;
     plan_tsid_valid_ = false;
     plan_tsid_ = 0U;
+    plan_initial_snapshot_valid_ = false;
+    plan_initial_snapshot_ = {};
     std::memset(&live_, 0, sizeof(live_));
     dt295_routes_reset(routes_);
     dt295_routes_set_satellite(routes_, system == ReceiverSystem::satellite ? 1 : 0);
@@ -821,7 +833,8 @@ ReceiverAdapter::Result ReceiverAdapter::start_stream_unlocked() noexcept
 }
 
 ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
-    dt295_route_plan* current, const dt295_route_plan* desired, bool live_policy) noexcept
+    dt295_route_plan* current, const dt295_route_plan* desired, bool live_policy,
+    const dt295_routes_snapshot* snapshot) noexcept
 {
     if (current == nullptr || desired == nullptr || device_ == nullptr)
         return Result::failure(Error::DISCONNECTED);
@@ -834,8 +847,13 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
     char policy_error[256]{};
     if (live_policy &&
         live_additions_only(current, &effective, ops, count, policy_error,
-                            sizeof(policy_error)) != 0)
+                            sizeof(policy_error)) != 0 &&
+        (plan_complete_ || !plan_initial_snapshot_valid_ || snapshot == nullptr ||
+         live_initial_pmt_completion_only(&plan_initial_snapshot_, snapshot, current,
+                                          &effective, ops, count, policy_error,
+                                          sizeof(policy_error)) != 0)) {
         return Result::failure(Error::UNSUPPORTED);
+    }
     if (!live_policy && count == 0U) return Result::success();
     dt295_route_plan candidate{};
     if (dt295_routes_guard(current, ops, count, &candidate, route_error) != 0)
@@ -852,6 +870,7 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
     candidate.has_primary = effective.has_primary;
     candidate.video_stream_type = effective.video_stream_type;
     candidate.audio_stream_type = effective.audio_stream_type;
+    candidate.primary_has_ecm_dependency = effective.primary_has_ecm_dependency;
     std::memcpy(candidate.dedicated_pid, effective.dedicated_pid,
                 sizeof(candidate.dedicated_pid));
     dt295_routes_commit(current, &candidate);
@@ -887,6 +906,8 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     plan_started_ = false;
     plan_tsid_valid_ = false;
     plan_tsid_ = 0U;
+    plan_initial_snapshot_valid_ = false;
+    plan_initial_snapshot_ = {};
     pump_error_.store(0, std::memory_order_release);
     deadline_timeout_pending_.store(false, std::memory_order_release);
     {
@@ -1179,12 +1200,12 @@ void ReceiverAdapter::pump() noexcept
                                      Error::INTERNAL);
                     break;
                 }
-                if (plan.has_primary) {
+                const bool primary_order_ready =
+                    !plan.has_primary || plan_started_ || snapshot.ready ||
+                    primary_order_resolved(snapshot, plan.primary_program);
+                if (plan.has_primary && primary_order_ready) {
                     if (!plan_started_) {
-                        unsigned ecms = 0U;
-                        for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
-                            if (plan.routes[i].enabled && plan.routes[i].is_ecm) ++ecms;
-                        if (ecms > 1U) {
+                        if (!dt295_initial_ecm_gate_allowed(&plan, snapshot.invalid_sections)) {
                             fail_acquisition(AcquisitionFailure::multiple_ecm,
                                              dtv::userland::detail::StreamTerminal::bridge_fatal,
                                              Error::UNSUPPORTED);
@@ -1252,6 +1273,8 @@ void ReceiverAdapter::pump() noexcept
                             plan_complete_ = snapshot.ready;
                             plan_tsid_ = snapshot.tsid;
                             plan_tsid_valid_ = snapshot.have_pat;
+                            plan_initial_snapshot_ = snapshot;
+                            plan_initial_snapshot_valid_ = !snapshot.ready;
                             residue.clear();
                             plan_generation_.fetch_add(1U, std::memory_order_acq_rel);
                             acquisition_phase_.store(AcquisitionPhase::ready,
@@ -1265,7 +1288,7 @@ void ReceiverAdapter::pump() noexcept
                         Result applied = Result::success();
                         {
                             std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                            applied = apply_plan_unlocked(&live_, &plan, true);
+                            applied = apply_plan_unlocked(&live_, &plan, true, &snapshot);
                         }
                         if (!applied) {
                             fail_acquisition(applied.error() == Error::UNSUPPORTED
@@ -1279,6 +1302,7 @@ void ReceiverAdapter::pump() noexcept
                         }
                         if (snapshot.ready && !plan_complete_) {
                             plan_complete_ = true;
+                            plan_initial_snapshot_valid_ = false;
                             std::fprintf(stderr,
                                          "DT295 acquisition plan complete: missing_pmts=%u\n",
                                          static_cast<unsigned>(plan.missing_pmts));
