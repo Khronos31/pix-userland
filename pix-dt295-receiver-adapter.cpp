@@ -389,28 +389,51 @@ ReceiverAdapter::Result ReceiverAdapter::configure(Engine& engine, ReceiverId re
 ReceiverAdapter::Result ReceiverAdapter::open(ReceiverId receiver) noexcept
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
-    if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
-    if (init_error_ != Error::OK) return Result::failure(init_error_);
-    if (recovery_failed_) return Result::failure(Error::USB_IO);
-    if (opened_) return Result::failure(Error::BUSY);
+    log_setup_stage("open.begin", recovery_failed_, 0);
+    if (!matches(receiver)) {
+        log_setup_stage("open.reject_receiver", recovery_failed_, static_cast<int>(Error::INVALID_ARGUMENT));
+        return Result::failure(Error::INVALID_ARGUMENT);
+    }
+    if (init_error_ != Error::OK) {
+        log_setup_stage("open.reject_init", recovery_failed_, static_cast<int>(init_error_));
+        return Result::failure(init_error_);
+    }
+    if (recovery_failed_) {
+        log_setup_stage("open.reject_recovery", recovery_failed_, static_cast<int>(Error::USB_IO));
+        return Result::failure(Error::USB_IO);
+    }
+    if (opened_) {
+        log_setup_stage("open.reject_opened", recovery_failed_, static_cast<int>(Error::BUSY));
+        return Result::failure(Error::BUSY);
+    }
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     dt295_card_invalidate_observation(device_);
     char error[256]{};
-    if (!dt295_has_session(device_)) {
-        if (dt295_boot(device_, error, sizeof(error)) != 0) {
+    const int has_session = dt295_has_session(device_) ? 1 : 0;
+    log_setup_stage("open.session_present", recovery_failed_, has_session);
+    if (has_session == 0) {
+        const int boot_result = dt295_boot(device_, error, sizeof(error));
+        log_setup_stage("open.boot", recovery_failed_, boot_result, error);
+        if (boot_result != 0) {
             dt295_card_invalidate_observation(device_);
             return Result::failure(Error::USB_IO);
         }
-        if (dt295_open_session(device_, error, sizeof(error)) != 0) {
+        const int session_result = dt295_open_session(device_, error, sizeof(error));
+        log_setup_stage("open.open_session", recovery_failed_, session_result, error);
+        if (session_result != 0) {
             dt295_card_invalidate_observation(device_);
             return Result::failure(Error::USB_IO);
         }
     }
-    if (dt295_card_initialize(device_, error, sizeof(error)) != 0) {
+    const int card_initialize_result = dt295_card_initialize(device_, error, sizeof(error));
+    log_setup_stage("open.card_initialize", recovery_failed_, card_initialize_result, error);
+    if (card_initialize_result != 0) {
         dt295_card_invalidate_observation(device_);
         return Result::failure(Error::NO_CARD);
     }
-    if (dt295_card_activate(device_, 2000U, error, sizeof(error)) != 0) {
+    const int card_activate_result = dt295_card_activate(device_, 2000U, error, sizeof(error));
+    log_setup_stage("open.card_activate", recovery_failed_, card_activate_result, error);
+    if (card_activate_result != 0) {
         dt295_card_invalidate_observation(device_);
         return Result::failure(Error::NO_CARD);
     }
@@ -422,6 +445,7 @@ ReceiverAdapter::Result ReceiverAdapter::open(ReceiverId receiver) noexcept
         plan_generation_.store(0U, std::memory_order_release);
     }
     session_ended_ = false;
+    log_setup_stage("open.ready", recovery_failed_, static_cast<int>(Error::OK));
     return Result::success();
 }
 
@@ -900,7 +924,8 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     if (device_start != 0)
         return Result::failure(Error::USB_IO);
     const auto started = start_stream_unlocked();
-    log_setup_stage("ensure_streaming.stream_start", recovery_failed_, started ? 0 : 1);
+    log_setup_stage("ensure_streaming.stream_start", recovery_failed_,
+                    started ? static_cast<int>(Error::OK) : static_cast<int>(started.error()));
     if (!started) {
         size_t drained = 0U;
         (void)dt295_stop(device_, &drained, error, sizeof(error));
