@@ -645,6 +645,17 @@ ReceiverAdapter::Result ReceiverAdapter::close(ReceiverId receiver) noexcept
     {
         std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
         dt295_card_invalidate_observation(device_);
+        // A closed receiver has no pump to renew its authenticated session.
+        // Return to unauthenticated idle so the next open authenticates again.
+        if (!recovery_failed_ && device_ != nullptr && dt295_has_session(device_)) {
+            char error[256]{};
+            if (dt295_shutdown(device_, error, sizeof(error)) != 0) {
+                recovery_failed_ = true;
+                std::fprintf(stderr, "DT295 close session shutdown failed: %s\n", error);
+                return Result::failure(Error::USB_IO);
+            }
+            key_retained_ = false;
+        }
         opened_ = false;
     }
     satellite_tuned_ = false;
@@ -1398,9 +1409,7 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
             return Result::failure(Error::INTERNAL);
         pump_joinable_ = false;
     }
-    const bool deadline_timeout_pending =
-        deadline_timeout_pending_.exchange(false, std::memory_order_acq_rel);
-    const int pump_error = pump_error_.load(std::memory_order_acquire);
+    (void)deadline_timeout_pending_.exchange(false, std::memory_order_acq_rel);
     const auto stopped = stop_receiver_unlocked();
     stream_attached_ = false;
     normal_capture_active_ = false;
@@ -1414,10 +1423,8 @@ ReceiverAdapter::Result ReceiverAdapter::stop_attached(const Attachment& attachm
         }
     }
     if (!stopped) return stopped;
-    if (pump_error != 0 && pump_error != static_cast<int>(Error::OK) &&
-        !(deadline_timeout_pending &&
-          pump_error == static_cast<int>(Error::TIMEOUT)))
-        return Result::failure(static_cast<Error>(pump_error));
+    // The stream terminal already carries acquisition errors. Only teardown
+    // failures belong to detach; a past pump error must not poison cleanup.
     return Result::success();
 }
 

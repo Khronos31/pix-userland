@@ -454,6 +454,14 @@ unsigned dt295_actual_fixture_renewal_applies(void)
     return value;
 }
 
+unsigned dt295_actual_fixture_shutdown_commands(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_fake.shutdown_commands;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
 unsigned dt295_actual_fixture_auth_requests(void)
 {
     pthread_mutex_lock(&pipeline_mutex);
