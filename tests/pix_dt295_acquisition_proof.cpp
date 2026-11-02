@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Offline DT295 normal acquisition gate proof. */
 #include "pix-dt295-receiver-adapter.h"
+#include "dt295_saved_cs_fixture.h"
 
 #include <libusb.h>
 
@@ -65,6 +66,15 @@ std::atomic<unsigned> g_reprepare_calls{0U};
 std::atomic<unsigned> g_stream_stop_calls{0U};
 std::atomic<unsigned> g_stream_destroy_calls{0U};
 std::atomic<bool> g_stream_stop_fail{false};
+std::atomic<unsigned> g_saved_pmts_emitted{0U};
+std::atomic<unsigned> g_route_write_calls{0U};
+std::mutex g_saved_plan_mutex;
+dt295_route_plan g_saved_reprepare_plan{};
+int g_saved_mux = DT295_SAVED_CS08;
+std::vector<unsigned> g_saved_order;
+unsigned g_saved_initial_pmts = 0U;
+unsigned g_saved_next_pmt = 0U;
+bool g_saved_initial_sent = false;
 
 struct Clock final : dtv::userland::detail::ReceiverClock {
     std::atomic<std::uint64_t> offset_ms{0U};
@@ -141,9 +151,28 @@ void reset_stream(int mode)
     g_stream_stop_calls.store(0U, std::memory_order_release);
     g_stream_destroy_calls.store(0U, std::memory_order_release);
     g_stream_stop_fail.store(false, std::memory_order_release);
+    g_saved_pmts_emitted.store(0U, std::memory_order_release);
+    g_route_write_calls.store(0U, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> plan_lock(g_saved_plan_mutex);
+        g_saved_reprepare_plan = {};
+    }
+    g_saved_initial_sent = false;
+    g_saved_next_pmt = 0U;
     g_bootstrap_sent = false;
     g_split_phase = 0;
     g_continuity = 0U;
+}
+
+void set_saved_schedule(int mux, const std::vector<unsigned> &order, unsigned initial_pmts)
+{
+    std::lock_guard<std::mutex> lock(g_stream_mutex);
+    g_saved_mux = mux;
+    g_saved_order = order;
+    g_saved_initial_pmts = initial_pmts;
+    g_saved_next_pmt = initial_pmts;
+    g_saved_pmts_emitted.store(initial_pmts, std::memory_order_release);
+    g_saved_initial_sent = false;
 }
 
 bool wait_phase(pix::capture::dt295::ReceiverAdapter &adapter, Phase phase,
@@ -553,6 +582,77 @@ int case_failure(const std::vector<std::uint8_t> &assets, int mode, Failure fail
                  satellite ? ReceiverSystem::satellite : ReceiverSystem::terrestrial),
                  "failure stop");
     CHECK_RESULT(rig.adapter.close(0U), "failure close");
+    return 0;
+}
+
+unsigned saved_plan_ecms(const dt295_route_plan &plan)
+{
+    unsigned count = 0U;
+    for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
+        if (plan.routes[i].enabled && plan.routes[i].is_ecm) ++count;
+    return count;
+}
+
+int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
+                           const std::vector<unsigned> &order, unsigned initial_pmts,
+                           bool initial_gate)
+{
+    reset_stream(20);
+    set_saved_schedule(mux, order, initial_pmts);
+    Rig rig(assets);
+    CHECK(rig.adapter.ready());
+    CHECK_RESULT(rig.adapter.open(0U), "saved CS open");
+    const bool cs08 = mux == DT295_SAVED_CS08;
+    const unsigned tsid = cs08 ? 24704U : 29024U;
+    const ReceiverSystem system = ReceiverSystem::satellite;
+    CHECK_RESULT(rig.adapter.program_hz(0U, system, 1049480000ULL, 1000U), "saved CS tune");
+    CHECK_RESULT(rig.adapter.select_satellite_tsid(0U, tsid, 1000U), "saved CS TSID");
+    CHECK_RESULT(rig.adapter.start_capture(0U, system), "saved CS start");
+    const Attachment attachment = attachment_for(20U + static_cast<std::uint64_t>(mux), system);
+    CHECK_RESULT(rig.adapter.attach(attachment), "saved CS attach");
+
+    if (initial_gate) {
+        CHECK(expect_terminal(
+            rig.adapter, attachment, Failure::multiple_ecm,
+            static_cast<std::uint8_t>(
+                dtv::userland::detail::StreamTerminal::bridge_fatal)));
+        CHECK(g_reprepare_calls.load(std::memory_order_acquire) == 0U);
+        CHECK(g_route_write_calls.load(std::memory_order_acquire) == 0U);
+    } else {
+        const bool reached_ready = wait_phase(rig.adapter, Phase::ready);
+        if (!reached_ready) {
+            const auto state = rig.adapter.acquisition();
+            std::fprintf(stderr, "saved CS initial state phase=%u failure=%u plan_generation=%u\n",
+                         static_cast<unsigned>(state.phase), static_cast<unsigned>(state.failure),
+                         static_cast<unsigned>(state.plan_generation));
+        }
+        CHECK(reached_ready);
+        CHECK(rig.adapter.acquisition().failure == Failure::none);
+        CHECK(rig.adapter.acquisition().plan_generation == 1U);
+        dt295_route_plan plan{};
+        {
+            std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+            plan = g_saved_reprepare_plan;
+        }
+        const unsigned expected_primary = dt295_saved_cs_program(mux, order[0]);
+        CHECK(plan.has_primary && plan.primary_program == expected_primary);
+        CHECK(plan.missing_pmts == 4U - initial_pmts);
+        CHECK(saved_plan_ecms(plan) == (order[0] == 0U ? 0U : 1U));
+        const unsigned prior_writes = g_route_write_calls.load(std::memory_order_acquire);
+        g_release_split.store(true, std::memory_order_release);
+        for (unsigned wait = 0U; wait < 3000U &&
+             g_saved_pmts_emitted.load(std::memory_order_acquire) <= initial_pmts; ++wait)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        CHECK(g_saved_pmts_emitted.load(std::memory_order_acquire) == initial_pmts + 1U);
+        CHECK(expect_terminal(rig.adapter, attachment, Failure::plan,
+                             static_cast<std::uint8_t>(
+                                 dtv::userland::detail::StreamTerminal::bridge_fatal)));
+        CHECK(g_route_write_calls.load(std::memory_order_acquire) == prior_writes);
+    }
+
+    CHECK_RESULT(rig.adapter.detach(attachment), "saved CS detach");
+    CHECK_RESULT(rig.adapter.stop_capture(0U, system), "saved CS stop");
+    CHECK_RESULT(rig.adapter.close(0U), "saved CS close");
     return 0;
 }
 
@@ -977,6 +1077,39 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
     const int mode = configured_mode >= 7 || g_use_mode.load(std::memory_order_acquire)
                          ? configured_mode
                          : 0;
+    if (mode == 20) {
+        auto append_saved = [&](unsigned index) {
+            std::uint8_t packet[188];
+            if (dt295_saved_cs_packet(g_saved_mux, index, packet) != 0) return false;
+            dt295_actual_fixture_encrypt(packet);
+            std::memcpy(output + length, packet, sizeof(packet));
+            length += sizeof(packet);
+            return true;
+        };
+        if (!g_saved_initial_sent) {
+            if (!append_saved(0U) || !append_saved(1U)) return LIBUSB_ERROR_IO;
+            for (unsigned i = 0U; i < g_saved_initial_pmts; ++i) {
+                if (i >= g_saved_order.size() || !append_saved(2U + g_saved_order[i]))
+                    return LIBUSB_ERROR_IO;
+            }
+            g_saved_initial_sent = true;
+            g_bootstrap_sent = true;
+            *sequence += length / 188U;
+            *completed_ns = 1U;
+            return static_cast<int>(length);
+        }
+        if (g_saved_next_pmt < g_saved_order.size() &&
+            g_release_split.exchange(false, std::memory_order_acq_rel)) {
+            if (!append_saved(2U + g_saved_order[g_saved_next_pmt])) return LIBUSB_ERROR_IO;
+            ++g_saved_next_pmt;
+            g_saved_pmts_emitted.store(static_cast<unsigned>(g_saved_next_pmt),
+                                       std::memory_order_release);
+            *sequence += length / 188U;
+            *completed_ns = 1U;
+            return static_cast<int>(length);
+        }
+        if (g_saved_next_pmt < g_saved_order.size()) return 0;
+    }
     if (mode >= 7 && mode != 8 && g_bootstrap_sent &&
         g_release_split.load(std::memory_order_acquire) &&
         !g_partial_pmt_sent.exchange(true, std::memory_order_acq_rel)) {
@@ -1068,6 +1201,7 @@ extern "C" int __wrap_dt295_stream_read(dt295_stream *, void *buffer, std::size_
 extern "C" int __wrap_dt295_route_write(dt295 *device, const dt295_route_op *op,
                                           char *error, std::size_t error_size)
 {
+    g_route_write_calls.fetch_add(1U, std::memory_order_acq_rel);
     if (op != nullptr && op->enabled && op->pid == 0x0300U)
         g_data_route_written.store(true, std::memory_order_release);
     if (op != nullptr && op->enabled && op->pid == 0x0301U)
@@ -1104,6 +1238,10 @@ extern "C" int __wrap_dt295_stream_destroy(dt295_stream *)
 extern "C" int __wrap_dt295_reprepare_plan(dt295 *device, const dt295_route_plan *plan,
                                             char *error, std::size_t error_size)
 {
+    {
+        std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
+        if (plan != nullptr) g_saved_reprepare_plan = *plan;
+    }
     g_reprepare_calls.fetch_add(1U, std::memory_order_acq_rel);
     if (g_reprepare_fail.load(std::memory_order_acquire) > 0) {
         g_reprepare_fail.fetch_sub(1, std::memory_order_acq_rel);
@@ -1143,6 +1281,30 @@ int main(int argc, char **argv)
     CHECK(run("split", [&] { return case_split_gate(assets); }));
     CHECK(run("partial-start", [&] { return case_partial_start_and_late_pmt(assets); }));
     CHECK(run("primary-pmt-missing", [&] { return case_primary_pmt_missing(assets); }));
+    CHECK(run("saved-cs08-same-read", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 4U, true);
+    }));
+    CHECK(run("saved-cs08-free-first", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {0U, 1U, 2U, 3U}, 1U, false);
+    }));
+    CHECK(run("saved-cs08-paid-first", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 1U, false);
+    }));
+    CHECK(run("saved-cs08-paid-multiple", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS08, {3U, 2U, 1U, 0U}, 2U, true);
+    }));
+    CHECK(run("saved-cs22-same-read", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 4U, true);
+    }));
+    CHECK(run("saved-cs22-free-first", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {0U, 1U, 2U, 3U}, 1U, false);
+    }));
+    CHECK(run("saved-cs22-paid-first", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 1U, false);
+    }));
+    CHECK(run("saved-cs22-paid-multiple", [&] {
+        return case_saved_cs_baseline(assets, DT295_SAVED_CS22, {3U, 2U, 1U, 0U}, 2U, true);
+    }));
     CHECK(run("partial-completion", [&] { return case_partial_completion_policy(assets, 9); }));
     CHECK(run("codec-final-same-read", [&] { return case_partial_completion_policy(assets, 10); }));
     CHECK(run("partial-tsid-change", [&] { return case_partial_completion_policy(assets, 11); }));
