@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
     uint8_t tid, used;
     uint16_t pid, ext;
+    uint32_t generation;
     section_set committed, pending;
     uint8_t previous_version, have_previous;
 } table_state;
@@ -387,6 +388,7 @@ static void apply_complete(dt295_routes *r, table_state *t) {
     t->have_previous = t->committed.valid;
     t->committed = t->pending;
     t->committed.valid = 1;
+    t->generation++;
     memset(&t->pending, 0, sizeof(t->pending));
 }
 
@@ -601,6 +603,7 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
                 t->ext == r->programs[i].program && t->committed.valid) {
                 s->pmt_present[i] = 1;
                 s->pmt_version[i] = t->committed.version;
+                s->pmt_generation[i] = t->generation;
                 break;
             }
         }
@@ -610,8 +613,10 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
         if (t->used && t->tid == 1 && t->committed.valid) {
             s->cat_version_valid = 1;
             s->cat_version = t->committed.version;
-            break;
+            s->cat_generation = t->generation;
         }
+        if (t->used && t->tid == 0 && t->committed.valid)
+            s->pat_generation = t->generation;
     }
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
     s->ready = r->have_pat && s->missing_pmts == 0;
@@ -944,6 +949,10 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
     }
     /* Dedicated roles are logical aliases; a shared PID gets one hardware slot. */
     if (primary_pmt) {
+        p.primary_has_ecm_dependency = primary_pmt->program_ecm != 0;
+        for (unsigned i = 0; i < primary_pmt->streams; ++i)
+            if (primary_pmt->stream[i].ecm_pid)
+                p.primary_has_ecm_dependency = 1;
         uint16_t vp = 0, ap = 0;
         uint8_t vt = 0, at = 0;
         for (unsigned i = 0; i < primary_pmt->streams; ++i) {

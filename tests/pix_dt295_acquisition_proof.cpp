@@ -686,6 +686,36 @@ bool saved_cs_completion_policy_proof(int mux)
         dt295_routes_guard(&current, ops, count, &candidate, error) == 0;
     if (accepted) {
         dt295_routes_snapshot changed = updated;
+        for (unsigned i = 0U; i < initial.program_count; ++i) {
+            if (!initial.pmt_present[i] && changed.pmt_present[i]) {
+                changed.pmt_generation[i] = 2U;
+                changed.pmt_version[i] = static_cast<std::uint8_t>(
+                    (changed.pmt_version[i] + 1U) & 31U);
+                break;
+            }
+        }
+        accepted = live_initial_pmt_completion_only(
+            &initial, &changed, &current, &desired, ops, count, error,
+            sizeof(error)) != 0;
+    }
+    if (accepted) {
+        dt295_routes_snapshot changed = updated;
+        changed.pat_generation++;
+        changed.cat_generation++;
+        accepted = live_initial_pmt_completion_only(
+            &initial, &changed, &current, &desired, ops, count, error,
+            sizeof(error)) != 0;
+    }
+    if (accepted) {
+        dt295_route_plan dependent = desired;
+        dependent.primary_has_ecm_dependency = 1U;
+        accepted = !dt295_primary_has_no_ecm_dependency(&dependent) &&
+                   live_initial_pmt_completion_only(
+                       &initial, &updated, &current, &dependent, ops, count,
+                       error, sizeof(error)) != 0;
+    }
+    if (accepted) {
+        dt295_routes_snapshot changed = updated;
         changed.pmt_version[0] = (uint8_t)((changed.pmt_version[0] + 1U) & 31U);
         accepted = live_initial_pmt_completion_only(
             &initial, &changed, &current, &desired, ops, count, error, sizeof(error)) != 0;
@@ -710,6 +740,12 @@ bool saved_cs_completion_policy_proof(int mux)
                    !dt295_initial_ecm_gate_allowed(&paid_full, 0U) &&
                    dt295_initial_ecm_gate_allowed(&free_full, 0U) &&
                    !dt295_initial_ecm_gate_allowed(&free_full, 1U);
+        if (accepted) {
+            dt295_route_plan dependent = free_full;
+            dependent.primary_has_ecm_dependency = 1U;
+            accepted = !dt295_primary_has_no_ecm_dependency(&dependent) &&
+                       !dt295_initial_ecm_gate_allowed(&dependent, 0U);
+        }
     }
     dt295_routes_destroy(routes);
     if (!accepted) return false;
@@ -751,6 +787,44 @@ bool saved_cs_completion_policy_proof(int mux)
     return rejected_paid;
 }
 
+bool saved_cs_primary_dependency_proof(int mux)
+{
+    dt295_routes *routes = dt295_routes_create();
+    if (!routes) return false;
+    dt295_routes_set_satellite(routes, 1);
+    char error[DT295_ROUTE_ERROR]{};
+    dt295_route_plan plan{};
+    bool accepted = true;
+    for (unsigned i = 0U; i < DT295_SAVED_CS_PACKET_COUNT; ++i) {
+        std::uint8_t packet[188];
+        const int packet_result = i == 2U
+            ? dt295_saved_cs_primary_ca_packet(mux, packet)
+            : dt295_saved_cs_packet(mux, i, packet);
+        if (packet_result != 0 || dt295_routes_feed(routes, packet) != 0) {
+            accepted = false;
+            break;
+        }
+    }
+    if (accepted)
+        accepted = dt295_routes_build(routes, dt295_saved_cs_target(mux), nullptr,
+                                      &plan, error) == 0 &&
+                   plan.primary_has_ecm_dependency &&
+                   !dt295_primary_has_no_ecm_dependency(&plan) &&
+                   !dt295_initial_ecm_gate_allowed(&plan, 0U);
+    bool private_binding = false;
+    bool ecm_route = false;
+    for (unsigned i = 0U; accepted && i < DT295_SLOT_COUNT; ++i) {
+        if (plan.routes[i].enabled && plan.routes[i].pid == 0x0710U &&
+            plan.routes[i].ecm_slot)
+            private_binding = true;
+        if (plan.routes[i].enabled && plan.routes[i].is_ecm &&
+            plan.routes[i].pid == 0x0711U)
+            ecm_route = true;
+    }
+    dt295_routes_destroy(routes);
+    return accepted && private_binding && ecm_route;
+}
+
 int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
                            const std::vector<unsigned> &order, unsigned initial_pmts)
 {
@@ -762,6 +836,7 @@ int case_saved_cs_baseline(const std::vector<std::uint8_t> &assets, int mux,
     CHECK(dt295_primary_has_no_ecm_dependency(&full_plan));
     CHECK(saved_plan_ecms(full_plan) == 3U);
     CHECK(saved_cs_completion_policy_proof(mux));
+    CHECK(saved_cs_primary_dependency_proof(mux));
     {
         std::lock_guard<std::mutex> lock(g_saved_plan_mutex);
         g_saved_full_plan = full_plan;

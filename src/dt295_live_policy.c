@@ -20,7 +20,7 @@ static int live_pid_is_retained(const dt295_route_plan *current,
     return 0;
 }
 int dt295_primary_has_no_ecm_dependency(const dt295_route_plan *plan) {
-    if (!plan || !plan->has_primary)
+    if (!plan || !plan->has_primary || plan->primary_has_ecm_dependency)
         return 0;
     unsigned av_routes = 0;
     for (unsigned role = 0; role < 2; ++role) {
@@ -85,6 +85,8 @@ int live_initial_pmt_completion_only(const dt295_routes_snapshot *initial,
                       "PAT/TSID changed during initial completion");
     COMPLETION_REJECT(initial->cat_version_valid != snapshot->cat_version_valid ||
                       initial->cat_version != snapshot->cat_version ||
+                      initial->pat_generation != snapshot->pat_generation ||
+                      initial->cat_generation != snapshot->cat_generation ||
                       snapshot->unsupported_tables || initial->invalid_sections ||
                       snapshot->invalid_sections != initial->invalid_sections ||
                       snapshot->continuity_errors != initial->continuity_errors,
@@ -111,12 +113,17 @@ int live_initial_pmt_completion_only(const dt295_routes_snapshot *initial,
     for (unsigned i = 0; i < initial->program_count; ++i) {
         if (initial->pmt_present[i]) {
             if (!snapshot->pmt_present[i] ||
-                initial->pmt_version[i] != snapshot->pmt_version[i]) {
+                initial->pmt_version[i] != snapshot->pmt_version[i] ||
+                initial->pmt_generation[i] != snapshot->pmt_generation[i]) {
                 snprintf(error, error_size, "known PMT changed during initial completion");
                 return -1;
             }
-        } else if (snapshot->pmt_present[i]) {
+        } else if (snapshot->pmt_present[i] &&
+                   snapshot->pmt_generation[i] == 1U) {
             completed++;
+        } else if (snapshot->pmt_present[i]) {
+            snprintf(error, error_size, "initially missing PMT changed before completion");
+            return -1;
         }
     }
     if (!completed) {

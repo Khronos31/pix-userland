@@ -870,6 +870,7 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
     candidate.has_primary = effective.has_primary;
     candidate.video_stream_type = effective.video_stream_type;
     candidate.audio_stream_type = effective.audio_stream_type;
+    candidate.primary_has_ecm_dependency = effective.primary_has_ecm_dependency;
     std::memcpy(candidate.dedicated_pid, effective.dedicated_pid,
                 sizeof(candidate.dedicated_pid));
     dt295_routes_commit(current, &candidate);
