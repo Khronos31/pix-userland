@@ -234,7 +234,7 @@ static void test_completeness_versions_and_planning(void) {
     feed_pat(r, 31, 1, 1, 2, 0x110);
     dt295_routes_snapshot_get(r, &s);
     assert(s.have_pat && s.program_count == 2 && !s.ready && s.missing_pmts == 2);
-    /* The current CAT is part of acquisition readiness; CAT/PAT versions are independent. */
+    /* CAT/PAT versions are independent; the CAT can arrive before all PMTs. */
     uint8_t b[TEST_SECTION_MAX];
     size_t n = make_cat(b, 0, 0x1ef);
     feed_section(r, 1, b, n);
@@ -515,7 +515,7 @@ static void test_bad_crc_same_version_and_capacity(void) {
     dt295_routes_destroy(r);
 }
 
-static void test_satellite_readiness_without_cat(void) {
+static void test_readiness_without_cat(void) {
     dt295_routes *r = dt295_routes_create();
     assert(r);
     dt295_routes_snapshot s;
@@ -525,14 +525,33 @@ static void test_satellite_readiness_without_cat(void) {
     size_t n = make_pmt(b, 0, 1, 0x100, 0, 0);
     feed_section(r, 0x100, b, n);
     dt295_routes_snapshot_get(r, &s);
-    assert(s.have_pat && s.missing_pmts == 0 && !s.have_cat && !s.ready);
+    assert(s.have_pat && s.missing_pmts == 0 && !s.have_cat && s.ready);
+    dt295_route_plan plan, updated;
+    char error[DT295_ROUTE_ERROR];
+    assert(dt295_routes_build(r, 0, NULL, &plan, error) == 0);
+    assert(plan.ready && plan.has_primary);
+    n = make_cat(b, 0, 0x1ef);
+    feed_section(r, 1, b, n);
+    dt295_routes_snapshot_get(r, &s);
+    assert(s.have_cat && s.missing_pmts == 0 && s.ready);
+    assert(dt295_routes_build(r, 0, &plan, &updated, error) == 0);
+    int retained_primary = 0, late_cat_route = 0;
+    for (unsigned i = 0; i < DT295_SLOT_COUNT; ++i) {
+        if (plan.routes[i].enabled && updated.routes[i].enabled &&
+            plan.routes[i].pid == updated.routes[i].pid &&
+            plan.routes[i].ecm_slot == updated.routes[i].ecm_slot)
+            retained_primary++;
+        if (updated.routes[i].enabled && updated.routes[i].pid == 0x1ef)
+            late_cat_route++;
+    }
+    assert(retained_primary == plan.route_count && late_cat_route == 1);
     dt295_routes_set_satellite(r, 1);
     dt295_routes_snapshot_get(r, &s);
     assert(s.ready);
     dt295_routes_destroy(r);
 }
 int main(void) {
-    test_satellite_readiness_without_cat();
+    test_readiness_without_cat();
     test_completeness_versions_and_planning();
     test_stable_bootstrap_slots();
     test_unsupported_multi_ecm_pmt_update_preserves_commit();

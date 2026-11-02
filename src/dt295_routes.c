@@ -591,7 +591,7 @@ void dt295_routes_snapshot_get(const dt295_routes *r, dt295_routes_snapshot *s) 
     s->program_count = r->program_count;
     memcpy(s->programs, r->programs, r->program_count * sizeof(r->programs[0]));
     s->missing_pmts = r->program_count > r->pmt_count ? r->program_count - r->pmt_count : 0;
-    s->ready = r->have_pat && (r->satellite || r->have_cat) && s->missing_pmts == 0;
+    s->ready = r->have_pat && s->missing_pmts == 0;
     s->invalid_sections = r->invalid_sections;
     s->continuity_errors = r->continuity_errors;
     s->unsupported_tables = r->unsupported_tables;
@@ -995,7 +995,7 @@ int dt295_routes_build(const dt295_routes *r, uint16_t primary, const dt295_rout
             if (!existing->ecm_slot && binding)
                 existing->ecm_slot = binding;
         }
-    p.ready = (r->satellite || r->have_cat) && p.missing_pmts == 0;
+    p.ready = p.missing_pmts == 0;
     if (error)
         error[0] = 0;
     *desired = p;

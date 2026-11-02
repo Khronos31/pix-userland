@@ -1155,8 +1155,8 @@ void ReceiverAdapter::pump() noexcept
                 break;
             }
             const bool may_plan = snapshot.have_pat &&
-                (snapshot.ready || tuned_system_.load(std::memory_order_acquire) ==
-                                       ReceiverSystem::satellite || snapshot.have_cat);
+                                  (snapshot.ready || tuned_system_.load(std::memory_order_acquire) ==
+                                                         ReceiverSystem::satellite || snapshot.have_cat);
             bool planned = false;
             if (may_plan) {
                 dt295_route_plan plan{};
