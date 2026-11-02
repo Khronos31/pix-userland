@@ -74,6 +74,28 @@ void log_acquisition(const char* stage, const char* fields = "") noexcept
                  fields[0] == '\0' ? "" : " ", fields);
 }
 
+void log_full_plan_result(const dt295_routes* routes, int result, const char* reason,
+                          const dt295_route_plan* plan, unsigned ecm_count,
+                          const char* gate) noexcept
+{
+    if (!setup_diagnostics_enabled()) return;
+    char snapshot[16384]{};
+    const int snapshot_result =
+        dt295_routes_format_pmt_snapshot(routes, snapshot, sizeof(snapshot));
+    if (snapshot_result != 0)
+        std::snprintf(snapshot, sizeof(snapshot), "[]");
+    std::fprintf(stderr,
+                 "DT295_ACQ_DIAG mono_ns=%llu stage=plan.full.result build_rc=%d "
+                 "reason=\"%s\" primary=%u primary_program=%u ecm_count=%u "
+                 "ecm_gate=%s pmt_snapshot=%s snapshot_complete=%d\n",
+                 static_cast<unsigned long long>(diagnostic_monotonic_ns()), result,
+                 reason == nullptr ? "" : reason,
+                 static_cast<unsigned>(result == 0 && plan != nullptr && plan->has_primary),
+                 static_cast<unsigned>(result == 0 && plan != nullptr ? plan->primary_program : 0U),
+                 ecm_count, gate == nullptr ? "not_reached" : gate, snapshot,
+                 snapshot_result == 0 ? 1 : 0);
+}
+
 void log_setup_stage(const char* stage, bool recovery_failed, int result,
                      const char* detail = nullptr) noexcept
 {
@@ -1296,8 +1318,21 @@ void ReceiverAdapter::pump() noexcept
             if (may_plan) {
                 dt295_route_plan plan{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_build(routes_, 0U, plan_started_ ? &live_ : nullptr,
-                                       &plan, route_error) != 0) {
+                const int plan_result =
+                    dt295_routes_build(routes_, 0U, plan_started_ ? &live_ : nullptr,
+                                       &plan, route_error);
+                unsigned ecms = 0U;
+                if (plan_result == 0)
+                    for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
+                        if (plan.routes[i].enabled && plan.routes[i].is_ecm) ++ecms;
+                const char* gate = plan_result != 0 ? "not_reached"
+                                   : !plan.has_primary ? "primary_missing"
+                                   : plan_started_ ? "not_initial"
+                                   : ecms > 1U ? "reject_multiple_ecm"
+                                               : "pass";
+                log_full_plan_result(routes_, plan_result, route_error,
+                                     plan_result == 0 ? &plan : nullptr, ecms, gate);
+                if (plan_result != 0) {
                     char plan_fields[192]{};
                     std::snprintf(plan_fields, sizeof(plan_fields),
                                   "result=failed reason=%s", route_error);
@@ -1309,9 +1344,6 @@ void ReceiverAdapter::pump() noexcept
                 }
                 if (plan.has_primary) {
                     if (!plan_started_) {
-                        unsigned ecms = 0U;
-                        for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
-                            if (plan.routes[i].enabled && plan.routes[i].is_ecm) ++ecms;
                         if (ecms > 1U) {
                             log_acquisition("plan.ecm_check", "result=multiple");
                             fail_acquisition(AcquisitionFailure::multiple_ecm,

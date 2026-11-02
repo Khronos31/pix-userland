@@ -68,6 +68,8 @@ int dt295_routes_feed(dt295_routes *, const uint8_t packet[188]);
  * 31->0), ignore the immediately superseded version, and count other backward or
  * half-cycle transitions as unsupported. A changed TSID resets table identity. */
 void dt295_routes_snapshot_get(const dt295_routes *, dt295_routes_snapshot *);
+/* Format committed PMT program, CA and elementary stream metadata for diagnostics. */
+int dt295_routes_format_pmt_snapshot(const dt295_routes *, char *, size_t);
 
 /* Build the smallest bootstrap route plan, even while PAT-listed PMTs are missing. */
 int dt295_routes_initial_plan(const dt295_routes *, dt295_route_plan *,
