@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <limits>
@@ -50,6 +51,23 @@ bool same_identity(const dtv::userland::detail::Attachment& left,
                    const dtv::userland::detail::Attachment& right) noexcept
 {
     return dtv::userland::detail::PacketStreamSession::same_identity(left, right);
+}
+
+bool setup_diagnostics_enabled() noexcept
+{
+    const char* value = std::getenv("PIX_DT295_SETUP_DIAGNOSTICS");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
+void log_setup_stage(const char* stage, bool recovery_failed, int result,
+                     const char* detail = nullptr) noexcept
+{
+    if (!setup_diagnostics_enabled()) return;
+    std::fprintf(stderr, "DT295_SETUP_DIAG stage=%s recovery_failed=%d result=%d",
+                 stage, recovery_failed ? 1 : 0, result);
+    if (detail != nullptr && detail[0] != '\0')
+        std::fprintf(stderr, " detail=%s", detail);
+    std::fputc('\n', stderr);
 }
 
 struct RetiredStream final {
@@ -413,6 +431,7 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
 {
     using TuneResult = dtv::userland::Result<TuneProgramming>;
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+    log_setup_stage("program_hz.begin", recovery_failed_, 0);
     if (!supports(receiver, system))
         return TuneResult::failure(Error::UNSUPPORTED);
     if (!opened_ || init_error_ != Error::OK)
@@ -474,8 +493,10 @@ dtv::userland::Result<TuneProgramming> ReceiverAdapter::program_hz(
         const int tsid = satellite_tsid_valid_.load(std::memory_order_acquire)
                              ? static_cast<int>(satellite_tsid_.load(std::memory_order_acquire))
                              : -1;
-        if (dt295_tune_satellite(device_, static_cast<std::uint32_t>(requested_hz), tsid,
-                                 error, sizeof(error)) != 0)
+        const int tune_result = dt295_tune_satellite(
+            device_, static_cast<std::uint32_t>(requested_hz), tsid, error, sizeof(error));
+        log_setup_stage("program_hz.satellite_tune", recovery_failed_, tune_result, error);
+        if (tune_result != 0)
             return TuneResult::failure(Error::USB_IO);
         satellite_tuned_ = true;
         const std::uint64_t rounded = ((requested_hz / 1000U + 500U) / 1000U) * 1000U;
@@ -549,6 +570,7 @@ std::optional<bool> ReceiverAdapter::sample_card_inserted() noexcept
             return true;
         if (result == DT295_CARD_RECOVERY_FATAL) {
             recovery_failed_ = true;
+            log_setup_stage("recovery_failed.set", recovery_failed_, 1);
             std::fprintf(stderr, "DT295 card recovery fatal: %s\n", error);
             dt295_card_invalidate_observation(device_);
         }
@@ -560,6 +582,7 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_slot(ReceiverId receiv
                                                std::uint32_t timeout_ms) noexcept
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+    log_setup_stage("select_satellite_slot.begin", recovery_failed_, 0);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
     if (recovery_failed_) return Result::failure(Error::USB_IO);
@@ -594,6 +617,7 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiv
                                                std::uint32_t timeout_ms) noexcept
 {
     std::lock_guard<std::mutex> operation_lock(operation_mutex_);
+    log_setup_stage("select_satellite_tsid.begin", recovery_failed_, 0);
     if (!matches(receiver)) return Result::failure(Error::INVALID_ARGUMENT);
     if (!opened_ || init_error_ != Error::OK) return Result::failure(Error::NOT_FOUND);
     if (recovery_failed_) return Result::failure(Error::USB_IO);
@@ -602,14 +626,19 @@ ReceiverAdapter::Result ReceiverAdapter::select_satellite_tsid(ReceiverId receiv
     if (!satellite_tuned_) return Result::success();
     std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
     char error[256]{};
-    if (dt295_select_satellite_tsid(device_, tsid, error, sizeof(error)) != 0)
+    const int select_result = dt295_select_satellite_tsid(device_, tsid, error, sizeof(error));
+    log_setup_stage("select_satellite_tsid.write", recovery_failed_, select_result, error);
+    if (select_result != 0)
         return Result::failure(Error::USB_IO);
     const std::uint32_t budget = timeout_ms == 0U ? 3000U : std::min(timeout_ms, 5000U);
     const std::uint64_t deadline = clock_.monotonic_ms() + budget;
     for (;;) {
         dt295_satellite_state state{};
-        if (dt295_satellite_status(device_, &state, error, sizeof(error)) != 0)
+        const int status_result = dt295_satellite_status(device_, &state, error, sizeof(error));
+        if (status_result != 0) {
+            log_setup_stage("select_satellite_tsid.status", recovery_failed_, status_result, error);
             return Result::failure(Error::USB_IO);
+        }
         if (state.selected_tsid == tsid && state.locked) return Result::success();
         if (clock_.monotonic_ms() >= deadline) return Result::failure(Error::TIMEOUT);
         clock_.sleep_ms(100U);
@@ -849,6 +878,7 @@ ReceiverAdapter::Result ReceiverAdapter::apply_plan_unlocked(
 
 ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
 {
+    log_setup_stage("ensure_streaming.begin", recovery_failed_, 0);
     if (recovery_failed_) return Result::failure(Error::USB_IO);
     if (streaming_) return Result::success();
     if (stream_ != nullptr) return Result::failure(Error::BUSY);
@@ -861,11 +891,16 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
     const int prepared = key_retained_
         ? dt295_reprepare_plan(device_, &live_, error, sizeof(error))
         : dt295_prepare_plan(device_, &live_, error, sizeof(error));
+    log_setup_stage(key_retained_ ? "ensure_streaming.reprepare" : "ensure_streaming.prepare",
+                    recovery_failed_, prepared, error);
     if (prepared != 0) return Result::failure(Error::USB_IO);
     key_retained_ = true;
-    if (dt295_start(device_, error, sizeof(error)) != 0)
+    const int device_start = dt295_start(device_, error, sizeof(error));
+    log_setup_stage("ensure_streaming.device_start", recovery_failed_, device_start, error);
+    if (device_start != 0)
         return Result::failure(Error::USB_IO);
     const auto started = start_stream_unlocked();
+    log_setup_stage("ensure_streaming.stream_start", recovery_failed_, started ? 0 : 1);
     if (!started) {
         size_t drained = 0U;
         (void)dt295_stop(device_, &drained, error, sizeof(error));
@@ -1563,6 +1598,8 @@ int ReceiverAdapter::control(void* opaque, std::uint8_t request_type, std::uint8
         static_cast<libusb_device_handle*>(usb_native_handle(io->owner->usb_)),
         request_type, request, value, index, data, static_cast<std::uint16_t>(length),
         timeout_ms);
+    if (result < 0 && setup_diagnostics_enabled())
+        std::fprintf(stderr, "DT295_SETUP_DIAG usb_control result=%d\n", result);
     *actual = result < 0 ? 0U : static_cast<std::size_t>(result);
     return result < 0 ? result : 0;
 }
@@ -1591,6 +1628,9 @@ int ReceiverAdapter::bulk(void* opaque, std::uint8_t endpoint, std::uint8_t* dat
     const int result = libusb_bulk_transfer(
         static_cast<libusb_device_handle*>(usb_native_handle(io->owner->usb_)),
         endpoint, data, static_cast<int>(length), &transferred, timeout_ms);
+    if (result < 0 && setup_diagnostics_enabled())
+        std::fprintf(stderr, "DT295_SETUP_DIAG usb_bulk endpoint=%u result=%d\n",
+                     static_cast<unsigned>(endpoint), result);
     if (transferred > 0) *actual = static_cast<std::size_t>(transferred);
     return result;
 }
@@ -1607,6 +1647,9 @@ int ReceiverAdapter::interrupt(void* opaque, std::uint8_t endpoint, std::uint8_t
     const int result = libusb_interrupt_transfer(
         static_cast<libusb_device_handle*>(usb_native_handle(io->owner->usb_)),
         endpoint, data, static_cast<int>(length), &transferred, timeout_ms);
+    if (result < 0 && setup_diagnostics_enabled())
+        std::fprintf(stderr, "DT295_SETUP_DIAG usb_interrupt endpoint=%u result=%d\n",
+                     static_cast<unsigned>(endpoint), result);
     *actual = transferred > 0 ? static_cast<std::size_t>(transferred) : 0U;
     return result;
 }
