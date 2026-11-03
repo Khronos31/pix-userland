@@ -11,15 +11,13 @@ mkdir -p "$work"
 tar -xzf "$archive" -C "$work"
 src=$(echo "$work"/pix-userland-*-source)
 [ -d "$src/third_party/dtv-userland-core" ] || { echo 'Archive lacks bundled Core source' >&2; exit 1; }
-source_revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository_commit"])' "$src/release-info.json")
 if [ "$mode" = windows-x64 ]; then
-    PIX_WINDOWS_OFFLINE=1 PIX_EMBEDDED_ASSETS=ON PIX_SOURCE_REVISION_OVERRIDE="$source_revision" bash "$src/tools/build-windows.sh"
+    PIX_WINDOWS_OFFLINE=1 bash "$src/tools/build-windows.sh"
     for program in pixd pixctl pix-ts; do
         python3 "$src/tools/audit-binary.py" windows-x64 "$src/build/windows-x64/$program.exe"
     done
-    python3 "$src/tools/verify-embedded-assets.py" "$src/build/windows-x64/pixd.exe" \
-        "$src/firmware/dt181.bin" "$src/firmware/dt295.bin" "$src/build/windows-x64/embedded-assets.json" \
-        --build-info "$src/build/windows-x64/build-info.txt"
+    cmp "$src/firmware/dt181.bin" "$src/build/windows-x64/firmware/dt181.bin"
+    cmp "$src/firmware/dt295.bin" "$src/build/windows-x64/firmware/dt295.bin"
     echo 'Source archive rebuilt offline: pixd.exe, pixctl.exe, pix-ts.exe (Windows execution is separate)'
     exit 0
 fi
@@ -37,26 +35,18 @@ export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
 cmake -S "$src/core-integration" -B "$work/build-static" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_EXE_LINKER_FLAGS=-static -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-static/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
-    -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DPIX_EMBEDDED_ASSETS=ON \
-    -DPIX_DT181_FIRMWARE_FILE="$src/firmware/dt181.bin" \
-    -DPIX_DT295_FIRMWARE_FILE="$src/firmware/dt295.bin" \
-    -DPIX_SOURCE_REVISION_OVERRIDE="$source_revision"
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build "$work/build-static" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 for program in pixd pixctl pix-ts; do
     python3 "$src/tools/audit-binary.py" "linux-$(uname -m)" "$work/build-static/bin/$program"
 done
-python3 "$src/tools/verify-embedded-assets.py" "$work/build-static/bin/pixd" \
-    "$src/firmware/dt181.bin" "$src/firmware/dt295.bin" \
-    "$work/build-static/embedded-assets/pix_embedded_assets.json"
 PKG_CONFIG_PATH="$work/libusb-prefix/lib/pkgconfig" \
 PKG_CONFIG_LIBDIR="$work/libusb-prefix/lib/pkgconfig" \
 cmake -S "$src/core-integration" -B "$work/build-proof" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_EXE_LINKER_FLAGS=-static \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-proof/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
-    -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DPIX_EMBEDDED_ASSETS=ON \
-    -DPIX_DT181_FIRMWARE_FILE="$src/firmware/dt181.bin" \
-    -DPIX_DT295_FIRMWARE_FILE="$src/firmware/dt295.bin" \
-    -DPIX_SOURCE_REVISION_OVERRIDE="$source_revision"
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build "$work/build-proof" --parallel "${JOBS:-4}"
 ctest --test-dir "$work/build-proof" --output-on-failure
 for program in pixd pixctl pix-ts; do
@@ -64,4 +54,4 @@ for program in pixd pixctl pix-ts; do
     "$work/build-static/bin/$program" --help > /dev/null
 done
 "$work/build-static/bin/pixd" --models | grep -q '06b8:102b'
-echo "Source archive rebuilt offline with embedded assets: pixd, pixctl, pix-ts $version"
+echo "Source archive rebuilt offline: pixd, pixctl, pix-ts $version"

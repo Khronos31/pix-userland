@@ -8,7 +8,7 @@
 
 `include/version.h` の版は変更していません。この移行は正式 Release・タグ・版更新を含みません。
 
-Release のバイナリアーカイブは DT181 および DT295 の標準バンドルを `pixd` に内蔵し、`embedded-assets.json` に機種別 SHA-256 とソース来歴を記録します。実行用バンドルを別の外部ファイルとして二重に同梱することはありません。外部 `--firmware` オプションは任意で、ソースアーカイブに含まれる機種別 `.bin` などを指定できます。
+Release の全バイナリアーカイブは標準 `firmware/dt181.bin` と `firmware/dt295.bin` を外部バンドルとして同梱し、起動時に `pixd --firmware FILE` で機種に対応したファイルを明示します。短縮形 `-F` はunknown argumentとして拒否されます。リリース検証は全7ターゲットの両ファイルを検証し、同じアーカイブの対応ソースパッケージに含まれる入力バイトとの一致を確認します。
 
 GitHub 自動生成の Source code アーカイブと、`tools/package-release.py source` が生成する公式の対応ソースパッケージは構成が異なります。どちらも Git 追跡された `firmware/dt181.bin`、衛星テーブルを含む標準 `firmware/dt295.bin`、マニフェスト、メタデータ、保存 IV を含みます。ただし、GitHub 自動生成アーカイブは固定バージョンの Core / libusb ソーススナップショットを含まないため、ネットワーク接続のない完全なオフライン再ビルドには対応ソースパッケージを使用します。暗号化された生成用入力 `.private/assets.enc` はどちらのアーカイブにも含まれません。
 
@@ -90,7 +90,7 @@ CIに実機は接続していないため、CI成功は各OSでの受信を保�
 
 ## 実機データの保管
 
-所有者指示（decision 6490053064）に従い、標準の `firmware/dt181.bin` および `firmware/dt295.bin` とマニフェスト・来歴メタデータを Git 追跡します。DT295 の標準バンドルは衛星レジスターテーブルを含みます。Release ビルドはこの 2 つのバンドルを検証して `pixd` に埋め込み、各バイナリアーカイブ内の `embedded-assets.json` と `build-info.txt` にファイルハッシュとビルド識別情報を記録します。Release ジョブで暗号化素材を復号することはありません。
+所有者指示（decision 6490053064）に従い、標準の `firmware/dt181.bin` および `firmware/dt295.bin` とマニフェスト・来歴メタデータを Git 追跡します。DT295 の標準バンドルは衛星レジスターテーブルを含みます。Release ビルドはこの2つのバンドルを検証し、各バイナリアーカイブの `firmware/` に外部ファイルとして同梱します。Release ジョブで暗号化素材を復号することはありません。
 
 GitHub 自動生成の Source code アーカイブおよび対応ソースパッケージは、標準バンドル、マニフェスト、メタデータ、保存 IV を含みます。固定バージョンの Core / libusb ソーススナップショットが必要なネットワークなしのソース再ビルドには対応ソースパッケージを使用します。通常の build と Release は暗号化素材を必要とせず、リポジトリにも保存しません。`tools/assets-bundle.py` は別途保管された暗号化 bundle を手動でseal/openするためのユーティリティとして残します。復号鍵は `PIX_ASSETS_KEY` 環境変数から渡し、Git やログに出力しません。使用例は `python3 tools/assets-bundle.py seal firmware/dt181.bin /path/to/private/assets.enc` および `python3 tools/assets-bundle.py open /path/to/private/assets.enc /path/to/output` です。
 

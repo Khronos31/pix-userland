@@ -6,20 +6,11 @@ set -eu
 mode=${1:-native}
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 case "$mode" in native|musl|android) ;; *) echo 'Usage: build-portable.sh native|musl|android' >&2; exit 2;; esac
-embedded_assets=${PIX_EMBEDDED_ASSETS:-OFF}
-case "$embedded_assets" in
-    ON|on|1|TRUE|true)
-        dt181_firmware=${PIX_DT181_FIRMWARE_FILE:-$root/firmware/dt181.bin}
-        dt295_firmware=${PIX_DT295_FIRMWARE_FILE:-$root/firmware/dt295.bin}
-        [ -f "$dt181_firmware" ] && [ -f "$dt295_firmware" ] || {
-            echo 'Embedded builds require PIX_DT181_FIRMWARE_FILE and PIX_DT295_FIRMWARE_FILE' >&2
-            exit 2
-        }
-        embedded_assets=ON
-        ;;
-    OFF|off|0|FALSE|false) embedded_assets=OFF;;
-    *) echo 'PIX_EMBEDDED_ASSETS must be ON or OFF' >&2; exit 2;;
-esac
+if [ "${PIX_EMBEDDED_ASSETS+x}" = x ] || [ "${PIX_DT181_FIRMWARE_FILE+x}" = x ] ||
+   [ "${PIX_DT295_FIRMWARE_FILE+x}" = x ] || [ "${PIX_SOURCE_REVISION_OVERRIDE+x}" = x ]; then
+    echo 'Embedded firmware build options were removed; distribute firmware/ bundles and pass --firmware at runtime' >&2
+    exit 2
+fi
 build=$(mktemp -d "${TMPDIR:-/tmp}/pix-build.XXXXXX")
 echo "Build directory: $build" >&2
 # Keep intermediates for reproducibility/debugging; no unbounded rm -rf.
@@ -121,45 +112,22 @@ fi
 pkgdir=$build/prefix/lib/pkgconfig
 out=$root/build/$mode
 [ "$mode" != android ] || out=$out-$abi
-mkdir -p "$out"
-set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" "-DPIX_SOURCE_REVISION_OVERRIDE=${PIX_SOURCE_REVISION_OVERRIDE:-}" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
+mkdir -p "$out/firmware"
+rm -f "$out/embedded-assets.json"
+cp "$root/firmware/dt181.bin" "$root/firmware/dt295.bin" "$out/firmware/"
+set -- cmake -S "$root/core-integration" -B "$build/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="$extra_link" -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$build/bin" -DPIX_RUNTIME_VERSION="$version" -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON
 [ -z "$toolchain_file" ] || set -- "$@" -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" -DANDROID_ABI="$android_abi" -DANDROID_PLATFORM="android-$api" -DANDROID_STL=c++_static -DCMAKE_FIND_ROOT_PATH="$build/prefix"
 [ ! -d "$core_root" ] || set -- "$@" "-DPIX_CORE_SOURCE_DIR=$core_root"
-if [ "$embedded_assets" = ON ]; then
-    set -- "$@" -DPIX_EMBEDDED_ASSETS=ON \
-        "-DPIX_DT181_FIRMWARE_FILE=$dt181_firmware" \
-        "-DPIX_DT295_FIRMWARE_FILE=$dt295_firmware"
-fi
 CC=$cc CXX=$cxx PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir "$@"
 PKG_CONFIG_PATH=$pkgdir PKG_CONFIG_LIBDIR=$pkgdir cmake --build "$build/cmake" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 cp "$build/bin/pixd" "$build/bin/pixctl" "$build/bin/pix-ts" "$out/"
 cp "$build/libusb-1.0.30/COPYING" "$out/COPYING.libusb"
 {
-    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\nmode=%s\ntarget=%s\nembedded_assets=%s\ncompiler=%s\ncxx=%s\n' "$version" "$actual" "$mode" "$build_target" "$embedded_assets" "$cc" "$cxx"
+    printf 'PIX version %s\nlibusb 1.0.30\nSHA256 %s\nmode=%s\ntarget=%s\nfirmware=external\ncompiler=%s\ncxx=%s\n' "$version" "$actual" "$mode" "$build_target" "$cc" "$cxx"
     printf 'dtv-userland-core %s\n' "$core_pin"
     "$cc" --version | head -n 1
     "$cxx" --version | head -n 1
 } > "$out/build-info.txt"
-if [ "$embedded_assets" = ON ]; then
-    install -m 0644 "$build/cmake/embedded-assets/pix_embedded_assets.json" "$out/embedded-assets.json"
-    python3 - "$build/cmake/embedded-assets/pix_embedded_assets.json" >> "$out/build-info.txt" <<'PY'
-import hashlib
-import json
-import sys
-
-path = sys.argv[1]
-manifest_bytes = open(path, "rb").read()
-manifest = json.loads(manifest_bytes)
-print("embedded_source_revision=" + manifest["source_revision"])
-print("embedded_core_revision=" + manifest["dtv_userland_core_revision"])
-print("embedded_toolchain=" + manifest["toolchain"])
-print("embedded_manifest_sha256=" + hashlib.sha256(manifest_bytes).hexdigest())
-for model, entries in manifest["assets"].items():
-    files = entries["files"] if "files" in entries else {entries["file"]["name"]: entries["file"]}
-    for name, item in sorted(files.items()):
-        print(f"embedded_asset={model}/{name} size={item['size']} sha256={item['sha256']}")
-PY
-fi
 mkdir -p "$out/licenses"
 python3 "$root/tools/core-notices.py" "$core_root" "$out/licenses"
 echo "Built $out/pixd, $out/pixctl, and $out/pix-ts" >&2

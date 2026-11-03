@@ -35,6 +35,15 @@ class TestReleaseWorkflowGate(unittest.TestCase):
         self.assertNotIn("secrets.PIX_ASSETS_KEY", workflow)
         self.assertNotIn("finalize-private-release.py", workflow)
 
+    def test_release_workflow_builds_external_bundle_packages(self):
+        workflow = (ROOT/".github/workflows/release.yml").read_text()
+        self.assertNotIn("PIX_EMBEDDED_ASSETS", workflow)
+        self.assertNotIn("verify-embedded-assets.py", workflow)
+        self.assertIn("python3 tools/verify-release.py", workflow)
+        package = (ROOT/"tools/package-release.py").read_text()
+        self.assertIn("firmware/{name}", package)
+        self.assertIn("('dt181.bin', 'dt295.bin')", package)
+
 
 if __name__ == "__main__":
     unittest.main()

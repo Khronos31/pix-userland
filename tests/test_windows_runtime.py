@@ -1,5 +1,6 @@
 """Windows package CLI and synthetic public-runtime proof; never opens real USB."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,7 +41,12 @@ def main():
         run(["tar", "-xzf", args.archive.resolve(), "-C", root])
         package = next(root.glob("pix-userland-*-windows-x64"))
         metadata = json.loads((package / "release-info.json").read_text())
-        assert metadata["private"] is False and metadata["device_assets"] is False
+        assert metadata["private"] is False and metadata["device_assets"] is True
+        for model in ("dt181", "dt295"):
+            asset = package / "firmware" / f"{model}.bin"
+            record = metadata["asset_inputs"][model]["file"]
+            assert asset.is_file() and asset.stat().st_size == record["size"]
+            assert hashlib.sha256(asset.read_bytes()).hexdigest() == record["sha256"]
         for name in ("pixd", "pixctl", "pix-ts"):
             program = package / (name + ".exe")
             assert metadata["version"].encode() in run([program, "--version"]).stdout
@@ -49,14 +55,16 @@ def main():
         run([proofs / "pix_windows_os_thread_proof.exe"])
         firmware = root / "素材 日本語" / "任意の名前.bin"
         firmware.parent.mkdir()
-        firmware.write_bytes((root_source / "firmware/dt181.bin").read_bytes())
+        firmware.write_bytes((package / "firmware/dt181.bin").read_bytes())
+        run([proofs / "pixd_fixture.exe", "--device", "serial:PIXDT18101",
+             "-F", str(firmware)], expected=2)
         runtime = root / "r"
         runtime.mkdir()
         user = os.environ["USERDOMAIN"] + "\\" + os.environ["USERNAME"]
         run(["icacls", runtime, "/setowner", user])
         run(["icacls", runtime, "/inheritance:r", "/grant:r", user + ":(OI)(CI)F"])
         fixture = proofs / "pixd_fixture.exe"
-        command = [str(fixture), "--device", "serial:PIXDT18101", "-F", str(firmware),
+        command = [str(fixture), "--device", "serial:PIXDT18101", "--firmware", str(firmware),
                    "--runtime-dir", str(runtime), "--instance", "proof", "--exit-on-stdin-eof"]
         for attempt in range(2):
             log = root / f"daemon-{attempt}.log"
@@ -85,7 +93,7 @@ def main():
             text = log.read_text(encoding="utf-8", errors="replace")
             assert "PIX_CLEANUP release-interface=" in text and "PIX_CLEANUP close-handle=" in text
             assert not list(runtime.rglob("*.sock")), "Runtime socket remains after EOF cleanup"
-        print("Windows package CLI/arguments/renamed UTF-8 firmware/binary TS/runtime/EOF/cleanup/restart: PASS")
+        print("Windows package CLI/arguments/bundled UTF-8 firmware/binary TS/runtime/EOF/cleanup/restart: PASS")
 
 
 if __name__ == "__main__":
