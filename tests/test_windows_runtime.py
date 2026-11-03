@@ -56,13 +56,15 @@ def main():
         firmware = root / "素材 日本語" / "任意の名前.bin"
         firmware.parent.mkdir()
         firmware.write_bytes((package / "firmware/dt181.bin").read_bytes())
+        run([proofs / "pixd_fixture.exe", "--device", "serial:PIXDT18101",
+             "-F", str(firmware)], expected=2)
         runtime = root / "r"
         runtime.mkdir()
         user = os.environ["USERDOMAIN"] + "\\" + os.environ["USERNAME"]
         run(["icacls", runtime, "/setowner", user])
         run(["icacls", runtime, "/inheritance:r", "/grant:r", user + ":(OI)(CI)F"])
         fixture = proofs / "pixd_fixture.exe"
-        command = [str(fixture), "--device", "serial:PIXDT18101", "-F", str(firmware),
+        command = [str(fixture), "--device", "serial:PIXDT18101", "--firmware", str(firmware),
                    "--runtime-dir", str(runtime), "--instance", "proof", "--exit-on-stdin-eof"]
         for attempt in range(2):
             log = root / f"daemon-{attempt}.log"

@@ -18,7 +18,18 @@ client_arguments=()
 firmware_path=
 for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
     argument=${raw_client_arguments[index]}
-    if [[ $argument == --firmware || $argument == -F ]]; then
+    if [[ $argument == -o || $argument == --output ]]; then
+        client_arguments+=("$argument")
+        if ((index + 1 < ${#raw_client_arguments[@]})); then
+            client_arguments+=("${raw_client_arguments[++index]}")
+        fi
+        continue
+    fi
+    if [[ $argument == -F || $argument == -V ]]; then
+        echo "pix-termux: unknown argument: $argument" >&2
+        exit 2
+    fi
+    if [[ $argument == --firmware ]]; then
         if [[ -n $firmware_path || $((index + 1)) -ge ${#raw_client_arguments[@]} ]]; then
             echo 'pix-termux: provide exactly one --firmware FILE argument' >&2
             exit 2

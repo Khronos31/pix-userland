@@ -52,7 +52,7 @@
 - **PIX-DT181-PU0**: 単一のファームウェアファイル `dt181.bin`（形式 `P181A1`、699,773 バイト、SHA-256 `a8532036b2995c869f713714b85609d2d21508f8848b96e5c7528ab75f3dd7a0`）。従来の 3 つの個別ファイル（FPGA ビットストリーム、ブートストラップ、認証データ）を単一ファイルへ統合・検証する形式です。
 - **PIX-DT295**: 標準 `firmware/dt295.bin` は形式 `D295A1`、1,839,100 バイト、SHA-256 `3cabe15f585a8a7a7d7b9b3db548b677b0732c13926dc3a2b5270acf1bc6ffc8` です。公式ドライバ由来の衛星レジスターテーブルを含み、地上波で使う他のバンドルセクションは従来版と同じです。この標準バンドルハッシュのみを受理し、以前の地上波専用バンドルは拒否します。衛星バンドルでの実機受信は未検証です。
 
-標準のCLIオプション `pixd --firmware <FILE>`（短縮形 `-F <FILE>`）でバンドルを明示します。Release の全バイナリアーカイブに `firmware/dt181.bin` と `firmware/dt295.bin` の両方が含まれます。接続機種に対応する方を指定してください。ファイル名や拡張子は任意で、内容の形式・機種・SHA-256 ハッシュで検証されます。指定ファイルが不正、または検出機種と一致しない場合は起動に失敗します。
+標準のCLIオプション `pixd --firmware <FILE>` でバンドルを明示します。短縮形 `-F` はunknown argumentとして拒否されます。Release の全バイナリアーカイブに `firmware/dt181.bin` と `firmware/dt295.bin` の両方が含まれます。接続機種に対応する方を指定してください。ファイル名や拡張子は任意で、内容の形式・機種・SHA-256 ハッシュで検証されます。指定ファイルが不正、または検出機種と一致しない場合は起動に失敗します。
 
 GitHub 自動生成の Source code アーカイブと Release の対応ソースパッケージにも標準ファームウェア、マニフェスト、来歴メタデータ、再構成検証用の保存 IV が含まれます。一般の利用者がバンドルを生成する必要はありません。
 
@@ -212,14 +212,14 @@ termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --syste
 - `--device <SPEC>`: 保持する USB デバイスを指定します（`usb:BUS-PORT`、インデックス、`serial:TEXT` 等）。
 - `--instance <TOKEN>`: デーモンのインスタンス識別名を指定します。
 - `--runtime-dir <DIR>`: UNIX ドメインソケット等のランタイムディレクトリを指定します。
-- `--firmware <FILE>`, `-F <FILE>`: 必須のファームウェアバンドル指定です。接続機種と一致する検証済みファイルを指定します（任意ファイル名に対応）。
+- `--firmware <FILE>`: 必須のファームウェアバンドル指定です。接続機種と一致する検証済みファイルを指定します（任意ファイル名に対応）。
 - `--group`: 共有グループアクセスを有効にします。
 - `--exit-on-stdin-eof`: 標準入力が閉じた（EOF）際に自動停止します（親プロセス監視用）。
 - `--fd <FD>`: オープン済みの USB ファイルディスクリプタを渡します（Android / Termux 用）。
 - `--models`: 静的な対応機種一覧を表示します。
 - `--list-json`: 接続中の機器を JSON 形式で一覧表示します。
 
-※ `--firmware <FILE>` または `-F <FILE>` は必須です。不正なファイルや機種不一致の場合は起動エラーになります。
+※ `--firmware <FILE>` は必須です。不正なファイルや機種不一致の場合は起動エラーになります。
 
 #### `pixctl`（制御・状態照会ツール）
 - サブコマンド:
@@ -288,7 +288,7 @@ termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --syste
 
 C++17 対応コンパイラ、CMake 3.16 以上、Python 3、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。CMakeはconfigure時にPython 3 interpreterを必須とします。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
 
-ビルド後の `pixd` 起動時に `--firmware <FILE>`（または `-F <FILE>`）でファイルを指定します。リポジトリ内の `firmware/dt181.bin` と `firmware/dt295.bin` は、どちらの機種向けにも使える検証済み入力です。
+ビルド後の `pixd` 起動時に `--firmware <FILE>` でファイルを指定します。リポジトリ内の `firmware/dt181.bin` と `firmware/dt295.bin` は、どちらの機種向けにも使える検証済み入力です。
 
 ```sh
 cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release
@@ -296,7 +296,7 @@ cmake --build build/cmake --parallel 4
 ctest --test-dir build/cmake --output-on-failure
 ```
 
-ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。`pixd` の起動時に `--firmware <FILE>`（または `-F <FILE>`）が必要です。
+ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。`pixd` の起動時に `--firmware <FILE>` が必要です。
 
 ### ポータブルビルド（静的リンクスクリプト）
 
