@@ -301,7 +301,7 @@ test -n "$D"; LOG="$WORK/log"; RT="$WORK/runtime"; mkdir -m 700 "$LOG" "$RT"; cd
 python3 -c 'import json,sys; m=json.load(open("release-info.json")); print(json.dumps(m,sort_keys=True)); assert m.get("commit") == sys.argv[1]' "$SOURCE_SHA"
 ```
 
-Windows uses a new empty `$D`, `Expand-Archive`, and `Get-FileHash -Algorithm SHA256`. The target artifact digest from GitHub is checked before extraction; record the inner archive SHA-256 and `release-info.json.commit` as separate provenance evidence. This workflow artifact does not provide an inner `SHA256SUMS`. Windows helper commands use Python 3.11+ (`python --version`). Termux uses `$PREFIX/tmp` or `$HOME`, not OS `/tmp`; install/check `gh`, Python 3.11+, `tar`, `unzip`, `coreutils` using `pkg install gh python tar unzip coreutils` only after host approval. `termux-usb -l` output is recorded, and `termux-usb -r <path>` is limited to a path identified as the target tuner. Linux access is observed with `id`, `stat`, and `lsusb -t`; permissions/udev changes require separate approval, saved original state, and restoration. Do not change HAOS/Supervisor settings.
+Windowsでは新しい空の `$D`、`Expand-Archive`、および `Get-FileHash -Algorithm SHA256` を使う。GitHub由来の対象artifactダイジェストは展開前に照合する。内側のアーカイブSHA-256と `release-info.json.commit` を個別の由来証拠として記録する。このワークフローのartifactには内側の `SHA256SUMS` は提供されない。WindowsのhelperコマンドはPython 3.11以上（`python --version`）を使う。TermuxはOSの `/tmp` ではなく、`$PREFIX/tmp` または `$HOME` を使う。ホスト管理者の承認後にのみ `pkg install gh python tar unzip coreutils` を使って `gh`、Python 3.11以上、`tar`、`unzip`、`coreutils` の導入と確認を行う。`termux-usb -l` の出力を記録し、`termux-usb -r <path>` は対象チューナーと特定されたパスのみに限定する。Linuxのアクセス権は `id`、`stat`、`lsusb -t` で確認する。アクセス権やudevの変更には個別の承認、元の状態の退避、および復元を要する。HAOS/Supervisor設定は変更しない。
 
 Windows PowerShellの実行例:
 
