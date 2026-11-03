@@ -8,7 +8,7 @@
 
 `include/version.h` の版は変更していません。この移行は正式 Release・タグ・版更新を含みません。
 
-Release の全バイナリアーカイブは標準 `firmware/dt181.bin` と `firmware/dt295.bin` を外部バンドルとして同梱し、起動時に `pixd --firmware FILE`（または `-F FILE`）で機種に対応したファイルを明示します。リリース検証は全7ターゲットの両ファイルを検証し、同じアーカイブの対応ソースパッケージに含まれる入力バイトとの一致を確認します。
+Release の全バイナリアーカイブは標準 `firmware/dt181.bin` と `firmware/dt295.bin` を外部バンドルとして同梱し、起動時に `pixd --firmware FILE` で機種に対応したファイルを明示します。短縮形 `-F` はunknown argumentとして拒否されます。リリース検証は全7ターゲットの両ファイルを検証し、同じアーカイブの対応ソースパッケージに含まれる入力バイトとの一致を確認します。
 
 GitHub 自動生成の Source code アーカイブと、`tools/package-release.py source` が生成する公式の対応ソースパッケージは構成が異なります。どちらも Git 追跡された `firmware/dt181.bin`、衛星テーブルを含む標準 `firmware/dt295.bin`、マニフェスト、メタデータ、保存 IV を含みます。ただし、GitHub 自動生成アーカイブは固定バージョンの Core / libusb ソーススナップショットを含まないため、ネットワーク接続のない完全なオフライン再ビルドには対応ソースパッケージを使用します。暗号化された生成用入力 `.private/assets.enc` はどちらのアーカイブにも含まれません。
 

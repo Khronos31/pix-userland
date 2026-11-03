@@ -56,7 +56,7 @@ void usage(FILE* output) noexcept
 {
     std::fprintf(output,
         "usage: pixd (--device serial:SELECTOR|usb:SELECTOR | --fd N [--device SELECTOR]) "
-        "[--firmware FILE|-F FILE] [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
+        "[--firmware FILE] [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
@@ -84,6 +84,10 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
+        if (option == "-F" || option == "-V") {
+            error = "unknown argument";
+            return false;
+        }
 #ifdef _WIN32
         if (option == "--exit-on-stdin-eof") {
             if (out.exit_on_stdin_eof) {
@@ -103,7 +107,7 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
             continue;
         }
         const bool value_option = option == "--device" || option == "--instance" ||
-            option == "--runtime-dir" || option == "--firmware" || option == "-F"
+            option == "--runtime-dir" || option == "--firmware"
 #ifndef _WIN32
             || option == "--fd"
 #endif
@@ -139,19 +143,19 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
-        else if ((option == "--firmware" || option == "-F") && !firmware && value[0] != '\0') {
+        else if (option == "--firmware" && !firmware && value[0] != '\0') {
             out.firmware_path = value;
             firmware = true;
         }
         else if (option == "--instance") {
             error = "--instance may be used once";
             return false;
-        } else if (option == "--firmware" || option == "-F") {
+        } else if (option == "--firmware") {
             error = firmware ? "--firmware may be used once" :
                 "--firmware requires a non-empty file path";
             return false;
         } else if (option == "--device" || option == "--runtime-dir" ||
-                   option == "--firmware" || option == "-F") {
+                   option == "--firmware") {
             error = "option may be used once";
             return false;
         } else {
