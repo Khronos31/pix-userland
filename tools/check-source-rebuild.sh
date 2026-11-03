@@ -43,6 +43,7 @@ done
 PKG_CONFIG_PATH="$work/libusb-prefix/lib/pkgconfig" \
 PKG_CONFIG_LIBDIR="$work/libusb-prefix/lib/pkgconfig" \
 cmake -S "$src/core-integration" -B "$work/build-proof" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_EXE_LINKER_FLAGS=-static \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-proof/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON

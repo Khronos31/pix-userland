@@ -428,7 +428,7 @@ else()
         -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
 endif()
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
 add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
 target_include_directories(pix_public_runtime_proof PRIVATE

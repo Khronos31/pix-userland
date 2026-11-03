@@ -195,8 +195,23 @@ class TestDT295Packaging(unittest.TestCase):
 
   def test_packager_adds_both_external_bundles_to_every_target(self):
     pack = load_script("package-release.py", "test_package_release_bundles")
+    pack.git_value = lambda *args: "a" * 40
     with __import__("tempfile").TemporaryDirectory() as temp:
       root = Path(temp)
+      source = root / "source"
+      required = ("README.md", "LICENSE", "COPYING.libusb", "THIRD_PARTY_NOTICES.md",
+                  "docs/releases.md", "packaging/pix-usb-permissions", "packaging/pix-termux",
+                  "licenses/musl-COPYRIGHT.txt", "licenses/GPL-2.0.txt")
+      for name in required:
+          path = source / name
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text("fixture")
+      for name in ("dt181.bin", "dt295.bin"):
+          path = source / "firmware" / name
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_bytes((ROOT / "firmware" / name).read_bytes())
+      pack.ROOT = source
+      pack.source_files = lambda: [(name, source / name) for name in required[4:]]
       binary = root / "binary"
       (binary / "licenses").mkdir(parents=True)
       (binary / "build-info.txt").write_text(f"dtv-userland-core {pack.CORE_LOCK}\n")
