@@ -467,7 +467,7 @@ helperのversionはrunbook Git commitとSHA-256の組で固定する。candidate
 
 ### T09 TS・counter・終了値判定
 
-- **適用対象/頻度:** 全capture/soak。
+- **適用対象/頻度:** 保存TSを対象とする品質確認。2時間ソークでは自動適用せず、5分品質試験と運転安定性の記録を分ける。
 - **準備:** Python 3.11以上を`python3 --version`で確認し、固定取得した`$TOOL/ts-check.py`（Windowsは`$Helper`）を使う。候補ごとに新規作成した`$LOG`を使う。
 - **実操作/利用者への依頼:** POSIXでは各TSに`python3 $TOOL/ts-check.py "$LOG/<capture>.ts" > "$LOG/<capture>.ts-check.json"`を実行する。Windowsは同じhelperを`python $Helper "$LOG\<capture>.ts"`で実行し、標準出力を`$LOG`へ保存する。Termuxは`python`で同じhelperを呼び出す。候補daemonのpacket/byte/USB counterとclient exitも記録する。
 - **期待値/終了値:** helperは固定4096 packet chunkでTSを走査し、null PIDはcontinuity判定から除外して`null_packet_count`をJSONへ出す。詳細indexが必要なrunだけ`--null-indices "$LOG/<capture>.null-indices.txt"`を追加し、zero-based indexを別fileへ1行ずつ出力する。出力先とTSを同じpathにしない。同一PIDの隣接payload duplicate pairはPCR timestamp以外の全byte一致時だけ1組を許容し、duplicate indexをJSONへ記録する。3個目、内容差、非連続再送はcontinuity error。retune境界を確認できるrunはzero-basedの最初の出力packet indexを`--retune-boundary-at`へ渡し、境界後の各PID初回packetだけCC比較を除外する。TEI、sync、framing、invalid adaptationは除外しない。PCR reserved bits/extension違反とinvalid adaptationはfail。全TSが製品SPEC基準を満たし通常取得exit 0。非空file/counter 0だけでpassにしない。
@@ -514,11 +514,11 @@ if ($parserRc -ne 0) { throw "TS parser failed: $parserRc" }
 ### T13 連続受信・頻度
 
 - **適用対象/頻度:** 毎releaseおよび全model初回/major。
-- **準備:** 確定頻度表の対象archive/model/timeをmatrixへ展開する。
+- **準備:** 確定頻度表の対象archive/model/timeをmatrixへ展開する。機種ごとの基本負荷は地上波1 streamを`/dev/null`へ出力する。別の負荷を指定する場合は、その負荷の結果として記録する。
 - **実操作/利用者への依頼:** 毎release代表Linux x86_64 glibc 2h/全archive native short; 初回全modelごと全無料channel 10s、macOS/Windows 30m、他ABI 10m。
-- **期待値/終了値:** 指定連続時間完了かつTS条件合格。追加soakは明示ユーザー決定分のみ。
+- **期待値/終了値:** 2時間ソークは指定負荷での運転安定性を判定する。指定時間を連続完了し、daemonからIPCを経てclientへ届くbyte/packetの観測系列が進行し、実daemon/client PID・実行ファイルに紐づくFD/RSS系列を記録し、client/daemonの正常終了と所有process・FD・IPCの解放を確認する。PID生存だけを出力進行としない。FD/RSSの定量閾値は設けず、最終観測まで安定しない持続増加は判定保留とする。観測欠測はnull/errorとして記録し、zeroやpassにしない。TEI/CC等のTS品質は5分品質試験で判定し、2時間ソークへ自動結合しない。追加soakは明示ユーザー決定分のみ。この運転安定性判定は2時間ソークに適用し、他の既存時間条件・採否は変更しない。
 - **停止/cleanup:** T08通常stopと全resource cleanup。
-- **記録:** model/OS/ABI/archive、時間、TS/counter、FD/RSS、未実施理由。
+- **記録:** model/OS/ABI/archive、指定負荷と時間、観測間のbyte/packet進行、実PID/executableごとのFD/RSS系列、終了値と所有resource/IPC cleanup、欠測/未実施理由を記録する。品質結果は別欄に保持する。Windowsのhandle countはFDの代替とせず、FD未取得はnull/errorとする。
 
 ### T14 失敗・リリース判定
 
@@ -1075,7 +1075,9 @@ termux-usb -r -e "./pixd --instance rc --runtime-dir $RT2 --group" "$USB_NODE"
 
 ## 5. soak・cleanup・記録
 
-代表Linux x86_64機で2時間連続受信し、開始・定期・終了時にTS/parser品質、packet/counter、process/FD/RSS、channel、終了値を保存します。未完了やエラーは失敗/未確認で残します。
+2時間ソークは運転安定性を判定し、TS品質を合否へ自動結合しない。TEI/CC等の保存TS品質は既存の5分品質試験で別に判定し、既存数値・採否条件は変えない。2時間run中にTS品質を別途確認した場合も、その結果は独立して記録する。
+
+代表Linux x86_64機で2時間連続受信し、開始・定期・終了時に出力byte/packet、counter、process/FD/RSS、channel、終了値を保存します。未完了やエラーは失敗/未確認で残します。
 
 `pix-ts`を通常終了し、`pixd`へSIGTERMを送り、status/process/runtime socket cleanupを確認します。`pixd`終了後もruntime rootを残したまま同じ`--group` accessでstatus照会し、IPC endpointの消失と接続失敗を対応付けます。
 
