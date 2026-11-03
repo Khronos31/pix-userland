@@ -147,6 +147,27 @@ for option in -F -V; do
     [ ! -s "$tmp/legacy.log" ]
     [ ! -e "$tmp/legacy.runtime" ]
 done
+
+for output_option in -o --output; do
+    name=$(printf '%s' "$output_option" | tr -d '-')
+    log="$tmp/output-$name.log"
+    runtime_file="$tmp/output-$name.runtime"
+    stderr_file="$tmp/output-$name.stderr"
+    if PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
+        PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+        "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+        --channel T27 "$output_option" -V 7 2>"$stderr_file"; then
+        status=0
+    else
+        status=$?
+    fi
+    [ "$status" -eq 0 ]
+    runtime=$(cat "$runtime_file")
+    grep -Fqx "pix-ts --runtime-dir $runtime --instance pix-fd --channel T27 $output_option -V" "$log"
+    grep -Fqx "pix-ts-arg=$output_option" "$log"
+    grep -Fqx 'pix-ts-arg=-V' "$log"
+    [ ! -e "$runtime" ]
+done
 if find "$tmp" -maxdepth 1 -type d -name 'pix-termux.*' | grep . >/dev/null; then
     echo 'legacy option created launcher runtime state' >&2
     exit 1

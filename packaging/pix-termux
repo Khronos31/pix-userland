@@ -18,6 +18,13 @@ client_arguments=()
 firmware_path=
 for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
     argument=${raw_client_arguments[index]}
+    if [[ $argument == -o || $argument == --output ]]; then
+        client_arguments+=("$argument")
+        if ((index + 1 < ${#raw_client_arguments[@]})); then
+            client_arguments+=("${raw_client_arguments[++index]}")
+        fi
+        continue
+    fi
     if [[ $argument == -F || $argument == -V ]]; then
         echo "pix-termux: unknown argument: $argument" >&2
         exit 2
