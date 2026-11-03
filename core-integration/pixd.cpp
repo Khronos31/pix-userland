@@ -163,12 +163,10 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         error = "--device or --fd is required";
         return false;
     }
-#if !defined(PIX_EMBEDDED_ASSETS)
     if (!firmware) {
-        error = "--firmware FILE is required in this build";
+        error = "--firmware FILE is required";
         return false;
     }
-#endif
     if (out.group && (!runtime || out.runtime_directory.empty())) {
         error = "--group requires an explicit non-empty --runtime-dir";
         return false;
@@ -501,9 +499,6 @@ int run(int argc, char** argv)
         }
     }
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
-#if defined(PIX_EMBEDDED_ASSETS)
-    const bool fake_dt295 = false;
-#else
     const char* fd_model = std::getenv("PIX_TEST_USB_FD_MODEL");
     const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
         (arguments.device == "serial:PIXDT29501" ||
@@ -519,7 +514,6 @@ int run(int argc, char** argv)
         const int notification = std::getenv("PIX_TEST_DT295_NOTIFICATION") != nullptr;
         dt295_actual_fixture_configure_presence(raw_state, notification);
     }
-#endif
 #endif
 
     const auto located = arguments.fd >= 0

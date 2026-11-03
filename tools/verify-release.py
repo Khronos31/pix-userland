@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the release set, embedded build identities and optional legacy assets."""
+"""Validate the release set, external firmware bundles and source closure."""
 import argparse
 import hashlib
 import importlib.util
@@ -28,13 +28,6 @@ SOURCE_ONLY_KEYS = {"repository_commit", "repository_tree", "dtv_userland_core_t
 FIRMWARE_MANIFEST = read_manifest()
 
 
-def validate_flags(with_assets, with_dt295_assets, with_embedded_assets=False):
-    if with_dt295_assets and not with_assets:
-        raise ValueError("--with-dt295-assets requires --with-assets")
-    if with_embedded_assets and (with_assets or with_dt295_assets):
-        raise ValueError("Embedded assets cannot be combined with legacy asset flags")
-
-
 def _read_archive(path):
     with tarfile.open(path, "r:gz") as archive:
         members = archive.getmembers()
@@ -45,13 +38,14 @@ def _read_archive(path):
         return {member.name: archive.extractfile(member).read() for member in members}
 
 
-def _expected_metadata(target, commit, with_assets, with_dt295_assets, with_embedded_assets=False):
+def _expected_metadata(target, commit, asset_inputs):
     expected = {
         "project": "pix-userland", "version": pack.VERSION, "target": target,
         "commit": commit, "libusb": "1.0.30", "private": False,
         "libusb_linkage": "static",
-        "device_assets": bool((with_assets or with_embedded_assets) and target != "source"),
+        "device_assets": target != "source",
         "dtv_userland_core_commit": CORE_PIN,
+        "asset_inputs": asset_inputs,
     }
     return expected
 
@@ -71,32 +65,6 @@ def _source_asset_records(contents, prefix):
                           "file": {"name": file_name, "size": len(data),
                                    "sha256": hashlib.sha256(data).hexdigest()}}
     return records
-
-
-def _verify_embedded_binary(contents, prefix, metadata, source_assets, source_contents, source_prefix):
-    try:
-        manifest_bytes = contents[prefix + "embedded-assets.json"]
-        manifest = json.loads(manifest_bytes)
-        build_info = contents[prefix + "build-info.txt"]
-    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Missing or invalid embedded asset manifest or build-info") from exc
-    embedded = pack.embedded_build_metadata(build_info, manifest, manifest_bytes)
-    if embedded["assets"] != source_assets:
-        raise ValueError("Embedded asset manifest differs from corresponding source inputs")
-    if embedded["source_revision"] != metadata["commit"] or embedded["dtv_userland_core_revision"] != CORE_PIN:
-        raise ValueError("Embedded source or Core revision mismatch")
-    asset_names = {name for name in contents if name.startswith(prefix + "firmware/")}
-    if asset_names:
-        raise ValueError("Embedded binary package contains external asset files")
-    pixd = contents[prefix + "pixd" + (".exe" if metadata["target"] == "windows-x64" else "")]
-    for model, entries in source_assets.items():
-        asset = entries["file"]
-        asset_path = source_prefix + "firmware/" + asset["name"]
-        if pixd.find(source_contents[asset_path]) < 0:
-            raise ValueError(f"pixd lacks embedded firmware bytes: {model}/{asset['name']}")
-    if metadata.get("embedded_assets") != embedded:
-        raise ValueError("Release metadata differs from embedded manifest")
-    return embedded
 
 
 def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
@@ -146,9 +114,7 @@ def _verify_source_closure(contents, prefix, metadata, libusb_sha256):
         raise ValueError("Source closure lacks the Core adapter COPYING")
 
 
-def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_embedded_assets=False, commit=None,
-                   source_libusb_sha256=SOURCE_LIBUSB_SHA256):
-    validate_flags(with_assets, with_dt295_assets, with_embedded_assets)
+def verify_release(root=None, commit=None, source_libusb_sha256=SOURCE_LIBUSB_SHA256):
     root = Path(root) if root is not None else pack.ROOT
     out = root / "dist"
     if commit is None:
@@ -179,12 +145,7 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
             metadata = json.loads(contents[metadata_name])
         except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(f"Missing or invalid release metadata: {target}") from exc
-        expected_metadata = _expected_metadata(target, commit, with_assets, with_dt295_assets,
-                                              with_embedded_assets)
-        if with_assets and target != "source":
-            expected_metadata["dt295_assets"] = bool(with_dt295_assets and target == "darwin-arm64")
-        elif target != "source" and metadata.get("dt295_assets", False) is not False:
-            raise ValueError(f"Unexpected DT295 asset metadata: {target}")
+        expected_metadata = _expected_metadata(target, commit, source_assets)
         compared = metadata
         if target == "source":
             if metadata.get("repository_commit") != commit:
@@ -193,30 +154,27 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
             if metadata.get("asset_inputs") != source_assets:
                 raise ValueError("Source asset metadata differs from source input bytes")
             expected_metadata["asset_inputs"] = source_assets
-        elif with_embedded_assets:
-            expected_metadata["embedded_assets"] = _verify_embedded_binary(
-                contents, prefix, metadata, source_assets, source_contents, source_prefix)
+        else:
+            for model in ("dt181", "dt295"):
+                asset_name = source_assets[model]["file"]["name"]
+                asset_path = prefix + "firmware/" + asset_name
+                source_path = source_prefix + "firmware/" + asset_name
+                if contents.get(asset_path) != source_contents.get(source_path):
+                    raise ValueError(f"Binary asset differs from source input: {target}/{asset_name}")
+            if prefix + "embedded-assets.json" in contents or "embedded_assets" in metadata:
+                raise ValueError(f"Embedded asset output is no longer supported: {target}")
         if compared != expected_metadata:
             raise ValueError(f"Release metadata mismatch: {target}")
         firmware_prefix = prefix + "firmware/"
         asset_names = {member_name for member_name in contents if member_name.startswith(firmware_prefix)}
-        expected_assets = {}
-        if with_assets and target != "source":
-            expected_assets[firmware_prefix + FIRMWARE_MANIFEST["models"]["dt181"]["file"]] = \
-                FIRMWARE_MANIFEST["models"]["dt181"]["size"]
-        if with_dt295_assets and target == "darwin-arm64":
-            expected_assets[firmware_prefix + FIRMWARE_MANIFEST["models"]["dt295"]["file"]] = \
-                FIRMWARE_MANIFEST["models"]["dt295"]["size"]
-        if target != "source" and asset_names != set(expected_assets):
+        expected_assets = {firmware_prefix + FIRMWARE_MANIFEST["models"][model]["file"]
+                           for model in ("dt181", "dt295")} if target != "source" else set()
+        if target != "source" and asset_names != expected_assets:
             raise ValueError(f"Incorrect device asset set: {target}")
-        for asset_name, size in expected_assets.items():
-            if size is not None and len(contents[asset_name]) != size:
-                raise ValueError(f"Invalid device asset size: {asset_name}")
         for asset_name in expected_assets:
-            if asset_name.endswith("dt181.bin"):
-                verify_bundle("dt181", contents[asset_name], FIRMWARE_MANIFEST)
-            elif asset_name.endswith("dt295.bin"):
-                verify_bundle("dt295", contents[asset_name], FIRMWARE_MANIFEST)
+            model = "dt181" if asset_name.endswith("dt181.bin") else "dt295"
+            verify_bundle(model, contents[asset_name], FIRMWARE_MANIFEST)
+            if model == "dt295":
                 finalize.validate_dt295_bundle(contents[asset_name])
         if any(member_name.lower().endswith((".dll", ".dylib", ".so")) for member_name in contents):
             raise ValueError("Unexpected shared library")
@@ -240,8 +198,9 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
             build_info = contents.get(prefix + "build-info.txt", b"").decode("utf-8", "replace")
             if f"dtv-userland-core {CORE_PIN}" not in build_info:
                 raise ValueError(f"build-info.txt lacks the Core pin: {target}")
-            if not with_embedded_assets and (prefix + "embedded-assets.json" in contents or "embedded_assets" in metadata):
-                raise ValueError(f"Unexpected embedded asset manifest: {target}")
+            build_info = contents.get(prefix + "build-info.txt", b"").decode("utf-8", "replace")
+            if "embedded_assets" in build_info or "embedded_asset=" in build_info:
+                raise ValueError(f"Unexpected embedded asset build metadata: {target}")
             if prefix + "licenses/dtv-userland-core-LICENSE" not in contents or not any(
                     name.startswith(prefix + "licenses/dtv-userland-core-") and name.endswith("-COPYING")
                     for name in contents):
@@ -259,15 +218,8 @@ def verify_release(root=None, with_assets=False, with_dt295_assets=False, with_e
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--with-assets", action="store_true")
-    parser.add_argument("--with-dt295-assets", action="store_true",
-                        help="require and verify the DT295 firmware bundle in darwin-arm64")
-    parser.add_argument("--with-embedded-assets", action="store_true",
-                        help="require embedded asset metadata and bytes in all seven binaries")
     args = parser.parse_args(argv)
-    validate_flags(args.with_assets, args.with_dt295_assets, args.with_embedded_assets)
-    verify_release(with_assets=args.with_assets, with_dt295_assets=args.with_dt295_assets,
-                   with_embedded_assets=args.with_embedded_assets)
+    verify_release()
     print("Verified seven binary packages (pixd, pixctl, pix-ts) and matching source closure; SHA256SUMS created")
 
 

@@ -113,12 +113,14 @@ def source_members(commit):
 
 def binary_members(target, commit):
     suffix = ".exe" if target == "windows-x64" else ""
+    source = source_members(commit)
+    asset_inputs = verify._source_asset_records(source, "")
     members = {
         "release-info.json": json.dumps({
             "project": "pix-userland", "version": finalize.pack.VERSION,
             "target": target, "commit": commit, "libusb": "1.0.30",
-            "private": False, "libusb_linkage": "static", "device_assets": False,
-            "dtv_userland_core_commit": verify.CORE_PIN,
+            "private": False, "libusb_linkage": "static", "device_assets": True,
+            "dtv_userland_core_commit": verify.CORE_PIN, "asset_inputs": asset_inputs,
         }).encode() + b"\n",
         "LICENSE": (ROOT / "LICENSE").read_bytes(), "COPYING.libusb": b"copying",
         "THIRD_PARTY_NOTICES.md": b"notices", "licenses/musl-COPYRIGHT.txt": b"musl",
@@ -126,6 +128,8 @@ def binary_members(target, commit):
         "build-info.txt": f"dtv-userland-core {verify.CORE_PIN}\n".encode(),
         "licenses/dtv-userland-core-LICENSE": b"mit",
         "licenses/dtv-userland-core-host_ts-COPYING": b"gpl",
+        "firmware/dt181.bin": source["firmware/dt181.bin"],
+        "firmware/dt295.bin": source["firmware/dt295.bin"],
     }
     members.update({program + suffix: b"binary" for program in verify.pack.PROGRAMS})
     return members
@@ -147,12 +151,6 @@ def make_release(tmp_path, monkeypatch):
     return root, commit
 
 
-def make_dt181_firmware(tmp_path):
-    firmware = tmp_path / "dt181.bin"
-    firmware.write_bytes((ROOT / "firmware/dt181.bin").read_bytes())
-    return firmware
-
-
 class TestDT295Packaging(unittest.TestCase):
   def test_bundle_validator_checks_all_hashes_and_structure(self):
     bundle = synthetic_bundle()
@@ -168,47 +166,6 @@ class TestDT295Packaging(unittest.TestCase):
         finalize.validate_dt295_bundle(bundle + b"x")
 
 
-  def test_optional_dt295_is_only_added_to_matching_binary_and_source_stays_unchanged(self):
-    with __import__("tempfile").TemporaryDirectory() as temp:
-      tmp_path = Path(temp)
-      root, commit = make_release(tmp_path, self)
-      source_path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-source.tar.gz"
-      source_before = source_path.read_bytes()
-      dt181 = make_dt181_firmware(tmp_path)
-      bundle_path = tmp_path / "dt295.bin"
-      bundle_path.write_bytes((ROOT / "firmware/dt295.bin").read_bytes())
-
-      finalize.finalize_private_release(dt181, bundle_path, root=root)
-
-      for target in finalize.pack.TARGETS:
-        contents = read_archive(root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz")
-        prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
-        metadata = json.loads(contents[prefix + "release-info.json"])
-        expected = target == "darwin-arm64"
-        self.assertIs(metadata["dt295_assets"], expected)
-        self.assertEqual((prefix + "firmware/dt295.bin" in contents), expected)
-        if expected:
-            self.assertEqual(contents[prefix + "firmware/dt295.bin"], bundle_path.read_bytes())
-      self.assertEqual(source_path.read_bytes(), source_before)
-
-      verify.verify_release(root=root, with_assets=True, with_dt295_assets=True,
-                          commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
-
-
-  def test_legacy_finalization_sets_false_and_verifies_without_dt295(self):
-    with __import__("tempfile").TemporaryDirectory() as temp:
-      tmp_path = Path(temp)
-      root, commit = make_release(tmp_path, self)
-      finalize.finalize_private_release(make_dt181_firmware(tmp_path), root=root)
-      for target in finalize.pack.TARGETS:
-        contents = read_archive(root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz")
-        prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
-        self.assertIs(json.loads(contents[prefix + "release-info.json"])["dt295_assets"], False)
-        self.assertFalse(any(name.startswith(prefix + "firmware/dt295") for name in contents))
-      verify.verify_release(root=root, with_assets=True, commit=commit,
-                          source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
-
-
   def test_invalid_bundle_is_rejected_before_any_archive_changes(self):
     with __import__("tempfile").TemporaryDirectory() as temp:
       tmp_path = Path(temp)
@@ -217,33 +174,75 @@ class TestDT295Packaging(unittest.TestCase):
       invalid = tmp_path / "invalid.bin"
       invalid.write_bytes((ROOT / "firmware/dt295.bin").read_bytes() + b"extra")
       with self.assertRaisesRegex(ValueError, "size"):
-          finalize.finalize_private_release(make_dt181_firmware(tmp_path), invalid, root=root)
+          finalize.finalize_private_release(ROOT / "firmware/dt181.bin", invalid, root=root)
       after = {path.name: path.read_bytes() for path in (root / "dist").glob("*.tar.gz")}
       self.assertEqual(after, before)
 
 
-  def test_verifier_requires_both_asset_flags_and_detects_bad_dt295_hash(self):
-    with self.assertRaisesRegex(ValueError, "requires --with-assets"):
-        verify.validate_flags(False, True)
+  def test_every_target_requires_both_external_bundles(self):
     with __import__("tempfile").TemporaryDirectory() as temp:
       tmp_path = Path(temp)
       root, commit = make_release(tmp_path, self)
-      bundle_path = tmp_path / "dt295.bin"
-      bundle_path.write_bytes((ROOT / "firmware/dt295.bin").read_bytes())
-      finalize.finalize_private_release(make_dt181_firmware(tmp_path), bundle_path, root=root)
-      archive_path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-darwin-arm64.tar.gz"
-      members = read_archive(archive_path)
-      asset_name = f"pix-userland-{finalize.pack.VERSION}-darwin-arm64/firmware/dt295.bin"
-      bad_bundle = bytearray(members[asset_name])
-      bad_bundle[-1] ^= 1
-      members[asset_name] = bytes(bad_bundle)
-      write_archive(archive_path, "darwin-arm64", {
-        name.removeprefix(f"pix-userland-{finalize.pack.VERSION}-darwin-arm64/"): data
-        for name, data in members.items()
-      })
-      with self.assertRaisesRegex(ValueError, "SHA-256"):
-        verify.verify_release(root=root, with_assets=True, with_dt295_assets=True,
-                              commit=commit, source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
+      for target in finalize.pack.TARGETS:
+        archive_path = root / "dist" / f"pix-userland-{finalize.pack.VERSION}-{target}.tar.gz"
+        members = read_archive(archive_path)
+        prefix = f"pix-userland-{finalize.pack.VERSION}-{target}/"
+        for name in ("dt181.bin", "dt295.bin"):
+            self.assertIn(prefix + "firmware/" + name, members)
+        self.assertEqual(json.loads(members[prefix + "release-info.json"])["device_assets"], True)
+      verify.verify_release(root=root, commit=commit,
+                            source_libusb_sha256=hashlib.sha256(SYNTHETIC_LIBUSB).hexdigest())
+
+  def test_packager_adds_both_external_bundles_to_every_target(self):
+    pack = load_script("package-release.py", "test_package_release_bundles")
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root = Path(temp)
+      binary = root / "binary"
+      (binary / "licenses").mkdir(parents=True)
+      (binary / "build-info.txt").write_text(f"dtv-userland-core {pack.CORE_LOCK}\n")
+      (binary / "licenses/musl-COPYRIGHT.txt").write_text("musl")
+      (binary / "licenses/GPL-2.0.txt").write_bytes((ROOT / "licenses/GPL-2.0.txt").read_bytes())
+      for target in pack.TARGETS:
+          suffix = ".exe" if target == "windows-x64" else ""
+          for program in pack.PROGRAMS:
+              (binary / (program + suffix)).write_bytes(b"binary")
+          pack.package(target, binary_dir=binary, output_dir=root / "dist")
+          archive_path = root / "dist" / f"pix-userland-{pack.VERSION}-{target}.tar.gz"
+          prefix = f"pix-userland-{pack.VERSION}-{target}/"
+          contents = read_archive(archive_path)
+          self.assertEqual(contents[prefix + "firmware/dt181.bin"],
+                           (ROOT / "firmware/dt181.bin").read_bytes())
+          self.assertEqual(contents[prefix + "firmware/dt295.bin"],
+                           (ROOT / "firmware/dt295.bin").read_bytes())
+          info = json.loads(contents[prefix + "release-info.json"])
+          self.assertTrue(info["device_assets"])
+
+  def test_verifier_rejects_missing_or_tampered_external_bundle(self):
+    for name, change, message in (
+        ("missing", lambda members, prefix: members.pop("firmware/dt295.bin"),
+         "Binary asset differs from source input"),
+        ("tampered", lambda members, prefix: members.__setitem__(
+            "firmware/dt295.bin", members["firmware/dt295.bin"][:-1] + b"x"),
+         "Binary asset differs from source input"),
+    ):
+      with self.subTest(case=name), __import__("tempfile").TemporaryDirectory() as temp:
+        root, commit = make_release(Path(temp), self)
+        self._rewrite(root, "linux-x86_64",
+                      lambda members: change(members, f"pix-userland-{finalize.pack.VERSION}-linux-x86_64/"))
+        with self.assertRaisesRegex(ValueError, message):
+          self._verify(root, commit)
+
+  def test_verifier_rejects_embedded_metadata_and_manifest(self):
+    with __import__("tempfile").TemporaryDirectory() as temp:
+      root, commit = make_release(Path(temp), self)
+      def add_old_metadata(members):
+          info = json.loads(members["release-info.json"])
+          info["embedded_assets"] = {"legacy": True}
+          members["release-info.json"] = json.dumps(info).encode()
+          members["embedded-assets.json"] = b"{}"
+      self._rewrite(root, "linux-x86_64", add_old_metadata)
+      with self.assertRaisesRegex(ValueError, "Embedded asset output is no longer supported"):
+          self._verify(root, commit)
 
 
   def test_verifier_rejects_grant_only_change(self):
