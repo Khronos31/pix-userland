@@ -56,7 +56,7 @@ void usage(FILE* output) noexcept
 {
     std::fprintf(output,
         "usage: pixd (--device serial:SELECTOR|usb:SELECTOR | --fd N [--device SELECTOR]) "
-        "[--firmware FILE] [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
+        "--firmware FILE [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
@@ -77,9 +77,32 @@ void usage(FILE* output) noexcept
         );
 }
 
-bool parse(int argc, char** argv, Arguments& out, bool& help,
+bool parse(int argc, char** argv, Arguments& out, bool& help, bool& version,
            const char*& error) noexcept
 {
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view option(argv[i] != nullptr ? argv[i] : "");
+        if (option == "-h" || option == "--help") help = true;
+        else if (option == "--version") version = true;
+        if ((option == "--runtime-dir" || option == "--firmware") &&
+            i + 1 < argc && argv[i + 1] != nullptr &&
+            std::string_view(argv[i + 1]).rfind("--", 0U) != 0U) {
+            ++i;
+        } else if ((option == "--device" || option == "--instance") &&
+                   i + 1 < argc && argv[i + 1] != nullptr &&
+                   std::string_view(argv[i + 1]).rfind("-", 0U) != 0U) {
+            ++i;
+        }
+#ifndef _WIN32
+        else if (option == "--fd" && i + 1 < argc && argv[i + 1] != nullptr &&
+                 std::string_view(argv[i + 1]) != "-h" &&
+                 std::string_view(argv[i + 1]) != "--help" &&
+                 std::string_view(argv[i + 1]) != "--version") {
+            ++i;
+        }
+#endif
+    }
+    if (help || version) return true;
     bool device = false, fd = false, instance = false, runtime = false, firmware = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
@@ -471,12 +494,17 @@ int run(int argc, char** argv)
     Arguments arguments;
     bool help = false;
     const char* parse_error = "invalid command line";
-    if (!parse(argc, argv, arguments, help, parse_error)) {
+    bool version = false;
+    if (!parse(argc, argv, arguments, help, version, parse_error)) {
         std::fprintf(stderr, "pixd: %s\n", parse_error);
         usage(stderr);
         return 2;
     }
     if (help) { usage(stdout); return 0; }
+    if (version) {
+        std::printf("pix-userland %s\n", PIX_RUNTIME_VERSION);
+        return 0;
+    }
 
     if (!arguments.device.empty()) {
         const auto parsed_selector =

@@ -76,7 +76,7 @@ void usage(FILE* file) noexcept
 {
     std::fprintf(file,
         "usage: pix-ts (--device serial:SELECTOR|usb:SELECTOR | --instance TOKEN) "
-        "[--receiver ID] (-c|--channel CH | -f|--freq HZ) [--system isdb-t|isdb-s] "
+        "--receiver ID (-c|--channel CH | -f|--freq HZ) [--system isdb-t|isdb-s] "
         "[--slot N|--tsid N] [--time SECONDS|-] [-o PATH|-] "
         "[--runtime-dir PATH] [--group] [--packet-count N] "
         "[--tune-timeout-ms N]\n");
@@ -120,7 +120,7 @@ int run(int argc, char** argv)
         usage(stderr);
         return 2;
     }
-    if (arguments.help) return 0;
+    if (arguments.help) { usage(stdout); return 0; }
     if (arguments.version) {
         std::puts("pix-ts " PIX_RUNTIME_VERSION);
         return 0;

@@ -1,13 +1,101 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+arguments=("$@")
+fd=
+if ((${#arguments[@]} > 0)); then
+    fd=${arguments[$((${#arguments[@]} - 1))]}
+fi
+
+run_without_usb_fd()
+{
+    local descriptor=$fd
+    if [[ $descriptor =~ ^[0-9]+$ ]]; then exec {descriptor}>&-; fi
+    exec "$@"
+}
+
+show_help()
+{
+    printf '%s\n' \
+        "usage: termux-usb -r -e \"$0 [pix-ts options...]\" USB_DEVICE" \
+        '       pix-termux --help' \
+        '       pix-termux --version'
+}
+
+takes_ts_value()
+{
+    case $1 in
+        -d|--device|--instance|--runtime-dir|--receiver|-c|--channel|-f|--freq|-s|--system|--slot|--tsid|-t|--time|-o|--output|--packet-count|--tune-timeout-ms)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+root=$(CDPATH= cd -- "$(run_without_usb_fd dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+metadata_arguments=()
+for ((index = 0; index < ${#arguments[@]}; ++index)); do
+    argument=${arguments[index]}
+    if takes_ts_value "$argument"; then
+        metadata_arguments+=("$argument")
+        if ((index + 1 < ${#arguments[@]})); then
+            value=${arguments[index + 1]}
+            if [[ $value != --help && $value != --version ]] &&
+                { [[ $value != -h ]] ||
+                  [[ $argument == --runtime-dir || $argument == -o || $argument == --output ]]; }; then
+                metadata_arguments+=("$value")
+                ((index += 1))
+            fi
+        fi
+        continue
+    fi
+    if [[ $argument == --firmware ]]; then
+        if ((index + 1 < ${#arguments[@]})); then
+            value=${arguments[index + 1]}
+            if [[ $value != --help && $value != --version ]]; then
+                ((index += 1))
+            fi
+        fi
+        continue
+    fi
+    metadata_arguments+=("$argument")
+done
+
+validation_argument=--pix-termux-validation
+while :; do
+    collision=false
+    for argument in "${metadata_arguments[@]}"; do
+        if [[ $argument == "$validation_argument" ||
+              $argument == "$validation_argument-2" ]]; then
+            collision=true
+            break
+        fi
+    done
+    [[ $collision == false ]] && break
+    validation_argument+="-"
+done
+if metadata_output=$(run_without_usb_fd "$root/pix-ts" "${metadata_arguments[@]}" \
+    "$validation_argument" "$validation_argument-2" 2>&1); then
+    if [[ $metadata_output == "pix-ts "* ]]; then
+        printf 'pix-termux %s\n' "${metadata_output#pix-ts }"
+    else
+        show_help
+    fi
+    exit 0
+else
+    metadata_status=$?
+fi
+
+if ((metadata_status != 2)); then
+    printf '%s\n' "$metadata_output" >&2
+    exit "$metadata_status"
+fi
+
 if (($# < 2)); then
-    printf 'usage: termux-usb -r -e "%s [pix-ts options...]" USB_DEVICE\n' "$0" >&2
+    show_help >&2
     exit 2
 fi
 
-arguments=("$@")
-fd=${arguments[$((${#arguments[@]} - 1))]}
 if [[ ! $fd =~ ^[0-9]+$ ]] || ((10#$fd < 3 || 10#$fd > 2147483647)); then
     echo 'pix-termux: expected the USB file descriptor appended by termux-usb' >&2
     exit 2
@@ -18,16 +106,16 @@ client_arguments=()
 firmware_path=
 for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
     argument=${raw_client_arguments[index]}
-    if [[ $argument == -o || $argument == --output ]]; then
+    if [[ $argument == -F || $argument == -V ]]; then
+        echo "pix-termux: unknown argument: $argument" >&2
+        exit 2
+    fi
+    if takes_ts_value "$argument"; then
         client_arguments+=("$argument")
         if ((index + 1 < ${#raw_client_arguments[@]})); then
             client_arguments+=("${raw_client_arguments[++index]}")
         fi
         continue
-    fi
-    if [[ $argument == -F || $argument == -V ]]; then
-        echo "pix-termux: unknown argument: $argument" >&2
-        exit 2
     fi
     if [[ $argument == --firmware ]]; then
         if [[ -n $firmware_path || $((index + 1)) -ge ${#raw_client_arguments[@]} ]]; then
@@ -55,15 +143,45 @@ for argument in "${client_arguments[@]}"; do
     fi
 done
 
-run_without_usb_fd()
-{
-    local descriptor=$fd
-    exec {descriptor}>&-
-    exec "$@"
-}
-
-root=$(CDPATH= cd -- "$(run_without_usb_fd dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 tmp_root=${TMPDIR:-${PREFIX:-/data/data/com.termux/files/usr}/tmp}
+validation_runtime_directory=$tmp_root/pix-termux.XXXXXX
+validation_client_arguments=()
+have_output=false
+for ((index = 0; index < ${#client_arguments[@]}; ++index)); do
+    argument=${client_arguments[index]}
+    if [[ $argument == -o || $argument == --output ]]; then
+        have_output=true
+        validation_client_arguments+=("$argument")
+        if ((index + 1 < ${#client_arguments[@]})); then
+            value=${client_arguments[index + 1]}
+            if [[ -z $value || ( $value == --* && $value != -- ) ]]; then
+                validation_client_arguments+=("$value")
+            else
+                validation_client_arguments+=(/dev/null)
+            fi
+            ((index += 1))
+        fi
+    else
+        validation_client_arguments+=("$argument")
+    fi
+done
+if [[ $have_output == false ]]; then
+    validation_client_arguments+=(--output /dev/null)
+fi
+validation_status=0
+if validation_output=$(run_without_usb_fd "$root/pix-ts" \
+    --runtime-dir "$validation_runtime_directory" --instance pix-fd \
+    "${validation_client_arguments[@]}" 2>&1); then
+    printf '%s\n' "$validation_output" >&2
+    exit 70
+else
+    validation_status=$?
+fi
+if ((validation_status == 2)); then
+    printf '%s\n' "$validation_output" >&2
+    exit 2
+fi
+
 runtime_directory=$(run_without_usb_fd mktemp -d "$tmp_root/pix-termux.XXXXXX")
 run_without_usb_fd chmod 700 "$runtime_directory" &
 helper_pid=$!

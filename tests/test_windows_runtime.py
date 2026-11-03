@@ -78,7 +78,8 @@ def main():
                     if attempt == 0:
                         destination = root / "受信 日本語.ts"
                         run([package / "pix-ts.exe", "--instance", "proof",
-                             "--freq", "473142857", "--time", "1", "--output", destination,
+                             "--receiver", "0", "--freq", "473142857", "--time", "1",
+                             "--output", destination,
                              "--runtime-dir", runtime])
                         assert destination.read_bytes() == expected, "TS binary output differs"
                     process.stdin.close()
