@@ -348,9 +348,6 @@ add_test(NAME pix_firmware_bundle_proof
     COMMAND pix_firmware_bundle_proof
         "${PIX_SOURCE_DIR}/firmware/dt181.bin"
         "${PIX_SOURCE_DIR}/firmware/dt295.bin")
-add_test(NAME pix_android_launcher
-    COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh")
-
 add_executable(pixctl tools/pixctl.cpp)
 target_compile_definitions(pixctl PRIVATE
     PX4CTL_PRODUCT_VERSION="${PIX_RUNTIME_VERSION}")
@@ -363,6 +360,8 @@ target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VER
 target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
+add_test(NAME pix_android_launcher
+    COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh" "$<TARGET_FILE:pix-ts>")
 
 add_executable(pix_ts_profile_tests tests/pix_ts_profile_tests.cpp)
 target_include_directories(pix_ts_profile_tests PRIVATE tools)

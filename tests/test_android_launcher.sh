@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PIX_PUBLIC_TS=$1
+export PIX_PUBLIC_TS
 tmp=$(mktemp -d)
 trap 'exec 7>&- 2>/dev/null || :; /bin/rm -rf "$tmp"' EXIT INT TERM
 mkdir -p "$tmp/stage/packaging" "$tmp/bin"
@@ -41,6 +43,18 @@ import time
 log = os.environ["PIX_TERMINUX_LOG"]
 descriptor = os.environ["PIX_TEST_USB_FD"]
 mode = os.environ.get("PIX_TEST_CLIENT_MODE", "exit")
+arguments = sys.argv[1:]
+validation = any(argument.startswith("--pix-termux-validation") for argument in arguments)
+for index, argument in enumerate(arguments[:-1]):
+    if argument == "--runtime-dir" and "pix-termux-validation-" in arguments[index + 1]:
+        validation = True
+if validation:
+    result = subprocess.run(
+        [os.environ["PIX_PUBLIC_TS"], *sys.argv[1:]],
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    raise SystemExit(result.returncode)
 with open(log, "a") as calls:
     client_fd = "present" if os.path.exists("/proc/self/fd/" + descriptor) else "absent"
     calls.write("pix-ts-fd=%s\n" % client_fd)
@@ -97,7 +111,8 @@ run_case()
     if PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
         PIX_TEST_USB_FD=7 PIX_TEST_CLIENT_STATUS="$client_status" \
         PIX_TEST_DAEMON_STATUS="$daemon_status" TMPDIR="$tmp" \
-        "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" --channel T27 7 \
+        "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+        --receiver 0 --channel T27 7 \
         2> "$stderr_file"; then
         status=0
     else
@@ -117,7 +132,7 @@ run_case()
     grep -Fqx "pixd-arg=$PIX_TEST_FIRMWARE_PATH" "$log"
     grep -q '^pixctl-fd=absent$' "$log"
     grep -q '^pix-ts-fd=absent$' "$log"
-    grep -q '^pix-ts --runtime-dir .*--instance pix-fd --channel T27$' "$log"
+    grep -q '^pix-ts --runtime-dir .*--instance pix-fd --receiver 0 --channel T27$' "$log"
     if grep -Fqx "pix-ts-arg=$PIX_TEST_FIRMWARE_PATH" "$log"; then
         echo "$name: firmware argument leaked to pix-ts" >&2
         return 1
@@ -156,20 +171,92 @@ for output_option in -o --output; do
     if PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
         PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
         "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
-        --channel T27 "$output_option" -V 7 2>"$stderr_file"; then
+        --receiver 0 --channel T27 "$output_option" -V 7 2>"$stderr_file"; then
         status=0
     else
         status=$?
     fi
     [ "$status" -eq 0 ]
     runtime=$(cat "$runtime_file")
-    grep -Fqx "pix-ts --runtime-dir $runtime --instance pix-fd --channel T27 $output_option -V" "$log"
+    grep -Fqx "pix-ts --runtime-dir $runtime --instance pix-fd --receiver 0 --channel T27 $output_option -V" "$log"
     grep -Fqx "pix-ts-arg=$output_option" "$log"
     grep -Fqx 'pix-ts-arg=-V' "$log"
     [ ! -e "$runtime" ]
 done
+
+run_metadata_case()
+{
+    name=$1
+    shift
+    log="$tmp/metadata-$name.log"
+    runtime_file="$tmp/metadata-$name.runtime"
+    PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
+        PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+        "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+        "$@" 7 >"$tmp/metadata-$name.stdout" 2>"$tmp/metadata-$name.stderr"
+    grep -Fq 'usage:' "$tmp/metadata-$name.stdout"
+    test ! -s "$log"
+    test ! -e "$runtime_file"
+}
+
+run_metadata_case device --device --output -h
+run_metadata_case channel --channel --output -h
+
+log="$tmp/metadata-both.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/metadata-both.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+    "$tmp/stage/packaging/pix-termux" --version --help 7 \
+    >"$tmp/metadata-both.stdout" 2>"$tmp/metadata-both.stderr"
+grep -Fq 'usage:' "$tmp/metadata-both.stdout"
+test ! -s "$log"
+test ! -e "$tmp/metadata-both.runtime"
+
+log="$tmp/version.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/version.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+    "$tmp/stage/packaging/pix-termux" --version 7 \
+    >"$tmp/version.stdout" 2>"$tmp/version.stderr"
+grep -Eq '^pix-termux [0-9]+\.[0-9]+\.[0-9]+$' "$tmp/version.stdout"
+test ! -s "$log"
+test ! -e "$tmp/version.runtime"
+
+printf 'KEEP\n' > "$tmp/output-sentinel.ts"
+run_invalid_case()
+{
+    name=$1
+    shift
+    log="$tmp/invalid-$name.log"
+    runtime_file="$tmp/invalid-$name.runtime"
+    status=0
+    PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
+        PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+        "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+        "$@" 7 >"$tmp/invalid-$name.stdout" 2>"$tmp/invalid-$name.stderr" || status=$?
+    [ "$status" -eq 2 ]
+    test ! -s "$log"
+    test ! -e "$runtime_file"
+    [ "$(cat "$tmp/output-sentinel.ts")" = KEEP ]
+}
+
+run_invalid_case missing-receiver --channel T27 --packet-count 1
+run_invalid_case duplicate-receiver --receiver 0 --channel T27 --packet-count 1 --receiver 1
+run_invalid_case duplicate-output --receiver 0 --channel T27 --packet-count 1 \
+    --output "$tmp/output-sentinel.ts" --output "$tmp/output-sentinel.ts"
+
+log="$tmp/output-h.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/output-h.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+    "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+    --receiver 0 --channel T27 --packet-count 1 --output -h 7 \
+    >"$tmp/output-h.stdout" 2>"$tmp/output-h.stderr"
+grep -Fqx 'pix-ts-arg=-h' "$log"
+
 if find "$tmp" -maxdepth 1 -type d -name 'pix-termux.*' | grep . >/dev/null; then
     echo 'legacy option created launcher runtime state' >&2
+    exit 1
+fi
+if find "$tmp" -maxdepth 1 -type d -name 'pix-termux-validation-*' | grep . >/dev/null; then
+    echo 'argument validation created runtime state' >&2
     exit 1
 fi
 
@@ -201,7 +288,8 @@ environment.update({
 })
 with open(stderr_file, "w") as stderr:
     process = subprocess.Popen(
-        [launcher, "--firmware", environment["PIX_TEST_FIRMWARE_PATH"], "--channel", "T27", "7"],
+        [launcher, "--firmware", environment["PIX_TEST_FIRMWARE_PATH"],
+         "--receiver", "0", "--channel", "T27", "7"],
         stderr=stderr,
         env=environment,
         pass_fds=(7,),
@@ -252,7 +340,8 @@ signal_case INT delayed-stop
 PIX_TEST_FIRMWARE_PATH='./firmware/DT295 bundle.bin'
 if PIX_TERMINUX_LOG="$tmp/fail-rm.log" PIX_TEST_RUNTIME_FILE="$tmp/fail-rm.runtime" \
     PIX_TEST_USB_FD=7 PIX_TEST_FAIL_RM=1 PATH="$tmp/bin:$PATH" TMPDIR="$tmp" \
-    "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" --channel T27 7 \
+    "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+    --receiver 0 --channel T27 7 \
     2> "$tmp/fail-rm.stderr"; then
     echo 'runtime cleanup failure unexpectedly returned success' >&2
     exit 1

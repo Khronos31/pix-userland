@@ -150,15 +150,15 @@ pixd_pid=$!
 ```sh
 # 地上波 27ch を 15 秒間受信し、terrestrial.ts に保存
 ./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
-  --channel T27 --time 15 --output terrestrial.ts
+  --receiver 0 --channel T27 --time 15 --output terrestrial.ts
 
 # BS 15ch（スロット0）を 15 秒間受信し、bs.ts に保存
 ./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
-  --channel BS15_0 --time 15 --output bs.ts
+  --receiver 0 --channel BS15_0 --time 15 --output bs.ts
 
 # CS 22ch を 15 秒間受信し、cs.ts に保存
 ./pix-ts --runtime-dir "$runtime_dir" --instance tuner \
-  --channel CS22 --time 15 --output cs.ts
+  --receiver 0 --channel CS22 --time 15 --output cs.ts
 ```
 
 - `--output -` を指定するか `--output` を省略すると、MPEG-TS パケットを標準出力へ出力します（診断メッセージやログは標準エラー出力へ送られます）。
@@ -180,7 +180,7 @@ Termux 環境では、Termux:API の `termux-usb` コマンドで USB のファ�
 
 ```sh
 # termux-usb -l でデバイスパスを確認
-termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --system isdb-t --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
+termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --system isdb-t --receiver 0 --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
 ```
 
 ランチャーがデーモン（`pixd --fd`）の起動、状態確認、`pix-ts` による受信、および終了時の後始末を一括して行います。詳細は [Android / Termux](docs/android-termux.md) を参照してください。
@@ -190,7 +190,7 @@ termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --syste
 ### 受信部（Receiver）
 
 各機種の受信部番号は `0` です（地デジ・BS・CS で共用）。
-`pix-ts --receiver` の指定を省略した場合は既定値 `0` が使用されます。未搭載の受信部番号を指定した場合はエラー（終了コード `3`）となります。
+`pix-ts --receiver` は明示必須です。受信部番号 `0` を指定します。未搭載の受信部番号を指定した場合はエラー（終了コード `3`）となります。
 
 ### チャンネル指定
 
@@ -236,7 +236,7 @@ termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --syste
 - `-t, --time <SECONDS>`: 受信時間を秒単位で指定します（省略時は停止シグナルまで継続）。
 - `--packet-count <N>`: 受信する MPEG-TS パケット数を指定します。
 - `-o, --output <PATH>`: 出力ファイルパスを指定します（省略時または `-` で標準出力）。
-- `--receiver <N>`: 受信部番号を指定します（既定値: `0`）。
+- `--receiver <N>`: 受信部番号を指定します（必須。対応値: `0`）。
 - `-p, --pid <PID>`: 出力する TS パケットの PID をフィルタリングします（複数指定可、既定値は全 PID）。
 - `--control`: 標準入力から改行区切りの選局コマンド（`channel <TOKEN>` / `tune <HZ>` / `quit`）を受け付けて動的に選局します。
 - `--fail-on-drop`: 受信キュー溢れや出力詰まりを検知した時点で即座に出力を停止し終了します。
