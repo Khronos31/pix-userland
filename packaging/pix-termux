@@ -51,7 +51,10 @@ for ((index = 0; index < ${#arguments[@]}; ++index)); do
     fi
     if [[ $argument == --firmware ]]; then
         if ((index + 1 < ${#arguments[@]})); then
-            ((index += 1))
+            value=${arguments[index + 1]}
+            if [[ $value != --help && $value != --version ]]; then
+                ((index += 1))
+            fi
         fi
         continue
     fi

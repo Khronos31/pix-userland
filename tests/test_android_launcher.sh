@@ -205,6 +205,30 @@ run_metadata_case()
 run_metadata_case device --device --output -h
 run_metadata_case channel --channel --output -h
 
+run_firmware_metadata_case()
+{
+    name=$1 expected=$2
+    shift 2
+    log="$tmp/firmware-metadata-$name.log"
+    runtime_file="$tmp/firmware-metadata-$name.runtime"
+    PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$runtime_file" \
+        PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+        "$tmp/stage/packaging/pix-termux" "$@" 7 \
+        >"$tmp/firmware-metadata-$name.stdout" 2>"$tmp/firmware-metadata-$name.stderr"
+    if [ "$expected" = help ]; then
+        grep -Fq 'usage:' "$tmp/firmware-metadata-$name.stdout"
+    else
+        grep -Eq '^pix-termux [0-9]+\.[0-9]+\.[0-9]+$' \
+            "$tmp/firmware-metadata-$name.stdout"
+    fi
+    test ! -s "$log"
+    test ! -e "$runtime_file"
+}
+
+run_firmware_metadata_case help help --firmware --help
+run_firmware_metadata_case version version --firmware --version
+run_firmware_metadata_case help-version help --firmware --help --version
+
 log="$tmp/metadata-both.log"
 PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/metadata-both.runtime" \
     PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
