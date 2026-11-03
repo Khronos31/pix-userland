@@ -13,7 +13,29 @@ if [[ ! $fd =~ ^[0-9]+$ ]] || ((10#$fd < 3 || 10#$fd > 2147483647)); then
     exit 2
 fi
 fd=$((10#$fd))
-client_arguments=("${arguments[@]:0:$((${#arguments[@]} - 1))}")
+raw_client_arguments=("${arguments[@]:0:$((${#arguments[@]} - 1))}")
+client_arguments=()
+firmware_path=
+for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
+    argument=${raw_client_arguments[index]}
+    if [[ $argument == --firmware || $argument == -F ]]; then
+        if [[ -n $firmware_path || $((index + 1)) -ge ${#raw_client_arguments[@]} ]]; then
+            echo 'pix-termux: provide exactly one --firmware FILE argument' >&2
+            exit 2
+        fi
+        firmware_path=${raw_client_arguments[++index]}
+        if [[ -z $firmware_path ]]; then
+            echo 'pix-termux: firmware path must not be empty' >&2
+            exit 2
+        fi
+        continue
+    fi
+    client_arguments+=("$argument")
+done
+if [[ -z $firmware_path ]]; then
+    echo 'pix-termux: --firmware FILE is required' >&2
+    exit 2
+fi
 
 for argument in "${client_arguments[@]}"; do
     if [[ $argument == --instance || $argument == --runtime-dir || $argument == --group ]]; then
@@ -113,7 +135,7 @@ trap 'handle_signal INT' INT
 trap 'handle_signal TERM' TERM
 
 cd "$root"
-"$root/pixd" --fd "$fd" --runtime-dir "$runtime_directory" \
+"$root/pixd" --fd "$fd" --firmware "$firmware_path" --runtime-dir "$runtime_directory" \
     --instance pix-fd >"$runtime_directory/pixd.log" 2>&1 &
 daemon_pid=$!
 

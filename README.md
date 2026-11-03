@@ -52,12 +52,9 @@
 - **PIX-DT181-PU0**: 単一のファームウェアファイル `dt181.bin`（形式 `P181A1`、699,773 バイト、SHA-256 `a8532036b2995c869f713714b85609d2d21508f8848b96e5c7528ab75f3dd7a0`）。従来の 3 つの個別ファイル（FPGA ビットストリーム、ブートストラップ、認証データ）を単一ファイルへ統合・検証する形式です。
 - **PIX-DT295**: 標準 `firmware/dt295.bin` は形式 `D295A1`、1,839,100 バイト、SHA-256 `3cabe15f585a8a7a7d7b9b3db548b677b0732c13926dc3a2b5270acf1bc6ffc8` です。公式ドライバ由来の衛星レジスターテーブルを含み、地上波で使う他のバンドルセクションは従来版と同じです。この標準バンドルハッシュのみを受理し、以前の地上波専用バンドルは拒否します。衛星バンドルでの実機受信は未検証です。
 
-**配布バイナリにはこれらの必要なファームウェアデータがあらかじめ組み込まれています（埋め込み方式）。** 通常の利用環境で外部ファイルを用意したり、コマンドラインで指定したりする必要はありません。
+標準のCLIオプション `pixd --firmware <FILE>`（短縮形 `-F <FILE>`）でバンドルを明示します。Release の全バイナリアーカイブに `firmware/dt181.bin` と `firmware/dt295.bin` の両方が含まれます。接続機種に対応する方を指定してください。ファイル名や拡張子は任意で、内容の形式・機種・SHA-256 ハッシュで検証されます。指定ファイルが不正、または検出機種と一致しない場合は起動に失敗します。
 
-配布バイナリは地上波・衛星に使用するファームウェアを `pixd` に内蔵しており、通常起動に外部ファイルの指定やバンドル生成作業は不要です。ソースから埋め込み有効でビルドする場合も、リポジトリや Source code アーカイブに含まれる `firmware/dt181.bin` と `firmware/dt295.bin` がそのまま使用されます。生成スクリプトはバンドルの保守・再現用であり、一般の利用者が公式アプリ等から生成する必要はありません。
-
-埋め込みを無効にしてビルドした場合（`PIX_EMBEDDED_ASSETS=OFF`）は、起動時に `--firmware <FILE>` または `-F <FILE>` でファイルを指定します。GitHub 自動生成の Source code アーカイブおよび Release の対応ソースパッケージには、いずれも標準ファームウェア、マニフェスト、来歴メタデータ、再構成検証用の保存 IV が含まれます。
-外部ファイルを指定してデーモンを起動する際は、`pixd` の `--firmware <FILE>`（または `-F <FILE>`）オプションを使用します。リポジトリやソースアーカイブ内の標準機種別 `.bin` を指定できます。ファイル名や拡張子は任意でよく、ファイル内容（形式ヘッダ、機種識別、SHA-256 ハッシュ）に基づいて検証されます。
+GitHub 自動生成の Source code アーカイブと Release の対応ソースパッケージにも標準ファームウェア、マニフェスト、来歴メタデータ、再構成検証用の保存 IV が含まれます。一般の利用者がバンドルを生成する必要はありません。
 
 ### 実行時ライブラリ
 
@@ -75,10 +72,11 @@
 
 配布アーカイブの構成:
 - `pixd`, `pixctl`, `pix-ts`（Windows 向けは `.exe`）
+- `firmware/dt181.bin`, `firmware/dt295.bin`
 - `build-info.txt`
 - `README.md`, `docs/`, `packaging/`, `licenses/`
 
-ファームウェアデータは実行ファイルに組み込まれているため、外部ファームウェアファイルの配置や展開作業は不要です。展開した実行ファイルをそのまま実行できます。
+起動時に接続機種に合う `--firmware firmware/dt181.bin` または `--firmware firmware/dt295.bin` を指定してください。
 
 ### Linux: USB デバイスのアクセス権限設定
 
@@ -126,7 +124,7 @@ USB ポートパスとインスタンス名を指定してデーモンを起動�
 
 ```sh
 runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/pix-userland.XXXXXX")
-./pixd --device usb:1-2 --instance tuner --runtime-dir "$runtime_dir" &
+./pixd --device usb:1-2 --firmware firmware/dt181.bin --instance tuner --runtime-dir "$runtime_dir" &
 pixd_pid=$!
 ```
 
@@ -182,7 +180,7 @@ Termux 環境では、Termux:API の `termux-usb` コマンドで USB のファ�
 
 ```sh
 # termux-usb -l でデバイスパスを確認
-termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
+termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --system isdb-t --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
 ```
 
 ランチャーがデーモン（`pixd --fd`）の起動、状態確認、`pix-ts` による受信、および終了時の後始末を一括して行います。詳細は [Android / Termux](docs/android-termux.md) を参照してください。
@@ -214,14 +212,14 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 - `--device <SPEC>`: 保持する USB デバイスを指定します（`usb:BUS-PORT`、インデックス、`serial:TEXT` 等）。
 - `--instance <TOKEN>`: デーモンのインスタンス識別名を指定します。
 - `--runtime-dir <DIR>`: UNIX ドメインソケット等のランタイムディレクトリを指定します。
-- `--firmware <FILE>`, `-F <FILE>`: 外部ファームウェアファイルを指定します（埋め込み無効ビルドでは必須、埋め込み有効ビルドでは省略可。任意ファイル名に対応）。
+- `--firmware <FILE>`, `-F <FILE>`: 必須のファームウェアバンドル指定です。接続機種と一致する検証済みファイルを指定します（任意ファイル名に対応）。
 - `--group`: 共有グループアクセスを有効にします。
 - `--exit-on-stdin-eof`: 標準入力が閉じた（EOF）際に自動停止します（親プロセス監視用）。
 - `--fd <FD>`: オープン済みの USB ファイルディスクリプタを渡します（Android / Termux 用）。
 - `--models`: 静的な対応機種一覧を表示します。
 - `--list-json`: 接続中の機器を JSON 形式で一覧表示します。
 
-※ 配布バイナリはファームウェアデータを内蔵しているため、通常利用で `--firmware` オプションは不要です。埋め込みを無効にしてビルドした場合（`PIX_EMBEDDED_ASSETS=OFF`）は `--firmware <FILE>` または `-F <FILE>` で対象機種の単一ファームウェアファイルを指定してください。指定されたファイルの内容が不正な場合や機種が一致しない場合は起動時にエラーとなり、内蔵データへのフォールバックは行われません。
+※ `--firmware <FILE>` または `-F <FILE>` は必須です。不正なファイルや機種不一致の場合は起動エラーになります。
 
 #### `pixctl`（制御・状態照会ツール）
 - サブコマンド:
@@ -290,30 +288,29 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 
 C++17 対応コンパイラ、CMake 3.16 以上、Python 3、pkg-config、および libusb 1.0 の開発用ヘッダが必要です。CMakeはconfigure時にPython 3 interpreterを必須とします。共通基盤 `dtv-userland-core` は固定コミットから自動取得して静的リンクします。
 
-配布バイナリと同様にファームウェアデータを埋め込んでビルドする場合は、あらかじめ `firmware/` に必要なファイル（`dt181.bin` および `dt295.bin`）を配置した上で、`-DPIX_EMBEDDED_ASSETS=ON` を指定します。配置先が標準パスと異なる場合は、`-DPIX_DT181_FIRMWARE_FILE=<FILE>` および `-DPIX_DT295_FIRMWARE_FILE=<FILE>` で個別ファイルを指定できます。
+ビルド後の `pixd` 起動時に `--firmware <FILE>`（または `-F <FILE>`）でファイルを指定します。リポジトリ内の `firmware/dt181.bin` と `firmware/dt295.bin` は、どちらの機種向けにも使える検証済み入力です。
 
 ```sh
-cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release -DPIX_EMBEDDED_ASSETS=ON
+cmake -S core-integration -B build/cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build/cmake --parallel 4
 ctest --test-dir build/cmake --output-on-failure
 ```
 
-ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。
-埋め込みを行わない診断ビルド（`PIX_EMBEDDED_ASSETS=OFF`、既定値）では、`pixd` の起動時に `--firmware <FILE>`（または `-F <FILE>`）で外部ファームウェアファイルを指定します。
+ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。`pixd` の起動時に `--firmware <FILE>`（または `-F <FILE>`）が必要です。
 
 ### ポータブルビルド（静的リンクスクリプト）
 
-各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。環境変数 `PIX_EMBEDDED_ASSETS=ON` を設定することで埋め込みバイナリをビルドできます（ファームウェアファイルは既定で `firmware/dt181.bin` と `firmware/dt295.bin` を参照しますが、`PIX_DT181_FIRMWARE_FILE` および `PIX_DT295_FIRMWARE_FILE` で任意パスの指定も可能です）。
+各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。バンドルはビルド出力の `firmware/` にコピーされ、Release アーカイブにも同梱されます。
 
 ```sh
 # ネイティブ環境（Linux: glibc 動的 + libusb 静的、macOS: システムライブラリ動的 + libusb 静的）
-PIX_EMBEDDED_ASSETS=ON ./tools/build-portable.sh native
+./tools/build-portable.sh native
 
 # musl Linux 環境（Alpine Linux 等の musl 環境で完全静的バイナリを作成）
-PIX_EMBEDDED_ASSETS=ON ./tools/build-portable.sh musl
+./tools/build-portable.sh musl
 
 # Android (Termux) 向けクロスビルド
-PIX_EMBEDDED_ASSETS=ON ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-portable.sh android
+ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aarch64 ./tools/build-portable.sh android
 ```
 
 ### Windows 向けクロスビルド
@@ -321,7 +318,7 @@ PIX_EMBEDDED_ASSETS=ON ANDROID_NDK_HOME=/path/to/android-ndk-r27d ANDROID_ABI=aa
 Linux x86_64 環境にて、llvm-mingw UCRT ツールチェーンを用いてクロスビルドを行います。
 
 ```sh
-PIX_EMBEDDED_ASSETS=ON ./tools/build-windows.sh
+./tools/build-windows.sh
 ```
 
 libusb 1.0.30 を静的リンクした Windows x64 用の実行ファイル（`pixd.exe`, `pixctl.exe`, `pix-ts.exe`）が生成されます。

@@ -118,26 +118,6 @@ class FirmwareBundleTests(unittest.TestCase):
         self.assertIn("PIX_DT295_BUNDLE_SHA256_COUNT 1U", header)
         self.assertIn("0x3cU, 0xabU, 0xe1U, 0x5fU", header)
 
-    def test_embed_generator_uses_the_same_whole_bundle_allowlist(self):
-        import importlib.util
-        generator_path = ROOT / "tools" / "embed-assets.py"
-        spec = importlib.util.spec_from_file_location("pix_embed_assets_test", generator_path)
-        generator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(generator)
-        dt181 = ROOT / "firmware" / "dt181.bin"
-        dt295 = ROOT / "firmware" / "dt295.bin"
-        generator._load_assets(dt181, dt295)
-        with tempfile.TemporaryDirectory() as temporary:
-            changed = Path(temporary) / "dt181.bin"
-            data = bytearray(dt181.read_bytes())
-            data[-1] ^= 1
-            changed.write_bytes(data)
-            self.assertEqual(changed.stat().st_size, dt181.stat().st_size)
-            with self.assertRaisesRegex(ValueError, "SHA-256"):
-                generator._load_assets(changed, dt295)
-            with self.assertRaisesRegex(ValueError, "size"):
-                generator._load_assets(dt181, dt181)
-
     def test_assets_bundle_opens_current_and_legacy_synthetic_payloads(self):
         import importlib.util
         script = ROOT / "tools" / "assets-bundle.py"
