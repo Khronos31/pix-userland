@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Offline DT295 incremental adapter lifecycle proof. */
 #include "pix-dt295-receiver-adapter.h"
 
@@ -9,8 +9,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
+#include <vector>
 
 extern "C" {
 int dt295_actual_fixture_open(const char *);
@@ -24,9 +27,13 @@ void dt295_actual_fixture_encrypt(uint8_t packet[188]);
 uint16_t dt295_actual_fixture_satellite_tsid(void);
 void dt295_actual_fixture_set_omit_cat(int);
 void dt295_actual_fixture_set_tsid_delay(unsigned);
+void dt295_actual_fixture_set_bootstrap_tsid(uint16_t);
 void dt295_actual_fixture_set_card_sample(unsigned, unsigned, unsigned);
 void dt295_actual_fixture_fail_activation_once(void);
 unsigned dt295_actual_fixture_control_calls(void);
+unsigned dt295_actual_fixture_auth_requests(void);
+unsigned dt295_actual_fixture_key_requests(void);
+unsigned dt295_actual_fixture_shutdown_commands(void);
 unsigned dt295_actual_fixture_activation_failures(void);
 unsigned dt295_actual_fixture_activation_commands(void);
 unsigned dt295_actual_fixture_card_acks(void);
@@ -46,6 +53,10 @@ struct FakeStream final {
     bool bootstrap_sent = false;
     unsigned continuity = 0U;
     unsigned generations = 0U;
+    std::atomic<unsigned> stop_abandon_remaining{0U};
+    std::atomic<unsigned> stop_calls{0U};
+    std::atomic<unsigned> destroy_calls{0U};
+    std::atomic<bool> quiescent{true};
 };
 
 FakeStream g_stream;
@@ -173,6 +184,7 @@ extern "C" int __wrap_dt295_stream_start(libusb_context*, libusb_device_handle*,
     if (stream == nullptr) return LIBUSB_ERROR_INVALID_PARAM;
     g_stream.bootstrap_sent = false;
     g_stream.continuity = 0U;
+    g_stream.quiescent.store(false, std::memory_order_release);
     ++g_stream.generations;
     *stream = reinterpret_cast<dt295_stream*>(&g_stream);
     return 0;
@@ -215,8 +227,26 @@ extern "C" int __wrap_random_bytes(void* output, std::size_t length)
     return 0;
 }
 
-extern "C" int __wrap_dt295_stream_stop(dt295_stream*, unsigned) { return 0; }
-extern "C" int __wrap_dt295_stream_destroy(dt295_stream*) { return 0; }
+extern "C" int __wrap_dt295_stream_stop(dt295_stream*, unsigned)
+{
+    ++g_stream.stop_calls;
+    unsigned remaining = g_stream.stop_abandon_remaining.load(std::memory_order_acquire);
+    while (remaining != 0U) {
+        if (g_stream.stop_abandon_remaining.compare_exchange_weak(
+                remaining, remaining - 1U, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return DT295_STREAM_ABANDONED;
+    }
+    g_stream.quiescent.store(true, std::memory_order_release);
+    return 0;
+}
+
+extern "C" int __wrap_dt295_stream_destroy(dt295_stream*)
+{
+    ++g_stream.destroy_calls;
+    if (!g_stream.quiescent.load(std::memory_order_acquire)) return DT295_STREAM_ABANDONED;
+    return 0;
+}
 
 int main()
 {
@@ -232,10 +262,16 @@ int main()
         CHECK(file != nullptr);
         std::fclose(file);
     }
+    std::ifstream assets_file(assets_path, std::ios::binary);
+    CHECK(assets_file.good());
+    const std::vector<std::uint8_t> assets{
+        std::istreambuf_iterator<char>(assets_file), std::istreambuf_iterator<char>()};
+    CHECK(!assets.empty());
 
     Clock clock;
     usb_selector selector{};
-    pix::capture::dt295::ReceiverAdapter adapter(directory, selector, clock, 0U, 2048U);
+    pix::capture::dt295::ReceiverAdapter adapter(
+        assets.data(), assets.size(), selector, clock, 0U, 2048U);
     if (!adapter.ready()) {
         std::fprintf(stderr, "FAILED adapter init_error=%d\n",
                      static_cast<int>(adapter.init_error()));
@@ -333,6 +369,7 @@ int main()
     CHECK(locked && locked.value());
     CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
     Attachment satellite = attachment_for(3U, ReceiverSystem::satellite);
+    dt295_actual_fixture_set_bootstrap_tsid(16400U);
     CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::satellite), "start satellite");
     CHECK_RESULT(adapter.attach(satellite), "attach satellite");
     CHECK(read_ts(adapter, satellite, 188U * 8U));
@@ -342,6 +379,51 @@ int main()
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
                  "return T13");
 
+    {
+        const unsigned stop_calls_before = g_stream.stop_calls.load();
+        const unsigned destroy_calls_before = g_stream.destroy_calls.load();
+        const unsigned close_calls_before = g_usb_close_calls;
+        CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                     "pending start");
+        const unsigned generations_before = g_stream.generations;
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!adapter.stop_capture(0U, ReceiverSystem::terrestrial));
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 2U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        CHECK(!g_stream.quiescent.load());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.generations == generations_before);
+
+        Attachment blocked = attachment_for(7U);
+        CHECK(!adapter.start_capture(0U, ReceiverSystem::terrestrial));
+        CHECK(!adapter.attach(blocked));
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.generations == generations_before);
+
+        g_stream.stop_abandon_remaining.store(0U, std::memory_order_release);
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "pending stop retry");
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 3U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "pending duplicate stop");
+        CHECK(g_stream.stop_calls.load() == stop_calls_before + 3U);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before);
+
+        CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial),
+                     "reuse start");
+        CHECK(g_stream.generations == generations_before + 1U);
+        CHECK_RESULT(adapter.attach(blocked), "reuse attach");
+        CHECK(read_ts(adapter, blocked, 188U * 8U));
+        CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial),
+                     "reuse stop");
+        CHECK_RESULT(adapter.detach(blocked), "reuse detach");
+        drain_attachment(adapter, blocked);
+    }
+
     dt295_actual_fixture_set_omit_cat(1);
     unsigned generations = g_stream.generations;
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
@@ -349,11 +431,18 @@ int main()
     Attachment no_cat_t = attachment_for(4U);
     CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial), "no-CAT start");
     CHECK_RESULT(adapter.attach(no_cat_t), "no-CAT attach");
-    CHECK(read_ts(adapter, no_cat_t, 188U * 8U));
+    std::uint8_t probe[188U]{};
+    const auto probe_result = adapter.read(no_cat_t,
+        dtv::userland::MutableByteView{probe, sizeof(probe)},
+        std::chrono::milliseconds(2000));
+    CHECK(probe_result);
+    CHECK(probe_result.value().bytes == sizeof(probe) && !probe_result.value().eof);
+    CHECK(adapter.acquisition().phase ==
+          pix::capture::dt295::ReceiverAdapter::AcquisitionPhase::ready);
     CHECK_RESULT(adapter.stop_capture(0U, ReceiverSystem::terrestrial), "no-CAT stop");
     CHECK_RESULT(adapter.detach(no_cat_t), "no-CAT detach");
     drain_attachment(adapter, no_cat_t);
-    CHECK(g_stream.generations == generations + 1U);
+    CHECK(g_stream.generations == generations + 2U);
 
     generations = g_stream.generations;
     CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::satellite, 1049480000ULL, 1000U),
@@ -377,6 +466,29 @@ int main()
     CHECK(dt295_actual_fixture_satellite_tsid() == 16400U);
     dt295_actual_fixture_set_tsid_delay(0U);
 
+    // Closing the receiver must retire the authentication that the stopped
+    // pump can no longer renew. Reopening must also acquire a fresh TS key.
+    const unsigned auth_before_close = dt295_actual_fixture_auth_requests();
+    const unsigned key_before_close = dt295_actual_fixture_key_requests();
+    const unsigned shutdown_before_close = dt295_actual_fixture_shutdown_commands();
+    CHECK_RESULT(adapter.close(0U), "close authenticated receiver");
+    CHECK(dt295_actual_fixture_shutdown_commands() == shutdown_before_close + 1U);
+    const unsigned calls_after_close = dt295_actual_fixture_control_calls();
+    CHECK_RESULT(adapter.close(0U), "repeat close");
+    CHECK(dt295_actual_fixture_control_calls() == calls_after_close);
+    CHECK_RESULT(adapter.open(0U), "reopen with fresh authentication");
+    CHECK(dt295_actual_fixture_auth_requests() == auth_before_close + 1U);
+    CHECK_RESULT(adapter.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL, 1000U),
+                 "reopened tune");
+    dt295_actual_fixture_set_bootstrap_tsid(0x1234U);
+    Attachment reopened = attachment_for(8U);
+    CHECK_RESULT(adapter.start_capture(0U, ReceiverSystem::terrestrial), "reopened start");
+    CHECK_RESULT(adapter.attach(reopened), "reopened attach");
+    CHECK(read_ts(adapter, reopened, 188U * 8U));
+    CHECK(dt295_actual_fixture_key_requests() == key_before_close + 1U);
+    CHECK_RESULT(adapter.detach(reopened), "reopened detach");
+    drain_attachment(adapter, reopened);
+
     CHECK_RESULT(adapter.close(0U), "close before fatal recovery proof");
     CHECK_RESULT(adapter.open(0U), "reopen before fatal recovery proof");
     dt295_actual_fixture_set_card_sample(1U, 1U, 0U);
@@ -394,6 +506,34 @@ int main()
     CHECK_RESULT(adapter.shutdown(), "shutdown");
     CHECK(dt295_actual_fixture_control_calls() > control_calls_after_fatal);
     CHECK(g_usb_close_calls == 1U);
+
+    {
+        pix::capture::dt295::ReceiverAdapter retained(
+            assets.data(), assets.size(), selector, clock, 0U, 2048U);
+        CHECK(retained.ready());
+        CHECK_RESULT(retained.open(0U), "retained open");
+        CHECK_RESULT(retained.program_hz(0U, ReceiverSystem::terrestrial, 473142857ULL,
+                                         1000U),
+                     "retained tune");
+        CHECK_RESULT(retained.start_capture(0U, ReceiverSystem::terrestrial),
+                     "retained start");
+        const unsigned close_calls_before = g_usb_close_calls;
+        const unsigned destroy_calls_before = g_stream.destroy_calls.load();
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!retained.shutdown());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        g_stream.stop_abandon_remaining.store(2U, std::memory_order_release);
+        CHECK(!retained.shutdown());
+        CHECK(g_usb_close_calls == close_calls_before);
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before);
+        g_stream.stop_abandon_remaining.store(0U, std::memory_order_release);
+        CHECK_RESULT(retained.shutdown(), "retained shutdown");
+        CHECK(g_stream.destroy_calls.load() == destroy_calls_before + 1U);
+        CHECK(g_usb_close_calls == close_calls_before + 1U);
+        CHECK_RESULT(retained.shutdown(), "retained repeated shutdown");
+        CHECK(g_usb_close_calls == close_calls_before + 1U);
+    }
 
     CHECK(g_stream.generations >= 4U);
     dt295_actual_fixture_close();

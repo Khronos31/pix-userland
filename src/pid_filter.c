@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "pid_filter.h"
 #include <string.h>
 int pix_pid_filter(uint8_t *packets, size_t *length, const uint8_t selected[8192]) {

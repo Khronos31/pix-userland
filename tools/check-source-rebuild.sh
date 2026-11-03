@@ -18,7 +18,7 @@ if [ "$mode" = windows-x64 ]; then
         python3 "$src/tools/audit-binary.py" windows-x64 "$src/build/windows-x64/$program.exe"
     done
     python3 "$src/tools/verify-embedded-assets.py" "$src/build/windows-x64/pixd.exe" \
-        "$src/assets" "$src/assets/dt295.assets" "$src/build/windows-x64/embedded-assets.json" \
+        "$src/firmware/dt181.bin" "$src/firmware/dt295.bin" "$src/build/windows-x64/embedded-assets.json" \
         --build-info "$src/build/windows-x64/build-info.txt"
     echo 'Source archive rebuilt offline: pixd.exe, pixctl.exe, pix-ts.exe (Windows execution is separate)'
     exit 0
@@ -38,21 +38,24 @@ cmake -S "$src/core-integration" -B "$work/build-static" -DCMAKE_BUILD_TYPE=Rele
     -DCMAKE_EXE_LINKER_FLAGS=-static -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-static/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DPIX_EMBEDDED_ASSETS=ON \
-    -DPIX_DT181_ASSET_DIR="$src/assets" -DPIX_DT295_ASSET_FILE="$src/assets/dt295.assets" \
+    -DPIX_DT181_FIRMWARE_FILE="$src/firmware/dt181.bin" \
+    -DPIX_DT295_FIRMWARE_FILE="$src/firmware/dt295.bin" \
     -DPIX_SOURCE_REVISION_OVERRIDE="$source_revision"
 cmake --build "$work/build-static" --target pixd pixctl pix-ts --parallel "${JOBS:-4}"
 for program in pixd pixctl pix-ts; do
     python3 "$src/tools/audit-binary.py" "linux-$(uname -m)" "$work/build-static/bin/$program"
 done
 python3 "$src/tools/verify-embedded-assets.py" "$work/build-static/bin/pixd" \
-    "$src/assets" "$src/assets/dt295.assets" "$work/build-static/embedded-assets/pix_embedded_assets.json"
+    "$src/firmware/dt181.bin" "$src/firmware/dt295.bin" \
+    "$work/build-static/embedded-assets/pix_embedded_assets.json"
 PKG_CONFIG_PATH="$work/libusb-prefix/lib/pkgconfig" \
 PKG_CONFIG_LIBDIR="$work/libusb-prefix/lib/pkgconfig" \
 cmake -S "$src/core-integration" -B "$work/build-proof" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$work/build-proof/bin" \
     -DPIX_RUNTIME_VERSION="$version" -DPIX_CORE_SOURCE_DIR="$src/third_party/dtv-userland-core" \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DPIX_EMBEDDED_ASSETS=ON \
-    -DPIX_DT181_ASSET_DIR="$src/assets" -DPIX_DT295_ASSET_FILE="$src/assets/dt295.assets" \
+    -DPIX_DT181_FIRMWARE_FILE="$src/firmware/dt181.bin" \
+    -DPIX_DT295_FIRMWARE_FILE="$src/firmware/dt295.bin" \
     -DPIX_SOURCE_REVISION_OVERRIDE="$source_revision"
 cmake --build "$work/build-proof" --parallel "${JOBS:-4}"
 ctest --test-dir "$work/build-proof" --output-on-failure

@@ -2,6 +2,7 @@
 """Build a private, integrity-checked DT295 runtime bundle from user files."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -115,6 +116,21 @@ def parse_profile(path):
     return b"".join(fields), struct.pack(">3I", *words)
 
 
+def load_profile_sections(path, manifest=None):
+    if manifest is None:
+        from firmware_bundle import read_manifest
+        manifest = read_manifest()
+    data = Path(path).read_bytes()
+    from firmware_bundle import verify_bundle
+    verify_bundle("dt295", data, manifest)
+    spec = importlib.util.spec_from_file_location(
+        "pix_finalize", Path(__file__).with_name("finalize-private-release.py"))
+    finalize = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(finalize)
+    sections = finalize.validate_dt295_bundle(data)
+    return sections[3], sections[4], sections[5]
+
+
 def section(data):
     return struct.pack("<I", len(data)) + hashlib.sha256(data).digest() + data
 
@@ -139,19 +155,29 @@ def main():
     ap.add_argument("--driver", required=True, help="official pxmb86m0x_usb.sys")
     ap.add_argument("--idle", required=True, help="official idle firmware image")
     ap.add_argument("--trc", required=True, help="official terrestrial TRC image")
-    ap.add_argument("--profile", required=True, help="private target-0 profile JSON")
-    ap.add_argument("--iv", required=True, help="16-byte IV extracted from the official application")
-    ap.add_argument("--output", required=True, help="private bundle output, usually assets/dt295.assets")
+    ap.add_argument("--profile", help="private target-0 profile JSON")
+    ap.add_argument("--base-bundle", help="verified standard DT295 bundle to reuse normalized fields, key request and IV")
+    ap.add_argument("--iv", help="16-byte IV extracted from the official application")
+    ap.add_argument("--output", required=True, help="private firmware bundle output, usually firmware/dt295.bin")
     args = ap.parse_args()
     idle = Path(args.idle).read_bytes()
     trc = Path(args.trc).read_bytes()
-    iv = Path(args.iv).read_bytes()
+    if bool(args.profile) == bool(args.base_bundle):
+        raise ValueError("specify exactly one of --profile or --base-bundle")
+    if args.base_bundle:
+        if args.iv:
+            raise ValueError("--iv cannot be used with --base-bundle")
+        fields, key_request, iv = load_profile_sections(args.base_bundle)
+    else:
+        if not args.iv:
+            raise ValueError("--iv is required with --profile")
+        fields, key_request = parse_profile(args.profile)
+        iv = Path(args.iv).read_bytes()
     if not 0 < len(idle) <= IMAGE_LIMIT or not 0 < len(trc) <= IMAGE_LIMIT:
         raise ValueError("idle and TRC images must be 1..16 MiB")
     if len(iv) != 16:
         raise ValueError("IV must contain exactly 16 bytes")
     material = extract_driver_material(args.driver)
-    fields, key_request = parse_profile(args.profile)
     bundle = build_bundle(idle, trc, material, fields, key_request, iv)
     dest = Path(args.output)
     dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

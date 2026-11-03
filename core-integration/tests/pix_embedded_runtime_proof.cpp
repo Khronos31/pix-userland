@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -63,14 +63,21 @@ bool wait_exit(pid_t child, int& status)
 }
 
 bool prove_model(const std::string& root, const char* serial, const char* model,
-                 unsigned index)
+                 unsigned index, const char* firmware_option = nullptr,
+                 const char* firmware_path = nullptr)
 {
     const std::string empty = root + "/empty-" + std::to_string(index);
     const std::string runtime = root;
     const std::string log = root + "/pixd-" + std::to_string(index) + ".log";
     if (::mkdir(empty.c_str(), 0700) != 0) return false;
-    const pid_t daemon = launch({"--device", std::string("serial:") + serial,
-                                 "--runtime-dir", runtime, "--group"}, empty, log);
+    std::vector<std::string> arguments;
+    if (firmware_option != nullptr && firmware_path != nullptr) {
+        arguments.emplace_back(firmware_option);
+        arguments.emplace_back(firmware_path);
+    }
+    arguments.insert(arguments.end(), {"--device", std::string("serial:") + serial,
+                                       "--runtime-dir", runtime, "--group"});
+    const pid_t daemon = launch(arguments, empty, log);
     if (daemon <= 0) return false;
     bool ready = false;
     for (unsigned attempt = 0U; attempt < 500U; ++attempt) {
@@ -105,30 +112,88 @@ bool prove_model(const std::string& root, const char* serial, const char* model,
     return clean;
 }
 
+struct RemoveTree {
+    std::string path;
+
+    bool remove() const
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+        return !error;
+    }
+
+    ~RemoveTree()
+    {
+        (void)remove();
+    }
+};
+
 }  // namespace
 
 int main()
 {
-    char root_template[] = "/tmp/pix-embedded-runtime-proof-XXXXXX";
-    char* root_value = ::mkdtemp(root_template);
+    const char* temp_parent = ::geteuid() == 0 ? "/run" : std::getenv("HOME");
+    if (temp_parent == nullptr || temp_parent[0] != '/') return 1;
+    std::string parent(temp_parent);
+    while (parent.size() > 1U && parent.back() == '/') parent.pop_back();
+    const std::string root_template = parent == "/"
+        ? "/p-XXXXXX" : parent + "/p-XXXXXX";
+    std::vector<char> root_storage(root_template.begin(), root_template.end());
+    root_storage.push_back('\0');
+    char* root_value = ::mkdtemp(root_storage.data());
     if (root_value == nullptr) return 1;
     const std::string root(root_value);
-    if (::chmod(root.c_str(), 0770) != 0) return 1;
-    if (!prove_model(root, "PIXDT18101", "PIX-DT181-PU0", 0U)) return 2;
-    if (!prove_model(root, "PIXDT29501", "PIX-DT295", 1U)) return 2;
+    const RemoveTree cleanup{root};
+    const int result = [&]() {
+        if (::chmod(root.c_str(), 0750) != 0) return 1;
+        if (!prove_model(root, "PIXDT18101", "PIX-DT181-PU0", 0U,
+                         "-F", PIX_FIRMWARE_DT181_PATH)) return 2;
+        const std::string invalid_firmware = root + "/invalid-explicit-firmware.bin";
+        std::ifstream firmware_file(PIX_FIRMWARE_DT181_PATH, std::ios::binary);
+        std::vector<char> firmware((std::istreambuf_iterator<char>(firmware_file)), {});
+        if (firmware.empty()) return 2;
+        firmware.back() ^= 1;
+        {
+            std::ofstream output(invalid_firmware, std::ios::binary);
+            if (!output || !output.write(firmware.data(), static_cast<std::streamsize>(firmware.size())))
+                return 2;
+        }
+        const std::string invalid_empty = root + "/empty-invalid-explicit";
+        const std::string invalid_log = root + "/invalid-explicit.log";
+        if (::mkdir(invalid_empty.c_str(), 0700) != 0) return 2;
+        const pid_t invalid = launch({"--device", "serial:PIXDT18101", "--firmware",
+                                      invalid_firmware, "--runtime-dir", root, "--group"},
+                                     invalid_empty, invalid_log);
+        int invalid_status = 0;
+        if (invalid <= 0 || !wait_exit(invalid, invalid_status) || !WIFEXITED(invalid_status) ||
+            WEXITSTATUS(invalid_status) != 2) return 2;
+        const std::string invalid_text = read_log(invalid_log);
+        if (invalid_text.find("unrecognized DT181 firmware bundle SHA-256") == std::string::npos ||
+            invalid_text.find("pixd ready:") != std::string::npos ||
+            !std::filesystem::is_empty(invalid_empty)) return 2;
+        if (!prove_model(root, "PIXDT29501", "PIX-DT295", 1U)) return 2;
 
-    const std::string empty = root + "/empty-cli";
-    const std::string help_log = root + "/help.log";
-    if (::mkdir(empty.c_str(), 0700) != 0) return 3;
-    const pid_t help = launch({"--help"}, empty, help_log);
-    int status = 0;
-    if (help <= 0 || !wait_exit(help, status) || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0 || read_log(help_log).find("--assets") != std::string::npos)
-        return 4;
-    const pid_t override = launch({"--assets", "/unused", "--device", "usb:1-1"},
-                                 empty, root + "/override.log");
-    if (override <= 0 || !wait_exit(override, status) || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 2) return 5;
-    std::puts("embedded pixd: both models reached ready from empty cwd/environment; --assets absent");
+        const std::string empty = root + "/empty-cli";
+        const std::string help_log = root + "/help.log";
+        if (::mkdir(empty.c_str(), 0700) != 0) return 3;
+        const pid_t help = launch({"--help"}, empty, help_log);
+        int status = 0;
+        if (help <= 0 || !wait_exit(help, status) || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0 ||
+            read_log(help_log).find("--firmware FILE|-F FILE") == std::string::npos ||
+            read_log(help_log).find("--assets") != std::string::npos)
+            return 4;
+        const pid_t override = launch({"--assets", "/unused", "--device", "usb:1-1"},
+                                     empty, root + "/override.log");
+        if (override <= 0 || !wait_exit(override, status) || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 2) return 5;
+        return 0;
+    }();
+    if (!cleanup.remove()) {
+        std::fprintf(stderr, "embedded pixd proof failed to clean its temporary root\n");
+        return 6;
+    }
+    if (result != 0) return result;
+    std::puts("embedded pixd: --firmware override and omitted embedded firmware both reached ready");
     return 0;
 }

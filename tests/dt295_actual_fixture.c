@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Reuse the accepted protocol emulator and asset builder without running its
  * standalone proof entrypoint. */
 #define main dt295_protocol_fixture_unused_main
@@ -26,6 +26,7 @@ static uint8_t pipeline_sat_pending;
 static int pipeline_sat_rf_read;
 static uint8_t pipeline_sat_pending_tsid[2];
 static unsigned pipeline_sat_tsid_delay;
+static uint16_t pipeline_bootstrap_tsid;
 static int pipeline_omit_cat;
 static atomic_uint pipeline_control_active;
 static atomic_uint pipeline_control_max_active;
@@ -174,7 +175,7 @@ static void pipeline_satellite_read(uint8_t sub, uint16_t length)
         reply[i] = pipeline_sat_regs[(uint8_t)(pipeline_sat_pending + i)];
 }
 
-int dt295_actual_fixture_open(const char *assets_path)
+static int dt295_actual_fixture_setup(void)
 {
     memset(&pipeline_fake, 0, sizeof(pipeline_fake));
     atomic_store_explicit(&pipeline_control_active, 0U, memory_order_release);
@@ -203,10 +204,62 @@ int dt295_actual_fixture_open(const char *assets_path)
     pipeline_sat_rf_read = 0;
     pipeline_sat_pending_tsid[0] = pipeline_sat_pending_tsid[1] = 0;
     pipeline_sat_tsid_delay = 0;
+    pipeline_bootstrap_tsid = 1;
     pipeline_omit_cat = 0;
     wr16(pipeline_fake.mem + 0x82008, 0x10);
     pipeline_fake.mem[0x822ac] = 0x30;
+    return 0;
+}
+
+int dt295_actual_fixture_open(const char *assets_path)
+{
+    if (dt295_actual_fixture_setup() != 0) return -1;
     create_assets(assets_path, &pipeline_fake);
+    return 0;
+}
+
+int dt295_actual_fixture_open_runtime(const char *firmware_path)
+{
+    if (dt295_actual_fixture_setup() != 0) return -1;
+    FILE *file = fopen(firmware_path, "rb");
+    if (file == NULL || fseek(file, 0, SEEK_END) != 0) {
+        if (file != NULL) fclose(file);
+        return -1;
+    }
+    const long file_size = ftell(file);
+    if (file_size < 8 + 6 * 36 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+    uint8_t *bundle = malloc((size_t)file_size);
+    if (bundle == NULL || fread(bundle, 1, (size_t)file_size, file) != (size_t)file_size) {
+        free(bundle);
+        fclose(file);
+        return -1;
+    }
+    fclose(file);
+    size_t lengths[6];
+    size_t total = 8 + 6 * 36;
+    for (unsigned index = 0; index < 6; index++) {
+        const uint8_t *length = bundle + 8 + index * 36;
+        lengths[index] = (size_t)length[0] | (size_t)length[1] << 8 |
+            (size_t)length[2] << 16 | (size_t)length[3] << 24;
+        if (lengths[index] > (size_t)file_size - total) {
+            free(bundle);
+            return -1;
+        }
+        total += lengths[index];
+    }
+    if (total != (size_t)file_size || lengths[2] != sizeof(pipeline_fake.material) ||
+        lengths[5] != sizeof(pipeline_fake.ts_iv)) {
+        free(bundle);
+        return -1;
+    }
+    size_t offset = 8 + 6 * 36 + lengths[0] + lengths[1];
+    memcpy(pipeline_fake.material, bundle + offset, sizeof(pipeline_fake.material));
+    offset += lengths[2] + lengths[3] + lengths[4];
+    memcpy(pipeline_fake.ts_iv, bundle + offset, sizeof(pipeline_fake.ts_iv));
+    free(bundle);
     return 0;
 }
 
@@ -355,6 +408,13 @@ void dt295_actual_fixture_set_omit_cat(int enabled)
     pthread_mutex_unlock(&pipeline_mutex);
 }
 
+void dt295_actual_fixture_set_bootstrap_tsid(uint16_t tsid)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    pipeline_bootstrap_tsid = tsid;
+    pthread_mutex_unlock(&pipeline_mutex);
+}
+
 void dt295_actual_fixture_set_tsid_delay(unsigned reads)
 {
     pthread_mutex_lock(&pipeline_mutex);
@@ -390,6 +450,14 @@ unsigned dt295_actual_fixture_renewal_applies(void)
 {
     pthread_mutex_lock(&pipeline_mutex);
     const unsigned value = pipeline_fake.renewal_applies;
+    pthread_mutex_unlock(&pipeline_mutex);
+    return value;
+}
+
+unsigned dt295_actual_fixture_shutdown_commands(void)
+{
+    pthread_mutex_lock(&pipeline_mutex);
+    const unsigned value = pipeline_fake.shutdown_commands;
     pthread_mutex_unlock(&pipeline_mutex);
     return value;
 }
@@ -458,7 +526,7 @@ static void actual_table_update(uint8_t packet[188], unsigned version, unsigned 
         pmt[n++] = 0x09; pmt[n++] = 4; pmt[n++] = 0; pmt[n++] = 5;
         pmt[n++] = 0xe9; pmt[n++] = 0x02;
     }
-    pmt[n++] = 0x1b; pmt[n++] = 0xe1; pmt[n++] = 0x01;
+    pmt[n++] = mode == 4 ? 0x24 : 0x1b; pmt[n++] = 0xe1; pmt[n++] = 0x01;
     pmt[n++] = 0xf0; pmt[n++] = 0;
     pmt[n++] = 0x0f; pmt[n++] = 0xe1; pmt[n++] = 0x02;
     pmt[n++] = 0xf0; pmt[n++] = 0;
@@ -525,7 +593,7 @@ void dt295_actual_fixture_bootstrap(uint8_t packets[3][188])
         0x1b, 0xe1, 0x01, 0xf0, 0,
         0x0f, 0xe1, 0x02, 0xf0, 0
     };
-    actual_table(packets[0], 0, 0, 1, pat, sizeof(pat));
+    actual_table(packets[0], 0, 0, pipeline_bootstrap_tsid, pat, sizeof(pat));
     if (pipeline_omit_cat) {
         memset(packets[1], 0xff, 188);
         packets[1][0] = 0x47;
@@ -569,6 +637,84 @@ void dt295_actual_fixture_shared_bootstrap(uint8_t packets[4][188])
     actual_table(packets[2], 0x100, 2, 1, pmt, n);
     n = actual_shared_pmt(pmt, 2, 0);
     actual_table(packets[3], 0x110, 2, 2, pmt, n);
+}
+
+/* Modes 0-5 cover the original acquisition cases; modes 7-12 cover partial plans. */
+unsigned dt295_actual_fixture_acquisition_bootstrap(uint8_t packets[5][188], int mode)
+{
+    const uint8_t pat[] = {0, 1, 0xe1, 0x00};
+    const uint8_t cat[] = {0x09, 4, 0, 5, 0xe9, 1};
+    const uint8_t pmt[] = {
+        0xe1, 0x01, 0xf0, 6, 0x09, 4, 0, 5, 0xe9, 1,
+        0x1b, 0xe1, 0x01, 0xf0, 0,
+        0x0f, 0xe1, 0x02, 0xf0, 0
+    };
+    const uint8_t pmt_noav[] = {0xe1, 0x01, 0xf0, 6, 0x09, 4, 0, 5, 0xe9, 1};
+    if (mode == 1) {
+        const uint8_t pat2[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10};
+        const uint8_t pmt1[] = {
+            0xe1, 0x01, 0xf0, 6, 0x09, 4, 0, 5, 0xe9, 1,
+            0x1b, 0xe1, 0x01, 0xf0, 0,
+            0x0f, 0xe1, 0x02, 0xf0, 0
+        };
+        const uint8_t pmt2[] = {
+            0xe1, 0x02, 0xf0, 6, 0x09, 4, 0, 5, 0xe9, 2,
+            0x1b, 0xe1, 0x11, 0xf0, 0,
+            0x0f, 0xe1, 0x12, 0xf0, 0
+        };
+        actual_table(packets[0], 0, 0, 1, pat2, sizeof(pat2));
+        actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+        actual_table(packets[2], 0x100, 2, 1, pmt1, sizeof(pmt1));
+        actual_table(packets[3], 0x110, 2, 2, pmt2, sizeof(pmt2));
+        return 4;
+    }
+    if (mode == 7 || mode == 8 || mode == 9 || mode == 10 || mode == 11 || mode == 12) {
+        const uint8_t pat2[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10};
+        const uint8_t pat3[] = {
+            0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10, 0, 3, 0xe1, 0x20
+        };
+        const uint8_t data_pmt[] = {0xe1, 0x02, 0xf0, 0, 0x0d, 0xe3, 0x00, 0xf0, 0};
+        const uint8_t data_pmt3[] = {0xe1, 0x03, 0xf0, 0, 0x0d, 0xe3, 0x01, 0xf0, 0};
+        const uint8_t *pat = mode == 8 ? pat2 : pat3;
+        const size_t pat_size = mode == 8 ? sizeof(pat2) : sizeof(pat3);
+        actual_table(packets[0], 0, 0, 1, pat, pat_size);
+        actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+        if (mode != 8) {
+            actual_table(packets[2], 0x100, 2, 1, pmt, sizeof(pmt));
+            actual_table(packets[3], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
+            if (mode == 9 || mode == 10) {
+                actual_table(packets[4], 0x120, 2, 3, data_pmt3, sizeof(data_pmt3));
+                return 5;
+            }
+            return 4;
+        }
+        actual_table(packets[2], 0x110, 2, 2, data_pmt, sizeof(data_pmt));
+        return 3;
+    }
+    const unsigned tsid = mode == 4 ? 0x4011u : pipeline_bootstrap_tsid;
+    actual_table(packets[0], 0, 0, tsid, pat, sizeof(pat));
+    if (mode == 5) return 1;
+    actual_table(packets[1], 1, 1, 1, cat, sizeof(cat));
+    actual_table(packets[2], 0x100, 2, 1, mode == 2 ? pmt_noav : pmt,
+                 mode == 2 ? sizeof(pmt_noav) : sizeof(pmt));
+    if (mode == 3) {
+        actual_table(packets[3], 0, 0x40, tsid, pat, sizeof(pat));
+        packets[3][3] = 0x11;
+        return 4;
+    }
+    return 3;
+}
+
+void dt295_actual_fixture_acquisition_codec_update(uint8_t packet[188])
+{
+    actual_table_update(packet, 2U, 1U, 4U);
+}
+
+void dt295_actual_fixture_acquisition_tsid_change(uint8_t packet[188])
+{
+    const uint8_t pat[] = {0, 1, 0xe1, 0, 0, 2, 0xe1, 0x10, 0, 3, 0xe1, 0x20};
+    actual_table(packet, 0, 0, 2, pat, sizeof(pat));
+    packet[3] = 0x11;
 }
 
 void dt295_actual_fixture_shared_update_packet(uint8_t packet[188], unsigned program,

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "dt181_capture_host.h"
 
 #include "dt181_capture_bridge.h"

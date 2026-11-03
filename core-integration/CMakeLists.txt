@@ -32,13 +32,22 @@ set(DTV_USERLAND_BUILD_HOST_TS ON CACHE BOOL "Build shared host TS client" FORCE
 
 if(PIX_CORE_SOURCE_DIR)
     add_subdirectory("${PIX_CORE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/dtv-userland-core")
+    set(PIX_CORE_VERSION_SOURCE_DIR "${PIX_CORE_SOURCE_DIR}")
 else()
     FetchContent_Declare(dtv_userland_core
         GIT_REPOSITORY https://github.com/Khronos31/dtv-userland-core.git
         GIT_TAG "${PIX_CORE_REVISION}"
         GIT_SHALLOW FALSE)
     FetchContent_MakeAvailable(dtv_userland_core)
+    set(PIX_CORE_VERSION_SOURCE_DIR "${dtv_userland_core_SOURCE_DIR}")
 endif()
+file(STRINGS "${PIX_CORE_VERSION_SOURCE_DIR}/CMakeLists.txt" DTV_CORE_PROJECT_LINE
+    REGEX "^project\\(dtv_userland_core VERSION ")
+if(NOT DTV_CORE_PROJECT_LINE MATCHES
+        "^project\\(dtv_userland_core VERSION ([0-9]+\\.[0-9]+\\.[0-9]+) LANGUAGES CXX\\)$")
+    message(FATAL_ERROR "Could not read dtv-userland-core project version")
+endif()
+set(DTV_USERLAND_CORE_VERSION "${CMAKE_MATCH_1}")
 
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 
@@ -105,9 +114,13 @@ add_library(pix_dt295_c_backend STATIC
     "${PIX_SOURCE_DIR}/src/dt295_routes.c"
     "${PIX_SOURCE_DIR}/src/dt295_stream.c"
     "${PIX_SOURCE_DIR}/src/ts_output.c"
-    "${PIX_SOURCE_DIR}/src/dt295_capture.c")
+    "${PIX_SOURCE_DIR}/src/dt295_capture.c"
+    "${PIX_SOURCE_DIR}/src/dt295_live_policy.c")
 target_compile_definitions(pix_dt295_c_backend PRIVATE
     _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+if(WIN32)
+    target_compile_definitions(pix_dt295_c_backend PRIVATE DT295_STREAM_WINDOWS_ENABLE)
+endif()
 target_include_directories(pix_dt295_c_backend PUBLIC
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_link_libraries(pix_dt295_c_backend PUBLIC
@@ -147,17 +160,155 @@ target_link_options(pix_dt295_adapter_lifecycle_proof PRIVATE
     -Wl,--wrap=random_bytes)
 add_test(NAME pix_dt295_adapter_lifecycle_proof
     COMMAND pix_dt295_adapter_lifecycle_proof)
+
+add_executable(pix_dt295_stream_retirement_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_stream_retirement_proof.cpp"
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_stream_retirement_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
+    "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")
+target_compile_definitions(pix_dt295_stream_retirement_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_stream_retirement_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_stream_retirement_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+target_link_libraries(pix_dt295_stream_retirement_proof PRIVATE
+    pix_dt295_composition Threads::Threads)
+target_link_options(pix_dt295_stream_retirement_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=libusb_submit_transfer -Wl,--wrap=libusb_cancel_transfer
+    -Wl,--wrap=libusb_handle_events_timeout_completed
+    -Wl,--wrap=libusb_free_transfer
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_stop
+    -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=dt295_destroy -Wl,--wrap=dt295_routes_destroy
+    -Wl,--wrap=dt295_assets_free)
+add_test(NAME pix_dt295_stream_retirement_retry
+    COMMAND pix_dt295_stream_retirement_proof retry)
+add_test(NAME pix_dt295_stream_retirement_detach
+    COMMAND pix_dt295_stream_retirement_proof detach)
+add_test(NAME pix_dt295_stream_retirement_destructor
+    COMMAND pix_dt295_stream_retirement_proof destructor)
+
+add_executable(pix_dt295_acquisition_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_acquisition_proof.cpp"
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c"
+    "${PIX_SOURCE_DIR}/tests/dt295_saved_cs_fixture.c")
+target_include_directories(pix_dt295_acquisition_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
+    "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")
+target_compile_definitions(pix_dt295_acquisition_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_acquisition_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_acquisition_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+target_link_libraries(pix_dt295_acquisition_proof PRIVATE
+    pix_dt295_composition Threads::Threads)
+target_link_options(pix_dt295_acquisition_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=dt295_reprepare_plan
+    -Wl,--wrap=dt295_routes_feed -Wl,--wrap=dt295_route_write)
+add_test(NAME pix_dt295_acquisition_proof
+    COMMAND pix_dt295_acquisition_proof)
+
+add_executable(pix_dt295_scan_contract_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_scan_contract_proof.cpp"
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_scan_contract_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
+    "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")
+target_compile_definitions(pix_dt295_scan_contract_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_scan_contract_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_scan_contract_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+target_link_libraries(pix_dt295_scan_contract_proof PRIVATE
+    pix_dt295_composition Threads::Threads)
+target_link_options(pix_dt295_scan_contract_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=pthread_join -Wl,--wrap=pthread_create
+    -Wl,--wrap=dt295_stop
+    -Wl,--wrap=dt295_destroy -Wl,--wrap=dt295_routes_destroy
+    -Wl,--wrap=dt295_assets_free)
+add_test(NAME pix_dt295_scan_contract_proof
+    COMMAND pix_dt295_scan_contract_proof)
+add_test(NAME pix_dt295_scan_persistent_close
+    COMMAND pix_dt295_scan_contract_proof persistent-close)
+add_test(NAME pix_dt295_scan_shutdown_persistent
+    COMMAND pix_dt295_scan_contract_proof shutdown-persistent)
+
+add_executable(pix_dt295_live_policy_proof
+    "${PIX_SOURCE_DIR}/tests/pix_dt295_live_policy_proof.cpp"
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_live_policy_proof PRIVATE
+    "${PIX_SOURCE_DIR}" "${PIX_SOURCE_DIR}/include"
+    "${PIX_SOURCE_DIR}/src" "${PIX_SOURCE_DIR}/tests")
+target_compile_definitions(pix_dt295_live_policy_proof PRIVATE
+    _POSIX_C_SOURCE=200809L)
+target_compile_features(pix_dt295_live_policy_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_live_policy_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
+target_link_libraries(pix_dt295_live_policy_proof PRIVATE
+    pix_dt295_composition Threads::Threads)
+target_link_options(pix_dt295_live_policy_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy
+    -Wl,--wrap=dt295_route_write)
+add_test(NAME pix_dt295_live_policy_proof
+    COMMAND pix_dt295_live_policy_proof)
 endif()
 
-set(PIX_RUNTIME_VERSION "0.0.0-dev" CACHE STRING "PIX runtime version")
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../include/version.h" PIX_PRODUCT_VERSION_LINE
+    REGEX "^#define VERSION \"")
+if(NOT PIX_PRODUCT_VERSION_LINE MATCHES
+        "^#define VERSION \"([0-9]+\\.[0-9]+\\.[0-9]+)\"$")
+    message(FATAL_ERROR "Could not read PIX product version from include/version.h")
+endif()
+set(PIX_PRODUCT_VERSION "${CMAKE_MATCH_1}")
+set(PIX_RUNTIME_VERSION "${PIX_PRODUCT_VERSION}" CACHE STRING "PIX runtime version")
 set(PIX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(PIX_FIRMWARE_MANIFEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/firmware-manifest")
+set(PIX_FIRMWARE_MANIFEST_HEADER "${PIX_FIRMWARE_MANIFEST_DIR}/pix_firmware_manifest_generated.h")
+add_custom_command(
+    OUTPUT "${PIX_FIRMWARE_MANIFEST_HEADER}"
+    COMMAND "${Python3_EXECUTABLE}" "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+        header --output "${PIX_FIRMWARE_MANIFEST_HEADER}"
+    DEPENDS "${PIX_SOURCE_DIR}/firmware/manifest.json"
+            "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+    VERBATIM)
 option(PIX_EMBEDDED_ASSETS "Embed the authorized DT181 and DT295 assets in pixd" OFF)
-set(PIX_DT181_ASSET_DIR "" CACHE PATH "Private directory containing DT181 assets")
-set(PIX_DT295_ASSET_FILE "" CACHE FILEPATH "Private DT295 asset bundle")
+set(PIX_DT181_FIRMWARE_FILE "" CACHE FILEPATH "Validated DT181 firmware bundle")
+set(PIX_DT295_FIRMWARE_FILE "" CACHE FILEPATH "Validated DT295 firmware bundle")
 
 if(PIX_EMBEDDED_ASSETS)
-    if(NOT IS_DIRECTORY "${PIX_DT181_ASSET_DIR}" OR NOT EXISTS "${PIX_DT295_ASSET_FILE}")
-        message(FATAL_ERROR "PIX_EMBEDDED_ASSETS requires DT181 and DT295 asset inputs")
+    if(NOT EXISTS "${PIX_DT181_FIRMWARE_FILE}" OR NOT EXISTS "${PIX_DT295_FIRMWARE_FILE}")
+        message(FATAL_ERROR "PIX_EMBEDDED_ASSETS requires DT181 and DT295 firmware files")
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(PIX_EMBEDDED_ASSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/embedded-assets")
@@ -192,26 +343,28 @@ if(PIX_EMBEDDED_ASSETS)
         OUTPUT "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}"
                "${PIX_EMBEDDED_ASSET_MANIFEST}"
         COMMAND "${Python3_EXECUTABLE}" "${PIX_SOURCE_DIR}/tools/embed-assets.py"
-            --dt181-assets "${PIX_DT181_ASSET_DIR}"
-            --dt295-assets "${PIX_DT295_ASSET_FILE}"
+            --dt181-firmware "${PIX_DT181_FIRMWARE_FILE}"
+            --dt295-firmware "${PIX_DT295_FIRMWARE_FILE}"
             --output-dir "${PIX_EMBEDDED_ASSET_DIR}"
             --source-revision "${PIX_SOURCE_REVISION}"
             --core-revision "${PIX_CORE_REVISION}"
             --toolchain "${PIX_EMBEDDED_TOOLCHAIN}"
         DEPENDS
             "${PIX_SOURCE_DIR}/tools/embed-assets.py"
+            "${PIX_SOURCE_DIR}/tools/firmware_bundle.py"
+            "${PIX_SOURCE_DIR}/firmware/manifest.json"
             "${PIX_SOURCE_DIR}/tools/finalize-private-release.py"
-            "${PIX_DT181_ASSET_DIR}/fpga.bin"
-            "${PIX_DT181_ASSET_DIR}/bootstrap.bin"
-            "${PIX_DT181_ASSET_DIR}/validation.bin"
-            "${PIX_DT295_ASSET_FILE}"
+            "${PIX_DT181_FIRMWARE_FILE}"
+            "${PIX_DT295_FIRMWARE_FILE}"
         VERBATIM)
 endif()
 
-add_library(pix_product_runtime STATIC pix_runtime.cpp)
+add_library(pix_product_runtime STATIC pix_runtime.cpp pix-firmware-bundle.cpp
+    "${PIX_FIRMWARE_MANIFEST_HEADER}")
 target_include_directories(pix_product_runtime PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}"
-    PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+    PRIVATE "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src"
+    "${PIX_FIRMWARE_MANIFEST_DIR}")
 if(PIX_EMBEDDED_ASSETS)
     target_sources(pix_product_runtime PRIVATE
         "${PIX_EMBEDDED_ASSET_HEADER}" "${PIX_EMBEDDED_ASSET_SOURCE}")
@@ -219,7 +372,8 @@ if(PIX_EMBEDDED_ASSETS)
     target_compile_definitions(pix_product_runtime PRIVATE PIX_EMBEDDED_ASSETS)
 endif()
 target_compile_definitions(pix_product_runtime PRIVATE
-    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+    _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    DTV_USERLAND_CORE_VERSION="${DTV_USERLAND_CORE_VERSION}")
 target_compile_features(pix_product_runtime PUBLIC cxx_std_17)
 target_compile_options(pix_product_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror
@@ -250,6 +404,15 @@ if(PIX_EMBEDDED_ASSETS)
     target_compile_definitions(pix_asset_memory_proof PRIVATE PIX_EMBEDDED_ASSETS)
 endif()
 add_test(NAME pix_asset_memory_proof COMMAND pix_asset_memory_proof)
+add_executable(pix_firmware_bundle_proof tests/pix_firmware_bundle_proof.cpp)
+target_compile_features(pix_firmware_bundle_proof PRIVATE cxx_std_17)
+target_compile_options(pix_firmware_bundle_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_firmware_bundle_proof PRIVATE pix_product_runtime)
+add_test(NAME pix_firmware_bundle_proof
+    COMMAND pix_firmware_bundle_proof
+        "${PIX_SOURCE_DIR}/firmware/dt181.bin"
+        "${PIX_SOURCE_DIR}/firmware/dt295.bin")
 add_test(NAME pix_android_launcher
     COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh")
 
@@ -265,6 +428,14 @@ target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VER
 target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
+
+add_executable(pix_ts_profile_tests tests/pix_ts_profile_tests.cpp)
+target_include_directories(pix_ts_profile_tests PRIVATE tools)
+target_compile_features(pix_ts_profile_tests PRIVATE cxx_std_17)
+target_compile_options(pix_ts_profile_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+target_link_libraries(pix_ts_profile_tests PRIVATE dtv::host_ts dtv::tuning)
+add_test(NAME pix_ts_profile_tests COMMAND pix_ts_profile_tests)
 
 add_executable(pixd_fixture pixd.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c
@@ -300,6 +471,26 @@ if(WIN32)
     add_executable(pix_windows_os_thread_proof tests/windows_os_thread_proof.c)
     target_include_directories(pix_windows_os_thread_proof PRIVATE "${PIX_SOURCE_DIR}/include")
     add_test(NAME pix_windows_os_thread_proof COMMAND pix_windows_os_thread_proof)
+
+    add_executable(pix_dt295_stream_windows_i1
+        "${PIX_SOURCE_DIR}/tests/test_dt295_stream_i1.c"
+        "${PIX_SOURCE_DIR}/src/dt295_stream.c")
+    target_include_directories(pix_dt295_stream_windows_i1 PRIVATE
+        "${PIX_SOURCE_DIR}/include")
+    target_compile_definitions(pix_dt295_stream_windows_i1 PRIVATE
+        DT295_STREAM_WINDOWS_ENABLE DT295_STREAM_TESTING)
+    target_compile_options(pix_dt295_stream_windows_i1 PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(pix_dt295_stream_windows_i1 PRIVATE PkgConfig::LIBUSB Threads::Threads)
+
+    add_executable(pix_dt295_stream_windows_i2
+        "${PIX_SOURCE_DIR}/tests/test_dt295_stream_windows_i2.c"
+        "${PIX_SOURCE_DIR}/src/dt295_stream.c")
+    target_include_directories(pix_dt295_stream_windows_i2 PRIVATE
+        "${PIX_SOURCE_DIR}/include")
+    target_compile_definitions(pix_dt295_stream_windows_i2 PRIVATE
+        DT295_STREAM_WINDOWS_ENABLE)
+    target_compile_options(pix_dt295_stream_windows_i2 PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(pix_dt295_stream_windows_i2 PRIVATE PkgConfig::LIBUSB Threads::Threads)
 else()
     target_link_options(pixd_fixture PRIVATE
         -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
@@ -313,7 +504,10 @@ target_include_directories(pix_public_runtime_proof PRIVATE
     "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
 target_compile_definitions(pix_public_runtime_proof PRIVATE
     _POSIX_C_SOURCE=200809L PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}"
+    DTV_USERLAND_CORE_VERSION="${DTV_USERLAND_CORE_VERSION}"
     PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin"
+    PIX_FIRMWARE_DT295_PATH="${PIX_SOURCE_DIR}/firmware/dt295.bin"
     PIXTS_PATH="$<TARGET_FILE:pix-ts>" PIXCTL_PATH="$<TARGET_FILE:pixctl>")
 target_compile_features(pix_public_runtime_proof PRIVATE cxx_std_17)
 target_link_libraries(pix_public_runtime_proof PRIVATE pix_product_runtime Threads::Threads)
@@ -328,10 +522,38 @@ add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
 endif()
 
+if(NOT WIN32)
+add_executable(pix_dt295_family_contract_proof
+    tests/pix_dt295_family_contract_proof.cpp
+    "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
+target_include_directories(pix_dt295_family_contract_proof PRIVATE
+    tests "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests"
+    "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+target_compile_definitions(pix_dt295_family_contract_proof PRIVATE
+    _POSIX_C_SOURCE=200809L
+    PIX_FIRMWARE_DT295_PATH="${PIX_SOURCE_DIR}/firmware/dt295.bin")
+target_compile_features(pix_dt295_family_contract_proof PRIVATE cxx_std_17)
+target_compile_options(pix_dt295_family_contract_proof PRIVATE
+    -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+target_link_libraries(pix_dt295_family_contract_proof PRIVATE
+    pix_product_runtime PkgConfig::LIBUSB Threads::Threads)
+target_link_options(pix_dt295_family_contract_proof PRIVATE
+    -Wl,--wrap=usb_open_model -Wl,--wrap=usb_close
+    -Wl,--wrap=usb_native_context -Wl,--wrap=usb_native_handle
+    -Wl,--wrap=libusb_control_transfer -Wl,--wrap=libusb_bulk_transfer
+    -Wl,--wrap=libusb_interrupt_transfer
+    -Wl,--wrap=random_bytes
+    -Wl,--wrap=dt295_stream_start -Wl,--wrap=dt295_stream_read
+    -Wl,--wrap=dt295_stream_stop -Wl,--wrap=dt295_stream_destroy)
+add_test(NAME pix_dt295_family_contract_proof
+    COMMAND pix_dt295_family_contract_proof)
+endif()
+
 if(PIX_EMBEDDED_ASSETS AND NOT WIN32)
 add_executable(pix_embedded_runtime_proof tests/pix_embedded_runtime_proof.cpp)
 target_compile_definitions(pix_embedded_runtime_proof PRIVATE
-    PIXD_PATH="$<TARGET_FILE:pixd_fixture>")
+    PIXD_PATH="$<TARGET_FILE:pixd_fixture>"
+    PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin")
 target_compile_features(pix_embedded_runtime_proof PRIVATE cxx_std_17)
 target_compile_options(pix_embedded_runtime_proof PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_dependencies(pix_embedded_runtime_proof pixd_fixture)

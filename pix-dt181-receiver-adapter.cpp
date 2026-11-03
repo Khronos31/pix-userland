@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "pix-dt181-receiver-adapter.h"
 
 #include <cerrno>

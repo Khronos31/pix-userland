@@ -11,12 +11,12 @@ from pathlib import Path
 import struct
 import tarfile
 import tempfile
+from firmware_bundle import read_manifest, verify_bundle
 
 _spec = importlib.util.spec_from_file_location("pix_package", Path(__file__).with_name("package-release.py"))
 pack = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pack)
 
-DT181_SIZES = {"fpga.bin": 699673, "bootstrap.bin": 16, "validation.bin": 64}
 DT295_MAGIC = b"D295A1\0\0"
 DT295_SECTION_COUNT = 6
 DT295_HEADER_SIZE = 8 + DT295_SECTION_COUNT * 36
@@ -71,19 +71,13 @@ def validate_dt295_bundle(data):
     return tuple(sections)
 
 
-def _load_dt181_assets(directory):
-    root = Path(directory)
-    blobs = {}
-    for name, size in DT181_SIZES.items():
-        path = root / name
-        data = path.read_bytes()
-        if len(data) != size:
-            raise ValueError(f"invalid DT181 asset size: {name}")
-        blobs[name] = data
-    return blobs
+def _load_dt181_firmware(path):
+    data = Path(path).read_bytes()
+    verify_bundle("dt181", data, read_manifest())
+    return data
 
 
-def _archive_update(path, target, dt181_blobs, dt295_blob):
+def _archive_update(path, target, dt181_blob, dt295_blob):
     prefix = f"pix-userland-{pack.VERSION}-{target}/"
     with tarfile.open(path, "r:gz") as archive:
         members = archive.getmembers()
@@ -94,7 +88,7 @@ def _archive_update(path, target, dt181_blobs, dt295_blob):
         entries = [(member.name, archive.extractfile(member).read(), member.mode) for member in members]
     if any(not name.startswith(prefix) or ".." in Path(name).parts for name, _, _ in entries):
         raise ValueError(f"invalid package member path in {path.name}")
-    if any(name.startswith(prefix + "assets/") for name, _, _ in entries):
+    if any(name.startswith(prefix + "firmware/") for name, _, _ in entries):
         raise ValueError(f"package already has device assets: {path.name}")
     info_name = prefix + "release-info.json"
     matching = [index for index, item in enumerate(entries) if item[0] == info_name]
@@ -112,9 +106,9 @@ def _archive_update(path, target, dt181_blobs, dt295_blob):
     metadata["device_assets"] = True
     metadata["dt295_assets"] = include_dt295
     entries[index] = (name, json.dumps(metadata, indent=2).encode() + b"\n", mode)
-    entries.extend((prefix + "assets/" + name, data, 0o600) for name, data in dt181_blobs.items())
+    entries.append((prefix + "firmware/dt181.bin", dt181_blob, 0o600))
     if include_dt295:
-        entries.append((prefix + "assets/dt295.assets", dt295_blob, 0o600))
+        entries.append((prefix + "firmware/dt295.bin", dt295_blob, 0o600))
     output = io.BytesIO()
     with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
         with tarfile.open(fileobj=compressed, mode="w") as archive:
@@ -127,19 +121,20 @@ def _archive_update(path, target, dt181_blobs, dt295_blob):
     return output.getvalue()
 
 
-def finalize_private_release(dt181_asset_dir, dt295_asset_path=None, root=None):
+def finalize_private_release(dt181_firmware_path, dt295_firmware_path=None, root=None):
     """Preflight all inputs/packages, then stage all seven updated binary archives."""
     root = Path(root) if root is not None else pack.ROOT
-    dt181_blobs = _load_dt181_assets(dt181_asset_dir)
+    dt181_blob = _load_dt181_firmware(dt181_firmware_path)
     dt295_blob = None
-    if dt295_asset_path is not None:
-        dt295_blob = Path(dt295_asset_path).read_bytes()
+    if dt295_firmware_path is not None:
+        dt295_blob = Path(dt295_firmware_path).read_bytes()
+        verify_bundle("dt295", dt295_blob, read_manifest())
         validate_dt295_bundle(dt295_blob)
 
     plans = []
     for target in pack.TARGETS:
         path = root / "dist" / f"pix-userland-{pack.VERSION}-{target}.tar.gz"
-        plans.append((path, _archive_update(path, target, dt181_blobs, dt295_blob)))
+        plans.append((path, _archive_update(path, target, dt181_blob, dt295_blob)))
 
     staged = []
     try:
@@ -165,11 +160,11 @@ def finalize_private_release(dt181_asset_dir, dt295_asset_path=None, root=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("assets", help="directory containing the three legacy DT181 assets")
-    parser.add_argument("--dt295-assets", help="validated private dt295.assets bundle for darwin-arm64 only")
+    parser.add_argument("dt181_firmware", help="validated DT181 firmware bundle")
+    parser.add_argument("--dt295-firmware", help="validated DT295 firmware bundle for darwin-arm64 only")
     args = parser.parse_args(argv)
-    finalize_private_release(args.assets, args.dt295_assets)
-    suffix = " and the macOS DT295 bundle" if args.dt295_assets else ""
+    finalize_private_release(args.dt181_firmware, args.dt295_firmware)
+    suffix = " and the macOS DT295 bundle" if args.dt295_firmware else ""
     print(f"Seven binary packages finalized with private DT181 assets{suffix}; source unchanged")
 
 

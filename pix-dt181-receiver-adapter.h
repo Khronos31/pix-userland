@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 // Product-local glue for the existing PIX DT181 C session and capture host.
 #ifndef PIX_DT181_RECEIVER_ADAPTER_H
 #define PIX_DT181_RECEIVER_ADAPTER_H
@@ -60,7 +60,7 @@ public:
     dtv::userland::Result<Consumer::ReadResult> read(
         const Attachment&, dtv::userland::MutableByteView,
         std::chrono::milliseconds) noexcept;
-    Result release_final(const Attachment&) noexcept;
+    Result release_final(const Attachment&) noexcept override;
 
 private:
     bool matches(ReceiverId) const noexcept;

@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(DT295_STREAM_WINDOWS_ENABLE)
 int dt295_stream_start(libusb_context *c, libusb_device_handle *h, dt295_stream **out) {
     (void)c;
     (void)h;

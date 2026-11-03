@@ -3,9 +3,9 @@
 import argparse
 import hashlib
 import json
-import os
 import struct
 from pathlib import Path
+from firmware_bundle import pack_dt181
 
 FRAMEWORKS = 'AliasFile CorePixy LoginItemsManager LogUtility PDLayerPixy Pixy PixyGraph px_mpegvd SerialKeyUtility SkinManager Sparkle TSReceiver TVCore WDLibrary'.split()
 PLUGINS = 'AACDec AudioOutputter DataSource DefaultPixy OpenGLViewVideoOutputter TSDemuxer TSFileSource TSRecorder VideoDec'.split()
@@ -26,7 +26,7 @@ def mapped_bytes(binary, address, size):
     raise ValueError('Address is outside file-backed segments')
 
 
-def prepare(app, fpga, output):
+def prepare(app, fpga, output, manifest_output=None):
     app = Path(app); output = Path(output)
     framework = app/'Contents/Frameworks/PDLayerPixy.framework/Versions/A'
     binary = (framework/'PDLayerPixy').read_bytes()
@@ -42,20 +42,26 @@ def prepare(app, fpga, output):
     if len(tag) != 48: raise ValueError('Unexpected application validation tag size')
     bitstream = Path(fpga).read_bytes()
     if len(bitstream) != 699673: raise ValueError('Unexpected FPGA bitstream size')
-    assets = {'bootstrap.bin': mapped_bytes(binary, 0x14a4bd+0x10ce98f, 16),
-              'validation.bin': digest.digest()+tag, 'fpga.bin': bitstream}
-    output.mkdir(parents=True, exist_ok=True); output.chmod(0o700)
-    for name, data in assets.items():
-        with open(output/name, 'wb') as f: f.write(data)
-        (output/name).chmod(0o600)
-    (output/'manifest.json').write_text(json.dumps({'application_sha256':PD_SHA256,
-           'validation_files':len(paths),'fpga_sha256':hashlib.sha256(bitstream).hexdigest()},indent=2)+'\n')
-    print(f'Prepared {len(assets)} private assets in {output.resolve()}')
+    sections = {'bootstrap': mapped_bytes(binary, 0x14a4bd+0x10ce98f, 16),
+                'validation': digest.digest()+tag, 'fpga': bitstream}
+    bundle = pack_dt181(sections)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(bundle)
+    output.chmod(0o600)
+    manifest_path = Path(manifest_output) if manifest_output else \
+        output.with_name('dt181-source-manifest.json')
+    manifest_path.write_text(json.dumps({'application_sha256':PD_SHA256,
+           'validation_files':len(paths),'fpga_sha256':hashlib.sha256(bitstream).hexdigest(),
+           'bundle_sha256':hashlib.sha256(bundle).hexdigest()},indent=2)+'\n')
+    manifest_path.chmod(0o600)
+    print(f'Prepared validated DT181 firmware bundle at {output.resolve()}')
 
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--app', required=True, type=Path)
     p.add_argument('--fpga', required=True, type=Path)
-    p.add_argument('--output', type=Path, default=Path(__file__).resolve().parent.parent/'assets')
-    a = p.parse_args(); prepare(a.app, a.fpga, a.output)
+    p.add_argument('--output', type=Path,
+                   default=Path(__file__).resolve().parent.parent/'firmware'/'dt181.bin')
+    p.add_argument('--manifest-output', type=Path)
+    a = p.parse_args(); prepare(a.app, a.fpga, a.output, a.manifest_output)

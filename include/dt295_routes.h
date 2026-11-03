@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MIT */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef PIX_DT295_ROUTES_H
 #define PIX_DT295_ROUTES_H
 
@@ -37,6 +37,7 @@ typedef struct {
     uint8_t has_primary;
     uint16_t dedicated_pid[4]; /* V, A, PMT, PCR logical roles; zero means disabled */
     uint8_t video_stream_type, audio_stream_type;
+    uint8_t primary_has_ecm_dependency;
     uint16_t primary_program;
     uint16_t missing_pmts;
 } dt295_route_plan;
@@ -51,6 +52,9 @@ typedef struct {
     uint16_t tsid;
     uint16_t program_count;
     dt295_pat_program programs[64];
+    uint8_t pmt_present[64], pmt_version[64];
+    uint32_t pat_generation, cat_generation, pmt_generation[64]; /* committed PSI updates */
+    uint8_t cat_version_valid, cat_version;
     uint16_t missing_pmts;
     uint8_t ready;
     uint32_t invalid_sections, continuity_errors, unsupported_tables;
@@ -58,7 +62,7 @@ typedef struct {
 
 /* The watcher owns bounded memory; create returns NULL on allocation failure. */
 dt295_routes *dt295_routes_create(void);
-/* Satellite streams may omit CAT; terrestrial readiness keeps requiring it. */
+/* CAT is optional; readiness requires PAT and every listed PMT. */
 void dt295_routes_set_satellite(dt295_routes *, int satellite);
 void dt295_routes_destroy(dt295_routes *);
 void dt295_routes_reset(dt295_routes *);
