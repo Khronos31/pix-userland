@@ -40,13 +40,26 @@ std::string canonical_daemon_instance(const char* spelling)
 int main()
 {
     bool ok = true;
-    for (const char* spelling : {"RoomA", "rooma", "ROOMA", "receiver.left"}) {
+    ok &= check(!parse_product({"pix-ts", "--instance", "pix",
+                                "--channel", "T13"}).valid,
+                "receiver omission is rejected");
+    const auto metadata = parse_product({"pix-ts", "--version", "--unknown"});
+    ok &= check(metadata.valid && metadata.version,
+                "version takes precedence over invalid arguments");
+    const auto both_metadata = parse_product({"pix-ts", "--version", "--help"});
+    ok &= check(both_metadata.valid && both_metadata.help,
+                "help takes precedence over version");
+    ok &= check(!parse_product({"pix-ts", "--receiver", "0", "-F", "file"}).valid &&
+                    !parse_product({"pix-ts", "--receiver", "0", "-V"}).valid,
+                "removed short options remain unknown");
+    for (const char* spelling : {"RoomA", "rooma", "ROOMA", "receiver.left",
+                                 "00001205000960"}) {
         const auto matched = parse_product({"pix-ts", "--instance", spelling,
                                             "--receiver", "0", "-c", "T13"});
         ok &= check(matched.valid && matched.instance == spelling,
                     "product profile preserves the explicit instance spelling");
     }
-    for (const char* rejected : {".", "..", "room/a", "room:a", "00001205000960"}) {
+    for (const char* rejected : {".", "..", "room/a", "room:a"}) {
         ok &= check(!parse_product({"pix-ts", "--instance", rejected,
                                     "--receiver", "0", "-c", "T13"}).valid,
                     "product profile rejects an invalid instance token");

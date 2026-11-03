@@ -1,12 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+arguments=("$@")
+show_help()
+{
+    printf '%s\n' \
+        "usage: termux-usb -r -e \"$0 [pix-ts options...]\" USB_DEVICE" \
+        '       pix-termux --help' \
+        '       pix-termux --version'
+}
+
+show_version()
+{
+    root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+    IFS= read -r product_version < "$root/VERSION"
+    printf 'pix-termux %s\n' "$product_version"
+}
+
+request_help=0
+request_version=0
+for ((index = 0; index < ${#arguments[@]}; ++index)); do
+    argument=${arguments[index]}
+    if [[ $argument == --help || $argument == -h ]]; then
+        request_help=1
+    elif [[ $argument == --version ]]; then
+        request_version=1
+    fi
+    if ((index + 1 < ${#arguments[@]})); then
+        value=${arguments[index + 1]}
+        if [[ $value != --* ]] && {
+            [[ $argument == -o || $argument == --output || $argument == --firmware ]] ||
+            [[ $value != -h && ($argument == --receiver || $argument == --time ||
+                $argument == -t || $argument == --freq || $argument == -f ||
+                $argument == --channel || $argument == -c || $argument == --system ||
+                $argument == --tune-timeout-ms || $argument == --packet-count) ]];
+        }; then
+            ((index += 1))
+        fi
+    fi
+done
+if ((request_help)); then
+    show_help
+    exit 0
+fi
+if ((request_version)); then
+    show_version
+    exit 0
+fi
+
 if (($# < 2)); then
-    printf 'usage: termux-usb -r -e "%s [pix-ts options...]" USB_DEVICE\n' "$0" >&2
+    show_help >&2
     exit 2
 fi
 
-arguments=("$@")
 fd=${arguments[$((${#arguments[@]} - 1))]}
 if [[ ! $fd =~ ^[0-9]+$ ]] || ((10#$fd < 3 || 10#$fd > 2147483647)); then
     echo 'pix-termux: expected the USB file descriptor appended by termux-usb' >&2

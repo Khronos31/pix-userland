@@ -389,7 +389,8 @@ int main()
             root + "/pixctl-long-endpoint.log",
             "endpoint path is too long")) return 49;
     if (!client_failure(PIXTS_PATH,
-            {"--device", "usb:1-2", "--instance", "pix-proof", "--channel", "T13",
+            {"--device", "usb:1-2", "--instance", "pix-proof", "--receiver", "0",
+             "--channel", "T13",
              "--runtime-dir", long_runtime, "--output", "-"},
             root + "/pix-ts-long-endpoint.log",
             "endpoint path is too long")) return 50;
@@ -435,7 +436,8 @@ int main()
     for (const char* voltage : {"0", "15"}) {
         const std::string removed_lnb_log = root + "/removed-lnb-" + voltage + ".log";
         const pid_t removed_lnb = launch(PIXTS_PATH,
-            {"--channel", "T13", "--lnb-voltage", voltage}, removed_lnb_log);
+            {"--receiver", "0", "--channel", "T13", "--lnb-voltage", voltage},
+            removed_lnb_log);
         int removed_lnb_status = 0;
         if (removed_lnb <= 0 ||
             ::waitpid(removed_lnb, &removed_lnb_status, 0) != removed_lnb ||
@@ -501,7 +503,8 @@ int main()
     const std::string idle_instance = json_string(idle_status, "instance");
 
     const pid_t client = launch(PIXTS_PATH,
-        {"--device", "serial:PIXDT18101", "--freq", "473142857", "--time", "3",
+        {"--device", "serial:PIXDT18101", "--receiver", "0", "--freq", "473142857",
+         "--time", "3",
          "--output", output_path, "--runtime-dir", root, "--group"}, root + "/pix-ts.log");
     std::string streaming_ready_status;
     unsigned readiness_attempts = 0U;
@@ -540,7 +543,8 @@ int main()
         return 5;
     }
     const pid_t off_grid = launch(PIXTS_PATH,
-        {"--device", "serial:PIXDT18101", "--freq", "473142000", "--time", "1",
+        {"--device", "serial:PIXDT18101", "--receiver", "0", "--freq", "473142000",
+         "--time", "1",
          "--output", off_grid_path, "--runtime-dir", root, "--group"},
         root + "/pix-ts-off-grid.log");
     int off_grid_status = 0;
@@ -551,7 +555,8 @@ int main()
         return 22;
     }
     const pid_t satellite = launch(PIXTS_PATH,
-        {"--device", "serial:PIXDT18101", "--channel", "BS01", "--tsid", "4660",
+        {"--device", "serial:PIXDT18101", "--receiver", "0", "--channel", "BS01",
+         "--tsid", "4660",
          "--time", "1", "--output", satellite_path,
          "--runtime-dir", root, "--group"}, root + "/pix-ts-satellite.log");
     int satellite_status = 0;
@@ -563,7 +568,8 @@ int main()
         return 11;
     }
     const pid_t satellite_slot = launch(PIXTS_PATH,
-        {"--device", "serial:PIXDT18101", "--channel", "BS01", "--slot", "3",
+        {"--device", "serial:PIXDT18101", "--receiver", "0", "--channel", "BS01",
+         "--slot", "3",
          "--time", "1", "--output", satellite_slot_path, "--runtime-dir", root,
          "--group"}, root + "/pix-ts-satellite-slot.log");
     int satellite_slot_status = 0;
@@ -583,7 +589,8 @@ int main()
     }
     const std::string missing_stream_log = root + "/pix-ts-missing-stream.log";
     const pid_t missing_stream_client = launch(PIXTS_PATH,
-        {"--device", "serial:PIXDT18101", "--channel", "T13", "--time", "1",
+        {"--device", "serial:PIXDT18101", "--receiver", "0", "--channel", "T13",
+         "--time", "1",
          "--output", root + "/missing-stream.ts", "--runtime-dir", root, "--group"},
         missing_stream_log);
     int missing_stream_status = 0;
@@ -699,7 +706,7 @@ int main()
          "--instance", "pix-no-ts"}, root + "/pixd-no-ts.log");
     if (no_ts_daemon <= 0 || !wait_ready(root + "/pixd-no-ts.log", no_ts_daemon)) return 13;
     const pid_t no_ts_client = launch(PIXTS_PATH,
-        {"--instance", "pix-no-ts", "--channel", "T13", "--time", "1",
+        {"--instance", "pix-no-ts", "--receiver", "0", "--channel", "T13", "--time", "1",
          "--output", no_ts_path, "--runtime-dir", no_ts_runtime}, root + "/pix-ts-no-ts.log");
     int no_ts_status = 0;
     if (no_ts_client <= 0 || ::waitpid(no_ts_client, &no_ts_status, 0) != no_ts_client ||
@@ -731,7 +738,7 @@ int main()
     const std::size_t held_start_closes = occurrence_count(
         held_start_log, "PIX_CLEANUP close-handle=");
     const pid_t held_client = launch(PIXTS_PATH,
-        {"--instance", "pix-held", "--channel", "T13", "--time", "3",
+        {"--instance", "pix-held", "--receiver", "0", "--channel", "T13", "--time", "3",
          "--output", root + "/held.ts", "--runtime-dir", held_runtime}, root + "/pix-ts-held.log");
     bool callback_held = false;
     for (unsigned attempt = 0U; attempt < 1000U; ++attempt) {
