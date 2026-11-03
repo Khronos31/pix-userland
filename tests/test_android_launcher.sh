@@ -4,7 +4,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PIX_PUBLIC_TS=$1
 export PIX_PUBLIC_TS
 tmp=$(mktemp -d)
-trap 'exec 7>&- 2>/dev/null || :; /bin/rm -rf "$tmp"' EXIT INT TERM
+long_tmp=
+trap 'exec 7>&- 2>/dev/null || :; /bin/rm -rf "$tmp"; if [ -n "$long_tmp" ]; then /bin/rm -rf "$long_tmp"; fi' EXIT INT TERM
 mkdir -p "$tmp/stage/packaging" "$tmp/bin"
 cp "$root/packaging/pix-termux" "$tmp/stage/packaging/pix-termux"
 cat > "$tmp/stage/pixd" <<'EOF'
@@ -47,6 +48,8 @@ arguments = sys.argv[1:]
 validation = any(argument.startswith("--pix-termux-validation") for argument in arguments)
 for index, argument in enumerate(arguments[:-1]):
     if argument == "--runtime-dir" and "pix-termux-validation-" in arguments[index + 1]:
+        validation = True
+    if argument == "--runtime-dir" and arguments[index + 1].endswith("/pix-termux.XXXXXX"):
         validation = True
 if validation:
     result = subprocess.run(
@@ -242,6 +245,39 @@ run_invalid_case missing-receiver --channel T27 --packet-count 1
 run_invalid_case duplicate-receiver --receiver 0 --channel T27 --packet-count 1 --receiver 1
 run_invalid_case duplicate-output --receiver 0 --channel T27 --packet-count 1 \
     --output "$tmp/output-sentinel.ts" --output "$tmp/output-sentinel.ts"
+run_invalid_case output-option-value --receiver 0 --channel T27 --packet-count 1 \
+    --output --control
+run_invalid_case output-empty-value --receiver 0 --channel T27 --packet-count 1 \
+    --output ''
+
+log="$tmp/metadata-output-firmware.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/metadata-output-firmware.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+    "$tmp/stage/packaging/pix-termux" --output --firmware -h 7 \
+    >"$tmp/metadata-output-firmware.stdout" 2>"$tmp/metadata-output-firmware.stderr"
+grep -Fq 'usage:' "$tmp/metadata-output-firmware.stdout"
+test ! -s "$log"
+test ! -e "$tmp/metadata-output-firmware.runtime"
+
+log="$tmp/firmware-h.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/firmware-h.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$tmp" \
+    "$tmp/stage/packaging/pix-termux" --firmware -h --receiver 0 --channel T13 7 \
+    >"$tmp/firmware-h.stdout" 2>"$tmp/firmware-h.stderr"
+grep -Fqx 'pixd-arg=-h' "$log"
+grep -q '^pix-ts-fd=absent$' "$log"
+
+long_tmp=$(mktemp -d /tmp/pix-validation-long-path-XXXXXXXX)
+[ "${#long_tmp}" -eq 38 ]
+log="$tmp/long-tmpdir.log"
+PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/long-tmpdir.runtime" \
+    PIX_TEST_USB_FD=7 TMPDIR="$long_tmp" \
+    "$tmp/stage/packaging/pix-termux" --firmware "$PIX_TEST_FIRMWARE_PATH" \
+    --receiver 0 --channel T13 7 \
+    >"$tmp/long-tmpdir.stdout" 2>"$tmp/long-tmpdir.stderr"
+runtime=$(cat "$tmp/long-tmpdir.runtime")
+grep -q '^pix-ts-fd=absent$' "$log"
+[ ! -e "$runtime" ]
 
 log="$tmp/output-h.log"
 PIX_TERMINUX_LOG="$log" PIX_TEST_RUNTIME_FILE="$tmp/output-h.runtime" \
@@ -255,7 +291,7 @@ if find "$tmp" -maxdepth 1 -type d -name 'pix-termux.*' | grep . >/dev/null; the
     echo 'legacy option created launcher runtime state' >&2
     exit 1
 fi
-if find "$tmp" -maxdepth 1 -type d -name 'pix-termux-validation-*' | grep . >/dev/null; then
+if find "$tmp" -maxdepth 1 -type d -name 'pix-termux.XXXXXX' | grep . >/dev/null; then
     echo 'argument validation created runtime state' >&2
     exit 1
 fi
