@@ -1024,13 +1024,15 @@ case "$ID:$CAPTURE_SECONDS" in *'<'*|*'>'*|*[!A-Za-z0-9:/.-]*) echo 'set a disco
 echo 0 > "$LOG/t27.rc"
 ```
 
-代表機の必須2時間runは同じ候補daemonを保持した同じterminal shellで、短いT27確認とは別runにする。初回/majorのmacOS・Windowsは1800秒、他OS/ABIは600秒をCAPTURE_SECONDSに設定する。Android clientではdevice selectorを付けず、同じinstance/runtime/groupに接続する。
+代表機の必須2時間runは同じ候補daemonを保持した同じterminal shellで、短いT27確認とは別runにする。初回/majorのmacOS・Windowsは1800秒、他OS/ABIは600秒をCAPTURE_SECONDSに設定する。Android clientではdevice selectorを付けず、同じinstance/runtime/groupに接続する。7200秒はTSを破棄し、1800秒/600秒ではTSを代表soakファイルへ保存して既存の品質検査に利用できる。
 
 ```sh
 CAPTURE_SECONDS='7200'
 case "$CAPTURE_SECONDS" in ''|*[!0-9]*|0) echo 'CAPTURE_SECONDS must be positive seconds' >&2; exit 2 ;; esac
+CAPTURE_OUTPUT="$LOG/representative-soak.ts"
+if [ "$CAPTURE_SECONDS" = 7200 ]; then CAPTURE_OUTPUT=/dev/null; fi
 ./pix-ts --instance "$INSTANCE" --channel T27 --system isdb-t \
-  --time "$CAPTURE_SECONDS" --output /dev/null --runtime-dir "$RT2" --group \
+  --time "$CAPTURE_SECONDS" --output "$CAPTURE_OUTPUT" --runtime-dir "$RT2" --group \
   > "$LOG/representative-soak.out" 2> "$LOG/representative-soak.err" || { RC=$?; echo "$RC" > "$LOG/representative-soak.rc"; exit "$RC"; }
 echo 0 > "$LOG/representative-soak.rc"
 ```
