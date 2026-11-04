@@ -84,9 +84,15 @@ target_compile_options(pix_dt181_composition PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
 enable_testing()
+# macOS ld64 has no --wrap, so proofs that substitute functions with it are not built there.
+if(APPLE)
+    set(PIX_LINKER_WRAP OFF)
+else()
+    set(PIX_LINKER_WRAP ON)
+endif()
 # These proofs inject pthread mutexes and POSIX processes; Windows uses the
 # same public runtime USB fixture with its native process harness below.
-if(NOT WIN32)
+if(NOT WIN32 AND PIX_LINKER_WRAP)
 add_executable(pix_dt181_receiver_adapter_proof
     "${PIX_SOURCE_DIR}/tests/pix_dt181_receiver_adapter_proof.cpp"
     "${PIX_SOURCE_DIR}/tests/pix_libusb_bottom.c")
@@ -135,7 +141,7 @@ target_link_libraries(pix_dt295_composition PUBLIC
 target_compile_options(pix_dt295_composition PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 
-if(NOT WIN32)
+if(NOT WIN32 AND PIX_LINKER_WRAP)
 add_executable(pix_dt295_adapter_lifecycle_proof
     "${PIX_SOURCE_DIR}/tests/pix_dt295_adapter_lifecycle_proof.cpp"
     "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
@@ -360,8 +366,11 @@ target_compile_definitions(pix-ts PRIVATE PIX_RUNTIME_VERSION="${PIX_RUNTIME_VER
 target_compile_features(pix-ts PRIVATE cxx_std_17)
 target_compile_options(pix-ts PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 target_link_libraries(pix-ts PRIVATE dtv::host_ts dtv::tuning dtv::host_facade)
+# The Termux launcher check reads /proc/<pid>/fd, which macOS does not have.
+if(NOT APPLE)
 add_test(NAME pix_android_launcher
     COMMAND sh "${PIX_SOURCE_DIR}/tests/test_android_launcher.sh" "$<TARGET_FILE:pix-ts>")
+endif()
 
 add_executable(pix_ts_profile_tests tests/pix_ts_profile_tests.cpp)
 target_include_directories(pix_ts_profile_tests PRIVATE tools)
@@ -371,6 +380,7 @@ target_compile_options(pix_ts_profile_tests PRIVATE
 target_link_libraries(pix_ts_profile_tests PRIVATE dtv::host_ts dtv::tuning)
 add_test(NAME pix_ts_profile_tests COMMAND pix_ts_profile_tests)
 
+if(PIX_LINKER_WRAP)
 add_executable(pixd_fixture pixd.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c
     "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
@@ -426,8 +436,9 @@ else()
     target_link_options(pixd_fixture PRIVATE
         -Wl,--wrap=pthread_create -Wl,--wrap=libusb_handle_events_timeout)
 endif()
+endif()
 
-if(NOT WIN32 AND NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
+if(NOT WIN32 AND PIX_LINKER_WRAP AND NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-static")
 add_executable(pix_public_runtime_proof tests/pix_public_runtime_proof.cpp
     tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c)
 target_include_directories(pix_public_runtime_proof PRIVATE
@@ -453,7 +464,7 @@ add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
 endif()
 
-if(NOT WIN32)
+if(NOT WIN32 AND PIX_LINKER_WRAP)
 add_executable(pix_dt295_family_contract_proof
     tests/pix_dt295_family_contract_proof.cpp
     "${PIX_SOURCE_DIR}/tests/dt295_actual_fixture.c")
