@@ -3,6 +3,7 @@
 #include "pix_l3_adapter.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -15,21 +16,128 @@
 
 namespace {
 
+struct Pending final {
+    uint64_t id = 0U;
+    dtv_l3_provider_binding *binding = nullptr;
+    dtv_l3_transfer_complete_fn complete = nullptr;
+    void *callback_context = nullptr;
+};
+
+struct FakeBackend;
+
+FakeBackend *fake(void *context);
+
 struct FakeBackend final {
     uint64_t claim_calls = 0U;
     uint64_t release_calls = 0U;
     uint64_t transfer_calls = 0U;
     uint64_t tune_calls = 0U;
     uint64_t configure_calls = 0U;
+    uint64_t bind_calls = 0U;
+    uint64_t initialize_calls = 0U;
+    uint64_t async_submit_calls = 0U;
+    uint64_t cancel_calls = 0U;
     uint32_t seen_model = 0U;
     uint64_t seen_selector = 0U;
+    dtv_l3_context *bound_owner = nullptr;
     dtv_l3_claim_result claim_result{DTV_L3_OK, DTV_L3_CLAIM_RETAINED};
+    dtv_l3_cancel_scope cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
+    dtv_l3_result cancel_result = DTV_L3_ACCEPTED;
+    bool async = false;
     std::vector<dtv_l3_release_result> releases;
     std::vector<dtv_l3_result> tunes;
     std::vector<std::uint8_t> last_out;
     std::vector<std::uint8_t> seen_firmware;
+    std::vector<Pending> pending;
     std::uint8_t fill = 0x47U;
 };
+
+dtv_l3_result async_submit(void *context, dtv_l3_provider_binding *binding,
+                           uint64_t transfer_id,
+                           const dtv_l3_transfer_request *request,
+                           dtv_l3_transfer_complete_fn complete,
+                           void *callback_context)
+{
+    FakeBackend *value = fake(context);
+    ++value->async_submit_calls;
+    if (request->out_size != 0U && request->out_data != nullptr) {
+        value->last_out.assign(request->out_data,
+                               request->out_data + request->out_size);
+    }
+    Pending pending{};
+    pending.id = transfer_id;
+    pending.binding = binding;
+    pending.complete = complete;
+    pending.callback_context = callback_context;
+    value->pending.push_back(pending);
+    return DTV_L3_ACCEPTED;
+}
+
+dtv_l3_result async_cancel(void *context, dtv_l3_provider_binding *binding,
+                           uint64_t transfer_id)
+{
+    (void)binding;
+    (void)transfer_id;
+    FakeBackend *value = fake(context);
+    ++value->cancel_calls;
+    return value->cancel_result;
+}
+
+dtv_l3_result product_bind(void *context, dtv_l3_context *owner)
+{
+    FakeBackend *value = fake(context);
+    ++value->bind_calls;
+    value->bound_owner = owner;
+    return DTV_L3_OK;
+}
+
+dtv_l3_result product_initialize(void *context, dtv_l3_context *owner)
+{
+    FakeBackend *value = fake(context);
+    ++value->initialize_calls;
+    value->bound_owner = owner;
+    return DTV_L3_OK;
+}
+
+bool wait_pending(FakeBackend &backend, std::size_t count)
+{
+    for (int attempt = 0; attempt < 1000; ++attempt) {
+        if (backend.pending.size() >= count) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
+
+bool complete_pending(FakeBackend &backend, uint64_t id, dtv_l3_result result,
+                      std::uint8_t fill)
+{
+    for (std::size_t i = 0U; i < backend.pending.size(); ++i) {
+        if (backend.pending[i].id != id) {
+            continue;
+        }
+        const Pending pending = backend.pending[i];
+        backend.pending.erase(backend.pending.begin() +
+                              static_cast<std::ptrdiff_t>(i));
+        std::uint8_t data[188];
+        for (std::size_t j = 0U; j < sizeof(data); ++j) {
+            data[j] = fill;
+        }
+        dtv_l3_transfer_completion completion{};
+        completion.result = result;
+        if (result == DTV_L3_OK) {
+            completion.data = data;
+            completion.size = sizeof(data);
+            completion.actual_length = sizeof(data);
+            completion.actual_length_known = 1U;
+        }
+        pending.complete(pending.binding, pending.id, &completion,
+                         pending.callback_context);
+        return true;
+    }
+    return false;
+}
 
 FakeBackend *fake(void *context)
 {
@@ -131,10 +239,18 @@ pix_l3_usb_backend_ops usb_ops_for(FakeBackend *backend)
 {
     pix_l3_usb_backend_ops ops{};
     ops.context = backend;
+    ops.cancel_scope = backend->cancel_scope;
     ops.claim = claim;
     ops.release_claim = release;
-    ops.transfer = transfer;
-    ops.cancel = cancel;
+    if (backend->async) {
+        ops.submit = async_submit;
+        ops.cancel_async = async_cancel;
+        ops.cancel_supported = backend->cancel_result != DTV_L3_UNSUPPORTED;
+    } else {
+        ops.transfer = transfer;
+        ops.cancel = cancel;
+        ops.cancel_supported = 0U;
+    }
     return ops;
 }
 
@@ -143,6 +259,8 @@ pix_l3_product_ops product_ops_for(FakeBackend *backend)
     pix_l3_product_ops ops{};
     ops.context = backend;
     ops.configure = configure;
+    ops.bind = product_bind;
+    ops.initialize = product_initialize;
     ops.tune = tune;
     ops.scope_query = nullptr;
     return ops;
@@ -265,8 +383,24 @@ int common_capabilities()
     if (dtv_l3_capabilities_get(session.owner, &common) != DTV_L3_OK ||
         common.receiver_count != 1U || common.reader_count != 1U ||
         common.lnb_power != 0U || common.serial != 0U ||
-        common.cancel_scope != DTV_L3_CANCEL_SCOPE_TRANSFER) {
+        common.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE) {
         return 2;
+    }
+    const dtv_l3_capability_catalog *catalog = nullptr;
+    if (dtv_l3_capabilities_get_catalog(session.owner, &catalog) !=
+            DTV_L3_OK ||
+        catalog == nullptr || catalog->receiver_count != 1U ||
+        catalog->readers == nullptr || catalog->reader_count != 1U ||
+        catalog->receivers[0].systems !=
+            (DTV_L3_SYSTEM_ISDB_T | DTV_L3_SYSTEM_ISDB_S) ||
+        catalog->readers[0].external_apdu != DTV_L3_SUPPORT_UNSUPPORTED ||
+        catalog->readers[0].support != DTV_L3_SUPPORT_SUPPORTED ||
+        catalog->lnb_scope_count != 0U) {
+        return 6;
+    }
+    if (backend.bind_calls != 1U || backend.initialize_calls != 1U ||
+        backend.bound_owner != session.owner) {
+        return 7;
     }
     dtv_l3_reader *reader = nullptr;
     if (dtv_l3_reader_acquire(session.owner, 0U, &reader) !=
@@ -306,7 +440,10 @@ int factory_capability_differences()
         details.model != PIX_L3_MODEL_DT181 ||
         details.selects_satellite_stream_before_tune != 1U ||
         details.custom_firmware_candidate != 0U ||
-        details.firmware_required != 1U) {
+        details.firmware_required != 1U ||
+        details.cancel_supported != 0U ||
+        details.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE ||
+        details.submit_nonblocking != 0U) {
         return 3;
     }
     pix_l3_factory_destroy(factory);
@@ -322,7 +459,8 @@ int factory_capability_differences()
         details.external_apdu != PIX_L3_UNSUPPORTED ||
         details.presence_observation != PIX_L3_SUPPORTED ||
         details.lnb_power != PIX_L3_UNSUPPORTED ||
-        details.route_owned_by_product != 1U) {
+        details.route_owned_by_product != 1U ||
+        details.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE) {
         return 4;
     }
     (void)firmware;
@@ -598,6 +736,159 @@ int close_retention_and_cleanup_retry()
     return session.finish() ? 0 : 8;
 }
 
+
+dtv_l3_result start_in_transfer(dtv_l3_context *owner, dtv_l3_op **op)
+{
+    dtv_l3_transfer_request request{};
+    request.kind = DTV_L3_TRANSFER_BULK;
+    request.endpoint = 0x81U;
+    request.timeout_ms = 100U;
+    request.in_capacity = 188U;
+    return dtv_l3_transfer_start(owner, &request, op);
+}
+
+int async_cancel_terminal_and_ownership()
+{
+    FakeBackend backend;
+    backend.async = true;
+    backend.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT181, firmware)) {
+        return 1;
+    }
+    pix_l3_product_capabilities details{};
+    if (pix_l3_factory_details(session.factory, &details) != DTV_L3_OK ||
+        details.cancel_supported != 1U ||
+        details.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE ||
+        details.submit_nonblocking != 1U) {
+        return 2;
+    }
+
+    dtv_l3_op *a = nullptr;
+    dtv_l3_op *b = nullptr;
+    dtv_l3_op_release(session.open_op);
+    session.open_op = nullptr;
+    const dtv_l3_result ra = start_in_transfer(session.owner, &a);
+    const dtv_l3_result rb = start_in_transfer(session.owner, &b);
+    const bool wp = wait_pending(backend, 2U);
+    if (ra != DTV_L3_ACCEPTED || rb != DTV_L3_ACCEPTED ||
+        a == nullptr || b == nullptr || !wp) {
+        return 3;
+    }
+    if (dtv_l3_op_cancel(a) != DTV_L3_ACCEPTED ||
+        backend.cancel_calls != 1U) {
+        return 4;
+    }
+    if (dtv_l3_close(session.owner, 0U) == DTV_L3_OK) {
+        return 5;
+    }
+    dtv_l3_close_status close_status{};
+    if (dtv_l3_close_status_get(session.owner, &close_status) != DTV_L3_OK ||
+        close_status.cleanup_complete != 0U || close_status.releasable != 0U) {
+        return 6;
+    }
+    if (dtv_l3_context_release(session.owner) != DTV_L3_BUSY) {
+        return 7;
+    }
+
+    if (!complete_pending(backend, 2U, DTV_L3_OK, 0x22U) ||
+        !complete_pending(backend, 1U, DTV_L3_CANCELLED, 0x00U)) {
+        return 8;
+    }
+    if (!wait_op(a) || !wait_op(b)) {
+        return 9;
+    }
+    dtv_l3_op_result a_result{};
+    dtv_l3_op_result b_result{};
+    if (dtv_l3_op_poll(a, &a_result) != DTV_L3_OK ||
+        dtv_l3_op_poll(b, &b_result) != DTV_L3_OK) {
+        return 10;
+    }
+    if (a_result.result != DTV_L3_CANCELLED ||
+        b_result.result != DTV_L3_OK || b_result.data_size != 188U ||
+        b_result.data == nullptr || b_result.data[0] != 0x22U) {
+        return 11;
+    }
+    if (dtv_l3_op_release(a) != DTV_L3_OK ||
+        dtv_l3_op_release(b) != DTV_L3_OK) {
+        return 12;
+    }
+    if (!session.finish()) {
+        return 13;
+    }
+    return 0;
+}
+
+int async_normal_completion_wins_race()
+{
+    FakeBackend backend;
+    backend.async = true;
+    backend.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
+        return 1;
+    }
+    dtv_l3_op *op = nullptr;
+    if (start_in_transfer(session.owner, &op) != DTV_L3_ACCEPTED ||
+        op == nullptr || !wait_pending(backend, 1U)) {
+        return 2;
+    }
+    if (dtv_l3_op_cancel(op) != DTV_L3_ACCEPTED) {
+        return 3;
+    }
+    if (!complete_pending(backend, 1U, DTV_L3_OK, 0x33U) || !wait_op(op)) {
+        return 4;
+    }
+    dtv_l3_op_result result{};
+    if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||
+        result.result != DTV_L3_OK || result.data_size != 188U ||
+        result.data == nullptr || result.data[0] != 0x33U) {
+        return 5;
+    }
+    if (dtv_l3_op_release(op) != DTV_L3_OK) {
+        return 6;
+    }
+    return session.finish() ? 0 : 7;
+}
+
+int async_cancel_unsupported_is_not_success()
+{
+    FakeBackend backend;
+    backend.async = true;
+    backend.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT181, firmware)) {
+        return 1;
+    }
+    dtv_l3_op *op = nullptr;
+    if (start_in_transfer(session.owner, &op) != DTV_L3_ACCEPTED ||
+        !wait_pending(backend, 1U)) {
+        return 2;
+    }
+    backend.cancel_result = DTV_L3_UNSUPPORTED;
+    if (dtv_l3_op_cancel(op) != DTV_L3_UNSUPPORTED) {
+        return 3;
+    }
+    if (!complete_pending(backend, 1U, DTV_L3_OK, 0x44U) || !wait_op(op)) {
+        return 4;
+    }
+    dtv_l3_op_result result{};
+    if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||
+        result.result != DTV_L3_OK) {
+        return 5;
+    }
+    if (dtv_l3_op_release(op) != DTV_L3_OK) {
+        return 6;
+    }
+    return session.finish() ? 0 : 7;
+}
+
 }  // namespace
 
 int main()
@@ -630,6 +921,15 @@ int main()
     }
     if (const int rc = close_retention_and_cleanup_retry()) {
         return 90 + rc;
+    }
+    if (const int rc = async_cancel_terminal_and_ownership()) {
+        return 100 + rc;
+    }
+    if (const int rc = async_normal_completion_wins_race()) {
+        return 110 + rc;
+    }
+    if (const int rc = async_cancel_unsupported_is_not_success()) {
+        return 120 + rc;
     }
     return 0;
 }

@@ -544,4 +544,14 @@ if(PIX_BUILD_L3_ADAPTER)
         pix_l3_adapter Threads::Threads)
     add_test(NAME pix_l3_dt295_io_backend_contract
         COMMAND pix_l3_dt295_io_backend_contract)
+
+    add_executable(pix_l3_dt181_backend_contract
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_dt181_backend_contract.cpp")
+    target_compile_features(pix_l3_dt181_backend_contract PRIVATE cxx_std_17)
+    target_compile_options(pix_l3_dt181_backend_contract PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_dt181_backend_contract PRIVATE
+        pix_l3_dt181_backend pix_dt181_c_backend Threads::Threads)
+    add_test(NAME pix_l3_dt181_backend_contract
+        COMMAND pix_l3_dt181_backend_contract)
 endif()

@@ -38,7 +38,8 @@ workflow are unchanged. The adapter consumes the Core prototype header at
 `PIX_L3_CORE_PROTOTYPE_DIR` (default:
 `${PIX_CORE_SOURCE_DIR}/prototype/l3_owner`). The current candidate is Core
 branch `wip-l3-product-integration-20261104`, API
-`253053da51184af03abebb15e7c129c465d90dee`, build/CI
+`253053da51184af03abebb15e7c129c465d90dee` plus G1
+`c5a54eec5c335b09b550db1dcb44a0bdf539236d`, build/CI
 `347f1ff54d1e6381a7690f404a9c0e5e708b7752`.
 
 ```sh
@@ -64,12 +65,24 @@ stream before tune while DT295 tunes first, both expose presence observation
 without external APDU, neither has an LNB power scope, and route/plan, firmware
 bootstrap, decoded TS output and custom firmware remain product-side. The
 existing DT181 `usb_backend` bulk path and DT295 `dt295_io` synchronous seam are
-the backend implementations; control transfers and per-transfer cancel that the
-current PIX backends do not expose are reported as `UNSUPPORTED` rather than
-created as a second path. Firmware is required for both models.
+the backend implementations. Their underlying stop is pipe-wide, so both report
+`DTV_L3_CANCEL_SCOPE_PIPE`; neither currently has a per-transfer cancel handle,
+so `cancel_supported` is 0 and a cancel request is reported as `UNSUPPORTED`
+rather than treated as success.
+
+The USB seam also accepts an optional asynchronous `submit`/`cancel_async` pair
+for a future G1 owner-backed transport. When present, submit must copy OUT data
+and retained state before returning `ACCEPTED` and cancel must return without
+waiting for a completion callback. The common owner keeps the claim, buffers and
+terminal completion when a cancel races a normal completion. The fixtures use a
+fake asynchronous pipe provider to verify CANCELLED/terminal retention, a raced
+normal completion, ownership retention until both completions, and an
+`UNSUPPORTED` cancel that does not become success. Firmware is required for both
+models.
 
 The fixtures cover factory/capability differences, all three firmware sources,
-route rejection keeping a free lease, transfer input copy and repeat polling,
-DT295 `dt295_io` control, bulk and deadline mapping, and close retention with
-explicit cleanup retry. Physical USB, real receivers, CARD/TS concurrency and
+G1 bind/initialize and the capability catalog, route rejection keeping a free
+lease, transfer input copy and repeat polling, DT295 `dt295_io` control, bulk
+and deadline mapping, per-transfer/pipe cancel scope and terminal completion
+retention, and close retention with explicit cleanup retry. Physical USB, real receivers, CARD/TS concurrency and
 custom firmware are not verified by this target.

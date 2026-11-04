@@ -68,18 +68,31 @@ typedef struct pix_l3_transfer_result {
  */
 typedef struct pix_l3_usb_backend_ops {
     void *context;
+    dtv_l3_cancel_scope cancel_scope;
+    /* Nonzero only when cancel/cancel_async can actually cancel an in-flight transfer. */
+    uint8_t cancel_supported;
     dtv_l3_claim_result (*claim)(void *context, uint32_t claim_index);
     dtv_l3_release_result (*release_claim)(void *context, uint32_t claim_index);
     /*
-     * For IN transfers write into in_buffer and point completion->data there.
-     * The adapter keeps it alive through the terminal callback. For OUT
-     * transfers copy request->out_data only.
+     * Synchronous path. For IN transfers write into in_buffer and point
+     * completion->data there. The adapter keeps it alive through the terminal
+     * callback. For OUT transfers copy request->out_data only.
      */
     dtv_l3_result (*transfer)(void *context, uint64_t transfer_id,
                               const pix_l3_transfer *request,
                               uint8_t *in_buffer, size_t in_capacity,
                               pix_l3_transfer_result *completion);
+    /* Synchronous path; the transfer has already completed. */
     dtv_l3_result (*cancel)(void *context, uint64_t transfer_id);
+    /*
+     * Optional asynchronous path used instead of transfer/cancel. submit must
+     * copy OUT data and any retained request state before returning ACCEPTED;
+     * it must return without waiting for completion. cancel must return
+     * without waiting for a completion callback. A pipe-scope cancel may end
+     * other transfers on the same pipe; the common owner classifies them.
+     */
+    dtv_l3_transfer_submit_fn submit;
+    dtv_l3_transfer_cancel_fn cancel_async;
 } pix_l3_usb_backend_ops;
 
 /*
@@ -93,6 +106,10 @@ typedef struct pix_l3_product_ops {
     dtv_l3_result (*configure)(void *context, uint32_t model,
                                uint64_t selector, const uint8_t *firmware,
                                size_t firmware_size);
+    /* G1 owner binding; the owner handle is borrowed and not retained after close. */
+    dtv_l3_result (*bind)(void *context, dtv_l3_context *owner);
+    /* G1 initialization lane entry after claims are ready. */
+    dtv_l3_result (*initialize)(void *context, dtv_l3_context *owner);
     dtv_l3_result (*tune)(void *context, dtv_l3_provider_binding *binding,
                           uint32_t receiver_id, uint64_t requested_hz,
                           uint64_t *programmed_hz);
@@ -128,7 +145,10 @@ typedef struct pix_l3_product_capabilities {
     uint8_t bridge_shared;
     uint8_t external_apdu;
     uint8_t presence_observation;
-    uint8_t reserved[3];
+    uint8_t cancel_supported;
+    uint8_t cancel_scope;
+    uint8_t submit_nonblocking;
+    uint8_t reserved[1];
 } pix_l3_product_capabilities;
 
 typedef struct pix_l3_factory pix_l3_factory;

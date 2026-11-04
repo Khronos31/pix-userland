@@ -119,6 +119,14 @@ int main()
     config.model = PIX_L3_MODEL_DT295;
     config.usb = pix_l3_dt295_io_backend_usb_ops(backend);
     config.product = pix_l3_dt295_io_backend_product_ops(backend);
+    if (config.usb.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE ||
+        config.usb.cancel_supported != 0U ||
+        config.usb.submit != nullptr || config.usb.cancel_async != nullptr ||
+        config.usb.transfer == nullptr || config.usb.cancel == nullptr ||
+        config.product.bind != nullptr ||
+        config.product.initialize != nullptr) {
+        return 19;
+    }
     pix_l3_factory *factory = nullptr;
     if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK) {
         return 2;
