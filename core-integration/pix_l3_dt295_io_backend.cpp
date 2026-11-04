@@ -186,6 +186,7 @@ extern "C" pix_l3_usb_backend_ops pix_l3_dt295_io_backend_usb_ops(
     ops.context = backend;
     ops.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
     ops.cancel_supported = 0U;
+    ops.call_flags = 0U;
     ops.claim = usb_claim;
     ops.release_claim = usb_release_claim;
     ops.transfer = usb_transfer;

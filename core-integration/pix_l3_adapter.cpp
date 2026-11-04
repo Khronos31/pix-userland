@@ -364,8 +364,6 @@ dtv_l3_result factory_create(void *context,
     instance->adapter.bridge_stop = nullptr;
     instance->adapter.stream_attach = nullptr;
     instance->adapter.stream_stop = nullptr;
-    instance->adapter.reader_acquire = nullptr;
-    instance->adapter.lnb_set = nullptr;
 
     *adapter_out = &instance->adapter;
     *adapter_owner_out = instance.get();
@@ -450,8 +448,7 @@ extern "C" dtv_l3_result pix_l3_factory_details(
     capabilities->cancel_supported = value->config.usb.cancel_supported;
     capabilities->cancel_scope =
         static_cast<std::uint8_t>(value->config.usb.cancel_scope);
-    capabilities->submit_nonblocking =
-        value->config.usb.submit != nullptr ? 1U : 0U;
+    capabilities->call_flags = value->config.usb.call_flags;
     return DTV_L3_OK;
 }
 
@@ -473,9 +470,7 @@ extern "C" dtv_l3_result pix_l3_factory_usb_provider(
     provider->cancel = usb_cancel;
     provider->claim_cancel = nullptr;
     provider->cancel_scope = value->config.usb.cancel_scope;
-    provider->submit_mode = value->config.usb.submit != nullptr
-                                ? DTV_L3_SUBMIT_NONBLOCKING
-                                : DTV_L3_SUBMIT_MAY_BLOCK;
+    provider->call_flags = value->config.usb.call_flags;
     provider->logger.fn = nullptr;
     provider->logger.userdata = nullptr;
     provider->logger.min_level = DTV_L3_LOG_ERROR;

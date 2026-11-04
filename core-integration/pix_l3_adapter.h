@@ -71,6 +71,12 @@ typedef struct pix_l3_usb_backend_ops {
     dtv_l3_cancel_scope cancel_scope;
     /* Nonzero only when cancel/cancel_async can actually cancel an in-flight transfer. */
     uint8_t cancel_supported;
+    /*
+     * Core call flags for this USB provider. PIX stays at zero by default:
+     * denpa-style Linux providers can wait on a lock, so an async shape alone
+     * is not a promise that submit/cancel may run inside a callback frame.
+     */
+    uint32_t call_flags;
     dtv_l3_claim_result (*claim)(void *context, uint32_t claim_index);
     dtv_l3_release_result (*release_claim)(void *context, uint32_t claim_index);
     /*
@@ -147,8 +153,7 @@ typedef struct pix_l3_product_capabilities {
     uint8_t presence_observation;
     uint8_t cancel_supported;
     uint8_t cancel_scope;
-    uint8_t submit_nonblocking;
-    uint8_t reserved[1];
+    uint32_t call_flags;
 } pix_l3_product_capabilities;
 
 typedef struct pix_l3_factory pix_l3_factory;

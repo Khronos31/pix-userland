@@ -39,7 +39,8 @@ workflow are unchanged. The adapter consumes the Core prototype header at
 `${PIX_CORE_SOURCE_DIR}/prototype/l3_owner`). The current candidate is Core
 branch `wip-l3-product-integration-20261104`, API
 `253053da51184af03abebb15e7c129c465d90dee` plus G1
-`c5a54eec5c335b09b550db1dcb44a0bdf539236d`, build/CI
+`c5a54eec5c335b09b550db1dcb44a0bdf539236d` and initialization transfer
+`01c995170f9459da44b0fda176eb79e2a12eecbd`, build/CI
 `347f1ff54d1e6381a7690f404a9c0e5e708b7752`.
 
 ```sh
@@ -73,7 +74,9 @@ rather than treated as success.
 The USB seam also accepts an optional asynchronous `submit`/`cancel_async` pair
 for a future G1 owner-backed transport. When present, submit must copy OUT data
 and retained state before returning `ACCEPTED` and cancel must return without
-waiting for a completion callback. The common owner keeps the claim, buffers and
+waiting for a completion callback. PIX keeps `call_flags` at zero by default:
+an async shape alone is not a promise that a Linux provider cannot wait on a
+lock inside a callback frame. The common owner keeps the claim, buffers and
 terminal completion when a cancel races a normal completion. The fixtures use a
 fake asynchronous pipe provider to verify CANCELLED/terminal retention, a raced
 normal completion, ownership retention until both completions, and an
@@ -81,7 +84,9 @@ normal completion, ownership retention until both completions, and an
 models.
 
 The fixtures cover factory/capability differences, all three firmware sources,
-G1 bind/initialize and the capability catalog, route rejection keeping a free
+G1 bind/initialize, a real owner transfer from initialize
+(`transfer_start` -> provider submit -> completion -> `op_wait`/`op_release` ->
+READY), failed-initialize open failure, and the capability catalog, route rejection keeping a free
 lease, transfer input copy and repeat polling, DT295 `dt295_io` control, bulk
 and deadline mapping, per-transfer/pipe cancel scope and terminal completion
 retention, and close retention with explicit cleanup retry. Physical USB, real receivers, CARD/TS concurrency and
