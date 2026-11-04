@@ -3,7 +3,14 @@
 #define PIX_L3_DT181_BACKEND_H
 
 #include "pix_l3_adapter.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "usb_backend.h"
+#ifdef __cplusplus
+}
+#endif
 
 #ifdef __cplusplus
 extern "C" {
