@@ -162,7 +162,8 @@ private:
     static void* pump_entry(void*) noexcept;
     Result stop_attached(const Attachment&) noexcept;
     void fail_acquisition(AcquisitionFailure, dtv::userland::detail::StreamTerminal,
-                          dtv::userland::Error) noexcept;
+                          dtv::userland::Error, const char* boundary = "unspecified",
+                          int detail = 0) noexcept;
     void end_session_for_acquisition(dtv::userland::detail::StreamTerminal) noexcept;
     void scan_append_packet(const std::uint8_t packet[188]) noexcept;
     void scan_terminate(SiEndReason reason) noexcept;

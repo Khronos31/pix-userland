@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <limits>
@@ -939,8 +940,24 @@ void ReceiverAdapter::end_session_for_acquisition(
 
 void ReceiverAdapter::fail_acquisition(AcquisitionFailure failure,
                                        dtv::userland::detail::StreamTerminal terminal,
-                                       Error error) noexcept
+                                       Error error, const char* boundary,
+                                       int detail) noexcept
 {
+    const char* diagnostics = std::getenv("PIX_DT295_DIAGNOSTICS");
+    if (diagnostics != nullptr && diagnostics[0] == '1' && diagnostics[1] == '\0') {
+        std::fprintf(stderr,
+                     "DT295 acquisition failure: boundary=%s failure=%u error=%u "
+                     "detail=%d tune_generation=%llu acquisition_generation=%llu "
+                     "plan_generation=%llu\n",
+                     boundary, static_cast<unsigned>(failure),
+                     static_cast<unsigned>(error), detail,
+                     static_cast<unsigned long long>(tune_generation_.load(
+                         std::memory_order_acquire)),
+                     static_cast<unsigned long long>(acquisition_generation_.load(
+                         std::memory_order_acquire)),
+                     static_cast<unsigned long long>(plan_generation_.load(
+                         std::memory_order_acquire)));
+    }
     {
         std::lock_guard<std::mutex> view_lock(acquisition_view_mutex_);
         acquisition_failure_.store(failure, std::memory_order_release);
@@ -988,7 +1005,7 @@ void ReceiverAdapter::pump() noexcept
             clock_.monotonic_ms() - acquisition_started_ms_ >= kAcquisitionDeadlineMs) {
             fail_acquisition(AcquisitionFailure::deadline,
                              dtv::userland::detail::StreamTerminal::sync_error,
-                             Error::TIMEOUT);
+                             Error::TIMEOUT, "acquisition_deadline");
             if (scan_mode) normal_done = true;
             else break;
         }
@@ -1000,7 +1017,7 @@ void ReceiverAdapter::pump() noexcept
             if (count == DT295_STREAM_ABANDONED || count == DT295_STREAM_CLOSED) break;
             fail_acquisition(AcquisitionFailure::usb,
                              dtv::userland::detail::StreamTerminal::usb_error,
-                             Error::USB_IO);
+                             Error::USB_IO, "dt295_stream_read", count);
             if (scan_mode) scan_terminate(SiEndReason::usb);
             break;
         }
@@ -1009,6 +1026,7 @@ void ReceiverAdapter::pump() noexcept
         std::size_t offset = 0U;
         bool terminal = false;
         bool decode_failed = false;
+        int decode_error = 0;
         const bool ready =
             acquisition_phase_.load(std::memory_order_acquire) == AcquisitionPhase::ready;
         while (residue.size() - offset >= 188U) {
@@ -1017,8 +1035,10 @@ void ReceiverAdapter::pump() noexcept
             offset += 188U;
             {
                 std::lock_guard<std::mutex> protocol_lock(protocol_mutex_);
-                if (dt295_decode_packet(device_, packet) < 0) {
+                const int decode_result = dt295_decode_packet(device_, packet);
+                if (decode_result < 0) {
                     decode_failed = true;
+                    decode_error = decode_result;
                     break;
                 }
             }
@@ -1030,7 +1050,7 @@ void ReceiverAdapter::pump() noexcept
         if (decode_failed) {
             fail_acquisition(AcquisitionFailure::packet,
                              dtv::userland::detail::StreamTerminal::sync_error,
-                             Error::INTERNAL);
+                             Error::INTERNAL, "decode_packet", decode_error);
             if (scan_mode) scan_terminate(SiEndReason::usb);
             break;
         }
@@ -1075,10 +1095,12 @@ void ReceiverAdapter::pump() noexcept
             } else if (!snapshot.ready && snapshot.have_pat) {
                 dt295_route_plan bootstrap{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_bootstrap_plan(routes_, &live_, &bootstrap, route_error) != 0) {
+                const int plan_result = dt295_routes_bootstrap_plan(
+                    routes_, &live_, &bootstrap, route_error);
+                if (plan_result != 0) {
                     fail_acquisition(AcquisitionFailure::plan,
                                      dtv::userland::detail::StreamTerminal::bridge_fatal,
-                                     Error::INTERNAL);
+                                     Error::INTERNAL, "bootstrap_plan", plan_result);
                     normal_done = true;
                 } else {
                     Result applied = Result::success();
@@ -1089,7 +1111,8 @@ void ReceiverAdapter::pump() noexcept
                     if (!applied) {
                         fail_acquisition(AcquisitionFailure::usb,
                                          dtv::userland::detail::StreamTerminal::usb_error,
-                                         applied.error());
+                                         applied.error(), "bootstrap_apply_plan",
+                                         static_cast<int>(applied.error()));
                         scan_terminate(SiEndReason::usb);
                         break;
                     }
@@ -1097,10 +1120,12 @@ void ReceiverAdapter::pump() noexcept
             } else if (snapshot.ready) {
                 dt295_route_plan plan{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_build(routes_, 0U, nullptr, &plan, route_error) != 0) {
+                const int plan_result = dt295_routes_build(
+                    routes_, 0U, nullptr, &plan, route_error);
+                if (plan_result != 0) {
                     fail_acquisition(AcquisitionFailure::plan,
                                      dtv::userland::detail::StreamTerminal::bridge_fatal,
-                                     Error::INTERNAL);
+                                     Error::INTERNAL, "routes_build", plan_result);
                 } else {
                     unsigned ecms = 0U;
                     for (unsigned i = 0U; i < DT295_SLOT_COUNT; ++i)
@@ -1134,10 +1159,12 @@ void ReceiverAdapter::pump() noexcept
             }
             dt295_route_plan desired{};
             char route_error[DT295_ROUTE_ERROR]{};
-            if (dt295_routes_build(routes_, 0U, &live_, &desired, route_error) != 0) {
+            const int plan_result = dt295_routes_build(
+                routes_, 0U, &live_, &desired, route_error);
+            if (plan_result != 0) {
                 fail_acquisition(AcquisitionFailure::plan,
                                  dtv::userland::detail::StreamTerminal::bridge_fatal,
-                                 Error::INTERNAL);
+                                 Error::INTERNAL, "routes_build", plan_result);
                 break;
             }
             Result applied = Result::success();
@@ -1152,7 +1179,8 @@ void ReceiverAdapter::pump() noexcept
                                  applied.error() == Error::UNSUPPORTED
                                      ? dtv::userland::detail::StreamTerminal::bridge_fatal
                                      : dtv::userland::detail::StreamTerminal::usb_error,
-                                 applied.error());
+                                 applied.error(), "live_apply_plan",
+                                 static_cast<int>(applied.error()));
                 break;
             }
         }
@@ -1193,11 +1221,13 @@ void ReceiverAdapter::pump() noexcept
             if (may_plan) {
                 dt295_route_plan plan{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_build(routes_, 0U, plan_started_ ? &live_ : nullptr,
-                                       &plan, route_error) != 0) {
+                const int plan_result = dt295_routes_build(
+                    routes_, 0U, plan_started_ ? &live_ : nullptr,
+                    &plan, route_error);
+                if (plan_result != 0) {
                     fail_acquisition(AcquisitionFailure::plan,
                                      dtv::userland::detail::StreamTerminal::bridge_fatal,
-                                     Error::INTERNAL);
+                                     Error::INTERNAL, "routes_build", plan_result);
                     break;
                 }
                 const bool primary_order_ready =
@@ -1297,7 +1327,8 @@ void ReceiverAdapter::pump() noexcept
                                              applied.error() == Error::UNSUPPORTED
                                                  ? dtv::userland::detail::StreamTerminal::bridge_fatal
                                                  : dtv::userland::detail::StreamTerminal::usb_error,
-                                             applied.error());
+                                             applied.error(), "acquisition_apply_plan",
+                                             static_cast<int>(applied.error()));
                             break;
                         }
                         if (snapshot.ready && !plan_complete_) {
@@ -1319,10 +1350,12 @@ void ReceiverAdapter::pump() noexcept
             if (!planned && !snapshot.ready && snapshot.have_pat) {
                 dt295_route_plan bootstrap{};
                 char route_error[DT295_ROUTE_ERROR]{};
-                if (dt295_routes_bootstrap_plan(routes_, &live_, &bootstrap, route_error) != 0) {
+                const int plan_result = dt295_routes_bootstrap_plan(
+                    routes_, &live_, &bootstrap, route_error);
+                if (plan_result != 0) {
                     fail_acquisition(AcquisitionFailure::plan,
                                      dtv::userland::detail::StreamTerminal::bridge_fatal,
-                                     Error::INTERNAL);
+                                     Error::INTERNAL, "bootstrap_plan", plan_result);
                     break;
                 }
                 if (!acquisition_preparing()) break;
