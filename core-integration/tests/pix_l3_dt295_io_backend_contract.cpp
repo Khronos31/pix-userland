@@ -86,6 +86,17 @@ dtv_l3_result tune(void *context, uint32_t receiver_id, uint64_t requested_hz,
     return DTV_L3_OK;
 }
 
+bool wait_op(dtv_l3_op *op)
+{
+    if (dtv_l3_op_wait(op, 3000U) != DTV_L3_OK) {
+        return false;
+    }
+    dtv_l3_op_result result{};
+    return dtv_l3_op_poll(op, &result) == DTV_L3_OK &&
+           (result.state == DTV_L3_OP_DONE ||
+            result.state == DTV_L3_OP_FAILED);
+}
+
 }  // namespace
 
 int main()
@@ -103,20 +114,34 @@ int main()
     if (backend == nullptr) {
         return 1;
     }
-    pix_l3_backend_ops ops = pix_l3_dt295_io_backend_ops(backend);
 
     pix_l3_factory_config config{};
     config.model = PIX_L3_MODEL_DT295;
-    config.backend = ops;
+    config.usb = pix_l3_dt295_io_backend_usb_ops(backend);
+    config.product = pix_l3_dt295_io_backend_product_ops(backend);
     pix_l3_factory *factory = nullptr;
     if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK) {
         return 2;
     }
-    dtv_l3_provider provider{};
-    if (pix_l3_factory_provider(factory, &provider) != DTV_L3_OK) {
+    dtv_l3_usb_provider usb{};
+    dtv_l3_adapter_factory adapter_factory{};
+    if (pix_l3_factory_usb_provider(factory, &usb) != DTV_L3_OK ||
+        pix_l3_factory_adapter_factory(factory, &adapter_factory) !=
+            DTV_L3_OK) {
         return 3;
     }
-    dtv_l3_open_result opened = dtv_l3_open(&provider, 1U);
+
+    const std::uint8_t firmware[4] = {0x10U, 0x20U, 0x30U, 0x40U};
+    dtv_l3_firmware firmware_view{};
+    firmware_view.source = DTV_L3_FIRMWARE_BYTES;
+    firmware_view.bytes = firmware;
+    firmware_view.size = sizeof(firmware);
+    dtv_l3_open_config open_config{};
+    open_config.model = PIX_L3_MODEL_DT295;
+    open_config.selector = 9U;
+    open_config.firmware = &firmware_view;
+    dtv_l3_open_result opened =
+        dtv_l3_open_factory(&usb, &adapter_factory, &open_config, 1U);
     if (opened.result != DTV_L3_ACCEPTED || opened.owner == nullptr) {
         return 4;
     }
@@ -151,7 +176,7 @@ int main()
     if (dtv_l3_transfer_start(opened.owner, &outbound, &op) != DTV_L3_ACCEPTED) {
         return 9;
     }
-    if (dtv_l3_op_wait(op, 1000U) != DTV_L3_OK) {
+    if (!wait_op(op)) {
         return 10;
     }
     dtv_l3_op_result result{};
@@ -174,7 +199,7 @@ int main()
     if (dtv_l3_transfer_start(opened.owner, &inbound, &op) != DTV_L3_ACCEPTED) {
         return 12;
     }
-    if (dtv_l3_op_wait(op, 1000U) != DTV_L3_OK) {
+    if (!wait_op(op)) {
         return 13;
     }
     if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||
@@ -197,7 +222,7 @@ int main()
     if (dtv_l3_transfer_start(opened.owner, &expired, &op) != DTV_L3_ACCEPTED) {
         return 15;
     }
-    if (dtv_l3_op_wait(op, 1000U) != DTV_L3_OK) {
+    if (!wait_op(op)) {
         return 16;
     }
     if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||

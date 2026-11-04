@@ -1,96 +1,166 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "pix_l3_adapter.h"
 
+#include <cstdio>
 #include <cstdint>
-#include <map>
 #include <memory>
-#include <mutex>
+#include <utility>
 #include <vector>
 
 namespace {
 
+constexpr std::size_t kMaxFirmwareBytes = 64U * 1024U * 1024U;
+
 struct Factory {
     pix_l3_factory_config config{};
-    std::mutex mutex;
-    std::map<std::uint64_t, std::uint32_t> active_transfers;
-    bool released = false;
 };
+
+struct AdapterInstance final {
+    dtv_l3_product_adapter adapter{};
+    pix_l3_product_ops product{};
+    dtv_l3_firmware firmware_view{};
+    std::vector<std::uint8_t> firmware_bytes;
+    pix_l3_model model = PIX_L3_MODEL_DT181;
+    std::uint64_t selector = 0U;
+    dtv_l3_capabilities capabilities{};
+};
+
+dtv_l3_claim_result backend_claim(void *context,
+                                 std::uint32_t claim_index) noexcept;
+dtv_l3_release_result backend_release_claim(
+    void *context, std::uint32_t claim_index) noexcept;
+
+dtv_l3_claim_result usb_claim(void *context,
+                              dtv_l3_provider_binding *binding,
+                              std::uint32_t claim_index) noexcept
+{
+    (void)binding;
+    return backend_claim(context, claim_index);
+}
+
+dtv_l3_release_result usb_release_claim(void *context,
+                                         dtv_l3_provider_binding *binding,
+                                         std::uint32_t claim_index) noexcept
+{
+    (void)binding;
+    return backend_release_claim(context, claim_index);
+}
 
 Factory *factory_from(void *context) noexcept
 {
     return static_cast<Factory *>(context);
 }
 
-dtv_l3_result require_backend(const pix_l3_backend_ops &backend) noexcept
+bool usb_backend_complete(const pix_l3_usb_backend_ops &usb) noexcept
 {
-    if (backend.claim == nullptr || backend.release_claim == nullptr ||
-        backend.transfer == nullptr || backend.cancel == nullptr) {
+    return usb.claim != nullptr && usb.release_claim != nullptr &&
+           usb.transfer != nullptr && usb.cancel != nullptr;
+}
+
+dtv_l3_result read_firmware_file(const char *path,
+                                 std::vector<std::uint8_t> &out) noexcept
+{
+    if (path == nullptr || path[0] == '\0') {
         return DTV_L3_INVALID;
+    }
+    std::FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) {
+        return DTV_L3_FAILED;
+    }
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+        std::fclose(file);
+        return DTV_L3_FAILED;
+    }
+    const long length = std::ftell(file);
+    if (length <= 0 || static_cast<unsigned long>(length) > kMaxFirmwareBytes) {
+        std::fclose(file);
+        return length == 0 ? DTV_L3_INVALID : DTV_L3_FAILED;
+    }
+    if (std::fseek(file, 0, SEEK_SET) != 0) {
+        std::fclose(file);
+        return DTV_L3_FAILED;
+    }
+    out.resize(static_cast<std::size_t>(length));
+    const std::size_t read = std::fread(out.data(), 1U, out.size(), file);
+    const int closed = std::fclose(file);
+    if (read != out.size() || closed != 0) {
+        out.clear();
+        return DTV_L3_FAILED;
     }
     return DTV_L3_OK;
 }
 
-dtv_l3_claim_result claim(void *context, dtv_l3_provider_binding *binding,
-                          std::uint32_t claim_index) noexcept
+dtv_l3_result load_firmware(const dtv_l3_firmware *firmware,
+                            std::vector<std::uint8_t> &out) noexcept
 {
-    (void)binding;
+    if (firmware == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    switch (firmware->source) {
+    case DTV_L3_FIRMWARE_PATH:
+        return read_firmware_file(firmware->path, out);
+    case DTV_L3_FIRMWARE_BYTES:
+        if (firmware->bytes == nullptr || firmware->size == 0U ||
+            firmware->size > kMaxFirmwareBytes) {
+            return DTV_L3_INVALID;
+        }
+        out.assign(firmware->bytes, firmware->bytes + firmware->size);
+        return DTV_L3_OK;
+    case DTV_L3_FIRMWARE_READ_CALLBACK: {
+        if (firmware->read == nullptr) {
+            return DTV_L3_INVALID;
+        }
+        const std::uint8_t *data = nullptr;
+        std::size_t size = 0U;
+        const dtv_l3_result result =
+            firmware->read(firmware->read_context, &data, &size);
+        if (result != DTV_L3_OK) {
+            return result;
+        }
+        if (data == nullptr || size == 0U || size > kMaxFirmwareBytes) {
+            return DTV_L3_INVALID;
+        }
+        out.assign(data, data + size);
+        return DTV_L3_OK;
+    }
+    case DTV_L3_FIRMWARE_NONE:
+    default:
+        return DTV_L3_INVALID;
+    }
+}
+
+dtv_l3_claim_result backend_claim(void *context,
+                                 std::uint32_t claim_index) noexcept
+{
     Factory *factory = factory_from(context);
-    if (factory == nullptr) {
+    if (factory == nullptr || factory->config.usb.claim == nullptr) {
         return {DTV_L3_INVALID, DTV_L3_CLAIM_NONE};
     }
-    if (factory->config.backend.claim == nullptr) {
-        return {DTV_L3_UNSUPPORTED, DTV_L3_CLAIM_NONE};
-    }
-    return factory->config.backend.claim(factory->config.backend.context,
-                                         claim_index);
+    return factory->config.usb.claim(factory->config.usb.context, claim_index);
 }
 
-dtv_l3_release_result release_claim(void *context,
-                                    dtv_l3_provider_binding *binding,
-                                    std::uint32_t claim_index) noexcept
+dtv_l3_release_result backend_release_claim(void *context,
+                                           std::uint32_t claim_index) noexcept
 {
-    (void)binding;
     Factory *factory = factory_from(context);
-    if (factory == nullptr) {
-        return {DTV_L3_RELEASE_QUIESCENCE_UNKNOWN, DTV_L3_CLAIM_NONE,
+    if (factory == nullptr || factory->config.usb.release_claim == nullptr) {
+        return {DTV_L3_RELEASE_QUIESCENCE_UNKNOWN, DTV_L3_CLAIM_RETAINED,
                 DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_INVALID};
     }
-    if (factory->config.backend.release_claim == nullptr) {
-        return {DTV_L3_RELEASE_QUIESCENCE_UNKNOWN, DTV_L3_CLAIM_RETAINED,
-                DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_UNSUPPORTED};
-    }
-    return factory->config.backend.release_claim(
-        factory->config.backend.context, claim_index);
+    return factory->config.usb.release_claim(factory->config.usb.context,
+                                             claim_index);
 }
 
-dtv_l3_result submit(void *context, dtv_l3_provider_binding *binding,
-                     std::uint64_t transfer_id,
-                     const dtv_l3_transfer_request *request,
-                     dtv_l3_transfer_complete_fn complete,
-                     void *callback_context) noexcept
+dtv_l3_result usb_submit(void *context, dtv_l3_provider_binding *binding,
+                         std::uint64_t transfer_id,
+                         const dtv_l3_transfer_request *request,
+                         dtv_l3_transfer_complete_fn complete,
+                         void *callback_context) noexcept
 {
     Factory *factory = factory_from(context);
     if (factory == nullptr || binding == nullptr || request == nullptr ||
-        complete == nullptr) {
+        complete == nullptr || factory->config.usb.transfer == nullptr) {
         return DTV_L3_INVALID;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(factory->mutex);
-        if (factory->released) {
-            return DTV_L3_CLOSING;
-        }
-        if (factory->active_transfers.count(transfer_id) != 0U) {
-            return DTV_L3_INVALID;
-        }
-        factory->active_transfers.emplace(transfer_id, request->claim_index);
-    }
-
-    if (request->kind != DTV_L3_TRANSFER_BULK &&
-        request->kind != DTV_L3_TRANSFER_CONTROL) {
-        std::lock_guard<std::mutex> lock(factory->mutex);
-        factory->active_transfers.erase(transfer_id);
-        return DTV_L3_UNSUPPORTED;
     }
 
     pix_l3_transfer transfer{};
@@ -111,10 +181,9 @@ dtv_l3_result submit(void *context, dtv_l3_provider_binding *binding,
     pix_l3_transfer_result completion{};
     completion.result = DTV_L3_FAILED;
     const dtv_l3_result submitted =
-        factory->config.backend.transfer(factory->config.backend.context,
-                                         transfer_id, &transfer,
-                                         in_buffer.data(), in_buffer.size(),
-                                         &completion);
+        factory->config.usb.transfer(factory->config.usb.context, transfer_id,
+                                     &transfer, in_buffer.data(),
+                                     in_buffer.size(), &completion);
 
     dtv_l3_transfer_completion delivered{};
     if (submitted == DTV_L3_OK) {
@@ -126,68 +195,128 @@ dtv_l3_result submit(void *context, dtv_l3_provider_binding *binding,
     } else {
         delivered.result = submitted;
     }
-
-    {
-        std::lock_guard<std::mutex> lock(factory->mutex);
-        factory->active_transfers.erase(transfer_id);
-    }
     complete(binding, transfer_id, &delivered, callback_context);
     return DTV_L3_ACCEPTED;
 }
 
-dtv_l3_result cancel(void *context, dtv_l3_provider_binding *binding,
-                     std::uint64_t transfer_id) noexcept
+dtv_l3_result usb_cancel(void *context, dtv_l3_provider_binding *binding,
+                         std::uint64_t transfer_id) noexcept
 {
     (void)binding;
     Factory *factory = factory_from(context);
-    if (factory == nullptr) {
+    if (factory == nullptr || factory->config.usb.cancel == nullptr) {
         return DTV_L3_INVALID;
     }
-    if (factory->config.backend.cancel == nullptr) {
-        return DTV_L3_UNSUPPORTED;
-    }
-    return factory->config.backend.cancel(factory->config.backend.context,
-                                          transfer_id);
+    return factory->config.usb.cancel(factory->config.usb.context, transfer_id);
 }
 
-dtv_l3_result scope_query(void *context, std::uint32_t receiver_id,
-                          dtv_l3_scope_info *scope) noexcept
+dtv_l3_result adapter_scope_query(void *context, std::uint32_t receiver_id,
+                                  dtv_l3_scope_info *scope) noexcept
 {
-    Factory *factory = factory_from(context);
-    if (factory == nullptr || scope == nullptr) {
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr || scope == nullptr) {
         return DTV_L3_INVALID;
+    }
+    if (instance->product.scope_query != nullptr) {
+        return instance->product.scope_query(instance->product.context,
+                                             receiver_id, scope);
     }
     if (receiver_id != 0U) {
         return DTV_L3_UNSUPPORTED;
     }
     /*
-     * PIX has one physical receiver and no shared bridge. The route/plan
-     * decision stays in the product backend tune path; this scope only
-     * describes exclusivity of the single receiver.
+     * PIX has one physical receiver and no shared bridge. Route/plan remains
+     * in the product tune path; this scope only describes exclusivity.
      */
     scope->bridge_id = 0U;
     scope->compatibility = DTV_L3_LEASE_EXCLUSIVE;
     return DTV_L3_OK;
 }
 
-dtv_l3_result tune(void *context, dtv_l3_provider_binding *binding,
-                   std::uint32_t receiver_id, std::uint64_t requested_hz,
-                   std::uint64_t *programmed_hz) noexcept
+dtv_l3_result adapter_tune(void *context, dtv_l3_provider_binding *binding,
+                           std::uint32_t receiver_id,
+                           std::uint64_t requested_hz,
+                           std::uint64_t *programmed_hz) noexcept
 {
-    (void)binding;
-    Factory *factory = factory_from(context);
-    if (factory == nullptr || programmed_hz == nullptr) {
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr || programmed_hz == nullptr) {
         return DTV_L3_INVALID;
     }
-    if (receiver_id != 0U) {
+    if (instance->product.tune == nullptr) {
         return DTV_L3_UNSUPPORTED;
     }
-    if (factory->config.backend.tune == nullptr) {
-        return DTV_L3_UNSUPPORTED;
+    return instance->product.tune(instance->product.context, binding,
+                                  receiver_id, requested_hz, programmed_hz);
+}
+
+dtv_l3_result factory_create(void *context,
+                             const dtv_l3_open_config *config,
+                             const dtv_l3_product_adapter **adapter_out,
+                             void **adapter_owner_out) noexcept
+{
+    Factory *factory = factory_from(context);
+    if (adapter_out == nullptr || adapter_owner_out == nullptr) {
+        return DTV_L3_INVALID;
     }
-    return factory->config.backend.tune(factory->config.backend.context,
-                                        receiver_id, requested_hz,
-                                        programmed_hz);
+    *adapter_out = nullptr;
+    *adapter_owner_out = nullptr;
+    if (factory == nullptr || config == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    if (config->model != static_cast<std::uint32_t>(factory->config.model)) {
+        return DTV_L3_INVALID;
+    }
+
+    std::vector<std::uint8_t> firmware;
+    const dtv_l3_result firmware_result =
+        load_firmware(config->firmware, firmware);
+    if (firmware_result != DTV_L3_OK) {
+        return firmware_result;
+    }
+
+    std::unique_ptr<AdapterInstance> instance(new AdapterInstance);
+    instance->product = factory->config.product;
+    instance->model = factory->config.model;
+    instance->selector = config->selector;
+    instance->firmware_bytes = std::move(firmware);
+    instance->firmware_view.source = DTV_L3_FIRMWARE_BYTES;
+    instance->firmware_view.bytes = instance->firmware_bytes.data();
+    instance->firmware_view.size = instance->firmware_bytes.size();
+
+    if (instance->product.configure != nullptr) {
+        const dtv_l3_result configured = instance->product.configure(
+            instance->product.context, config->model, config->selector,
+            instance->firmware_bytes.data(), instance->firmware_bytes.size());
+        if (configured != DTV_L3_OK) {
+            return configured;
+        }
+    }
+
+    instance->adapter.product_context = instance.get();
+    instance->adapter.capabilities.receiver_count = 1U;
+    instance->adapter.capabilities.reader_count = 1U;
+    instance->adapter.capabilities.lnb_power = 0U;
+    instance->adapter.capabilities.serial = 0U;
+    instance->adapter.capabilities.cancel_scope = DTV_L3_CANCEL_SCOPE_TRANSFER;
+    instance->adapter.firmware = &instance->firmware_view;
+    instance->adapter.scope_query = adapter_scope_query;
+    instance->adapter.tune = adapter_tune;
+    instance->adapter.bridge_start = nullptr;
+    instance->adapter.bridge_stop = nullptr;
+    instance->adapter.stream_attach = nullptr;
+    instance->adapter.stream_stop = nullptr;
+    instance->adapter.reader_acquire = nullptr;
+    instance->adapter.lnb_set = nullptr;
+
+    *adapter_out = &instance->adapter;
+    *adapter_owner_out = instance.get();
+    instance.release();
+    return DTV_L3_OK;
+}
+
+void factory_release(void *adapter_owner)
+{
+    delete static_cast<AdapterInstance *>(adapter_owner);
 }
 
 }  // namespace
@@ -205,7 +334,7 @@ extern "C" dtv_l3_result pix_l3_factory_create(
         config->model != PIX_L3_MODEL_DT295) {
         return DTV_L3_INVALID;
     }
-    if (require_backend(config->backend) != DTV_L3_OK) {
+    if (!usb_backend_complete(config->usb)) {
         return DTV_L3_INVALID;
     }
     std::unique_ptr<pix_l3_factory> factory(new pix_l3_factory);
@@ -220,13 +349,28 @@ extern "C" void pix_l3_factory_destroy(pix_l3_factory *factory)
 }
 
 extern "C" dtv_l3_result pix_l3_factory_capabilities(
-    const pix_l3_factory *factory, pix_l3_capabilities *capabilities)
+    const pix_l3_factory *factory, dtv_l3_capabilities *capabilities)
+{
+    if (factory == nullptr || capabilities == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    *capabilities = dtv_l3_capabilities{};
+    capabilities->receiver_count = 1U;
+    capabilities->reader_count = 1U;
+    capabilities->lnb_power = 0U;
+    capabilities->serial = 0U;
+    capabilities->cancel_scope = DTV_L3_CANCEL_SCOPE_TRANSFER;
+    return DTV_L3_OK;
+}
+
+extern "C" dtv_l3_result pix_l3_factory_details(
+    const pix_l3_factory *factory, pix_l3_product_capabilities *capabilities)
 {
     if (factory == nullptr || capabilities == nullptr) {
         return DTV_L3_INVALID;
     }
     const Factory *value = static_cast<const Factory *>(factory);
-    *capabilities = pix_l3_capabilities{};
+    *capabilities = pix_l3_product_capabilities{};
     capabilities->model = value->config.model;
     capabilities->tuner_count = 1U;
     capabilities->reader_count = 1U;
@@ -234,48 +378,51 @@ extern "C" dtv_l3_result pix_l3_factory_capabilities(
     capabilities->route_owned_by_product = 1U;
     capabilities->custom_firmware_candidate =
         value->config.model == PIX_L3_MODEL_DT295 ? 1U : 0U;
-    capabilities->card_ts_concurrency = PIX_L3_CARD_TS_UNVERIFIED;
-    capabilities->fence_ts_effect = PIX_L3_FENCE_TS_UNKNOWN;
-
-    pix_l3_tuner_capability &tuner = capabilities->tuners[0];
-    tuner.receiver_id = 0U;
-    tuner.terrestrial = PIX_L3_SUPPORTED;
-    tuner.satellite = PIX_L3_SUPPORTED;
-    tuner.satellite_slot_count = 8U;
-    tuner.selects_satellite_stream_before_tune =
+    capabilities->card_ts_concurrency = 0U;
+    capabilities->fence_ts_effect = 0U;
+    capabilities->firmware_required = 1U;
+    capabilities->selects_satellite_stream_before_tune =
         value->config.model == PIX_L3_MODEL_DT181 ? 1U : 0U;
-    tuner.bridge_shared = 0U;
-
-    pix_l3_reader_capability &reader = capabilities->readers[0];
-    reader.reader_id = 0U;
-    reader.present = 1U;
-    reader.presence_observation = PIX_L3_SUPPORTED;
-    reader.external_apdu = PIX_L3_UNSUPPORTED;
-    reader.protocol_t1 = PIX_L3_UNKNOWN;
+    capabilities->satellite_slot_count = 8U;
+    capabilities->bridge_shared = 0U;
+    capabilities->external_apdu = PIX_L3_UNSUPPORTED;
+    capabilities->presence_observation = PIX_L3_SUPPORTED;
     return DTV_L3_OK;
 }
 
-extern "C" dtv_l3_result pix_l3_factory_provider(pix_l3_factory *factory,
-                                                 dtv_l3_provider *provider)
+extern "C" dtv_l3_result pix_l3_factory_usb_provider(
+    pix_l3_factory *factory, dtv_l3_usb_provider *provider)
 {
     if (factory == nullptr || provider == nullptr) {
         return DTV_L3_INVALID;
     }
     Factory *value = static_cast<Factory *>(factory);
-    if (require_backend(value->config.backend) != DTV_L3_OK) {
+    if (!usb_backend_complete(value->config.usb)) {
         return DTV_L3_INVALID;
     }
-    *provider = dtv_l3_provider{};
+    *provider = dtv_l3_usb_provider{};
     provider->provider_context = factory;
-    provider->claim = claim;
-    provider->release_claim = release_claim;
-    provider->submit = submit;
-    provider->cancel = cancel;
-    provider->scope_query = scope_query;
-    provider->tune = tune;
+    provider->claim = usb_claim;
+    provider->release_claim = usb_release_claim;
+    provider->submit = usb_submit;
+    provider->cancel = usb_cancel;
+    provider->claim_cancel = nullptr;
     provider->cancel_scope = DTV_L3_CANCEL_SCOPE_TRANSFER;
     provider->logger.fn = nullptr;
     provider->logger.userdata = nullptr;
     provider->logger.min_level = DTV_L3_LOG_ERROR;
+    return DTV_L3_OK;
+}
+
+extern "C" dtv_l3_result pix_l3_factory_adapter_factory(
+    pix_l3_factory *factory, dtv_l3_adapter_factory *adapter_factory)
+{
+    if (factory == nullptr || adapter_factory == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    *adapter_factory = dtv_l3_adapter_factory{};
+    adapter_factory->factory_context = factory;
+    adapter_factory->create = factory_create;
+    adapter_factory->release = factory_release;
     return DTV_L3_OK;
 }

@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#define _POSIX_C_SOURCE 200809L
 #include "pix_l3_adapter.h"
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -14,10 +20,14 @@ struct FakeBackend final {
     uint64_t release_calls = 0U;
     uint64_t transfer_calls = 0U;
     uint64_t tune_calls = 0U;
+    uint64_t configure_calls = 0U;
+    uint32_t seen_model = 0U;
+    uint64_t seen_selector = 0U;
     dtv_l3_claim_result claim_result{DTV_L3_OK, DTV_L3_CLAIM_RETAINED};
     std::vector<dtv_l3_release_result> releases;
     std::vector<dtv_l3_result> tunes;
     std::vector<std::uint8_t> last_out;
+    std::vector<std::uint8_t> seen_firmware;
     std::uint8_t fill = 0x47U;
 };
 
@@ -85,9 +95,25 @@ dtv_l3_result cancel(void *context, std::uint64_t transfer_id)
     return DTV_L3_UNSUPPORTED;
 }
 
-dtv_l3_result tune(void *context, std::uint32_t receiver_id,
-                   std::uint64_t requested_hz, std::uint64_t *programmed_hz)
+dtv_l3_result configure(void *context, std::uint32_t model,
+                        std::uint64_t selector, const std::uint8_t *firmware,
+                        std::size_t firmware_size)
 {
+    FakeBackend *value = fake(context);
+    ++value->configure_calls;
+    value->seen_model = model;
+    value->seen_selector = selector;
+    if (firmware != nullptr && firmware_size != 0U) {
+        value->seen_firmware.assign(firmware, firmware + firmware_size);
+    }
+    return DTV_L3_OK;
+}
+
+dtv_l3_result tune(void *context, dtv_l3_provider_binding *binding,
+                   std::uint32_t receiver_id, std::uint64_t requested_hz,
+                   std::uint64_t *programmed_hz)
+{
+    (void)binding;
     FakeBackend *value = fake(context);
     ++value->tune_calls;
     const std::size_t index = static_cast<std::size_t>(value->tune_calls - 1U);
@@ -101,58 +127,78 @@ dtv_l3_result tune(void *context, std::uint32_t receiver_id,
     return DTV_L3_OK;
 }
 
-bool wait_open(dtv_l3_context *owner, dtv_l3_op *op)
+pix_l3_usb_backend_ops usb_ops_for(FakeBackend *backend)
 {
-    if (dtv_l3_op_wait(op, 3000U) != DTV_L3_OK) {
-        return false;
-    }
-    dtv_l3_op_result result{};
-    if (dtv_l3_op_poll(op, &result) != DTV_L3_OK) {
-        return false;
-    }
-    if (result.state != DTV_L3_OP_DONE || result.result != DTV_L3_OK) {
-        return false;
-    }
-    dtv_l3_open_status status{};
-    return dtv_l3_open_status_get(owner, &status) == DTV_L3_OK &&
-           status.state == DTV_L3_OPEN_READY;
+    pix_l3_usb_backend_ops ops{};
+    ops.context = backend;
+    ops.claim = claim;
+    ops.release_claim = release;
+    ops.transfer = transfer;
+    ops.cancel = cancel;
+    return ops;
 }
 
-bool wait_op(dtv_l3_op *op)
+pix_l3_product_ops product_ops_for(FakeBackend *backend)
 {
-    if (dtv_l3_op_wait(op, 3000U) != DTV_L3_OK) {
-        return false;
-    }
-    dtv_l3_op_result result{};
-    return dtv_l3_op_poll(op, &result) == DTV_L3_OK &&
-           result.state == DTV_L3_OP_DONE;
+    pix_l3_product_ops ops{};
+    ops.context = backend;
+    ops.configure = configure;
+    ops.tune = tune;
+    ops.scope_query = nullptr;
+    return ops;
+}
+
+dtv_l3_result read_firmware(void *context, const std::uint8_t **data,
+                            std::size_t *size)
+{
+    static const std::uint8_t bytes[4] = {0x11U, 0x22U, 0x33U, 0x44U};
+    (void)context;
+    *data = bytes;
+    *size = sizeof(bytes);
+    return DTV_L3_OK;
 }
 
 struct Session final {
     pix_l3_factory *factory = nullptr;
-    dtv_l3_provider provider{};
+    dtv_l3_usb_provider usb{};
+    dtv_l3_adapter_factory adapter_factory{};
     dtv_l3_context *owner = nullptr;
     dtv_l3_op *open_op = nullptr;
 
-    bool start(const pix_l3_backend_ops &backend, pix_l3_model model)
+    bool start(FakeBackend &backend, pix_l3_model model,
+               const dtv_l3_firmware &firmware)
     {
         pix_l3_factory_config config{};
         config.model = model;
-        config.backend = backend;
-        if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK) {
+        config.usb = usb_ops_for(&backend);
+        config.product = product_ops_for(&backend);
+        if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK ||
+            pix_l3_factory_usb_provider(factory, &usb) != DTV_L3_OK ||
+            pix_l3_factory_adapter_factory(factory, &adapter_factory) !=
+                DTV_L3_OK) {
             return false;
         }
-        if (pix_l3_factory_provider(factory, &provider) != DTV_L3_OK) {
-            return false;
-        }
-        dtv_l3_open_result opened = dtv_l3_open(&provider, 1U);
+        dtv_l3_open_config open_config{};
+        open_config.model = static_cast<std::uint32_t>(model);
+        open_config.selector = 0x55U;
+        open_config.firmware = &firmware;
+        const dtv_l3_open_result opened =
+            dtv_l3_open_factory(&usb, &adapter_factory, &open_config, 1U);
         owner = opened.owner;
         open_op = opened.op;
         if (opened.result != DTV_L3_ACCEPTED || owner == nullptr ||
             open_op == nullptr) {
             return false;
         }
-        return wait_open(owner, open_op);
+        dtv_l3_op_result result{};
+        if (dtv_l3_op_wait(open_op, 3000U) != DTV_L3_OK ||
+            dtv_l3_op_poll(open_op, &result) != DTV_L3_OK ||
+            result.state != DTV_L3_OP_DONE || result.result != DTV_L3_OK) {
+            return false;
+        }
+        dtv_l3_open_status status{};
+        return dtv_l3_open_status_get(owner, &status) == DTV_L3_OK &&
+               status.state == DTV_L3_OPEN_READY;
     }
 
     bool finish()
@@ -166,7 +212,8 @@ struct Session final {
             dtv_l3_close(owner, 100U);
             dtv_l3_close_status status{};
             if (dtv_l3_close_status_get(owner, &status) == DTV_L3_OK &&
-                status.cleanup_complete != 0U && status.physical_quiesced == 0U) {
+                status.cleanup_complete != 0U &&
+                status.physical_quiesced == 0U) {
                 dtv_l3_cleanup_retry(owner);
             }
             const dtv_l3_result result = dtv_l3_context_release(owner);
@@ -185,87 +232,218 @@ struct Session final {
     }
 };
 
-pix_l3_backend_ops ops_for(FakeBackend *backend)
+bool wait_op(dtv_l3_op *op)
 {
-    pix_l3_backend_ops ops{};
-    ops.context = backend;
-    ops.claim = claim;
-    ops.release_claim = release;
-    ops.transfer = transfer;
-    ops.cancel = cancel;
-    ops.tune = tune;
-    return ops;
+    if (dtv_l3_op_wait(op, 3000U) != DTV_L3_OK) {
+        return false;
+    }
+    dtv_l3_op_result result{};
+    return dtv_l3_op_poll(op, &result) == DTV_L3_OK &&
+           (result.state == DTV_L3_OP_DONE ||
+            result.state == DTV_L3_OP_FAILED);
 }
 
-int capability_differences()
+dtv_l3_firmware firmware_bytes(const std::uint8_t *bytes, std::size_t size)
+{
+    dtv_l3_firmware firmware{};
+    firmware.source = DTV_L3_FIRMWARE_BYTES;
+    firmware.bytes = bytes;
+    firmware.size = size;
+    return firmware;
+}
+
+int common_capabilities()
 {
     FakeBackend backend;
-    Session dt181;
-    if (!dt181.start(ops_for(&backend), PIX_L3_MODEL_DT181)) {
+    const std::uint8_t image[2] = {0x01U, 0x02U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
         return 1;
     }
-    pix_l3_capabilities a{};
-    if (pix_l3_factory_capabilities(dt181.factory, &a) != DTV_L3_OK ||
-        a.model != PIX_L3_MODEL_DT181 ||
-        a.tuners[0].selects_satellite_stream_before_tune != 1U ||
-        a.custom_firmware_candidate != 0U) {
+    dtv_l3_capabilities common{};
+    if (dtv_l3_capabilities_get(session.owner, &common) != DTV_L3_OK ||
+        common.receiver_count != 1U || common.reader_count != 1U ||
+        common.lnb_power != 0U || common.serial != 0U ||
+        common.cancel_scope != DTV_L3_CANCEL_SCOPE_TRANSFER) {
         return 2;
     }
-    if (!dt181.finish()) {
-        return 5;
-    }
-
-    Session dt295;
-    if (!dt295.start(ops_for(&backend), PIX_L3_MODEL_DT295)) {
+    dtv_l3_reader *reader = nullptr;
+    if (dtv_l3_reader_acquire(session.owner, 0U, &reader) !=
+        DTV_L3_UNSUPPORTED) {
         return 3;
     }
-    pix_l3_capabilities b{};
-    if (pix_l3_factory_capabilities(dt295.factory, &b) != DTV_L3_OK ||
-        b.model != PIX_L3_MODEL_DT295 ||
-        b.tuners[0].selects_satellite_stream_before_tune != 0U ||
-        b.custom_firmware_candidate != 1U ||
-        b.tuners[0].satellite_slot_count != 8U ||
-        b.tuners[0].bridge_shared != 0U ||
-        b.readers[0].external_apdu != PIX_L3_UNSUPPORTED ||
-        b.readers[0].presence_observation != PIX_L3_SUPPORTED ||
-        b.lnb_power != PIX_L3_UNSUPPORTED ||
-        b.route_owned_by_product != 1U ||
-        b.card_ts_concurrency != PIX_L3_CARD_TS_UNVERIFIED ||
-        b.fence_ts_effect != PIX_L3_FENCE_TS_UNKNOWN) {
+    if (dtv_l3_lnb_set(session.owner, 0U, 1U) != DTV_L3_UNSUPPORTED) {
         return 4;
     }
-    if (!dt295.finish()) {
-        return 6;
+    if (!session.finish()) {
+        return 5;
     }
     return 0;
 }
 
-int factory_rejects_incomplete()
+int factory_capability_differences()
+{
+    FakeBackend backend;
+    const std::uint8_t image[2] = {0x01U, 0x02U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    pix_l3_factory_config config{};
+    config.model = PIX_L3_MODEL_DT181;
+    config.usb = usb_ops_for(&backend);
+    config.product = product_ops_for(&backend);
+    pix_l3_factory *factory = nullptr;
+    if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK) {
+        return 1;
+    }
+    dtv_l3_capabilities common{};
+    pix_l3_product_capabilities details{};
+    if (pix_l3_factory_capabilities(factory, &common) != DTV_L3_OK ||
+        common.receiver_count != 1U || common.reader_count != 1U ||
+        common.lnb_power != 0U) {
+        return 2;
+    }
+    if (pix_l3_factory_details(factory, &details) != DTV_L3_OK ||
+        details.model != PIX_L3_MODEL_DT181 ||
+        details.selects_satellite_stream_before_tune != 1U ||
+        details.custom_firmware_candidate != 0U ||
+        details.firmware_required != 1U) {
+        return 3;
+    }
+    pix_l3_factory_destroy(factory);
+
+    config.model = PIX_L3_MODEL_DT295;
+    if (pix_l3_factory_create(&config, &factory) != DTV_L3_OK ||
+        pix_l3_factory_details(factory, &details) != DTV_L3_OK ||
+        details.model != PIX_L3_MODEL_DT295 ||
+        details.selects_satellite_stream_before_tune != 0U ||
+        details.custom_firmware_candidate != 1U ||
+        details.satellite_slot_count != 8U ||
+        details.bridge_shared != 0U ||
+        details.external_apdu != PIX_L3_UNSUPPORTED ||
+        details.presence_observation != PIX_L3_SUPPORTED ||
+        details.lnb_power != PIX_L3_UNSUPPORTED ||
+        details.route_owned_by_product != 1U) {
+        return 4;
+    }
+    (void)firmware;
+    pix_l3_factory_destroy(factory);
+    return 0;
+}
+
+int factory_rejects_invalid()
 {
     pix_l3_factory_config config{};
-    config.model = PIX_L3_MODEL_DT295;
     pix_l3_factory *factory = nullptr;
     if (pix_l3_factory_create(&config, &factory) != DTV_L3_INVALID ||
         factory != nullptr) {
         return 1;
     }
+    FakeBackend backend;
     config.model = static_cast<pix_l3_model>(1);
-    config.backend.claim = claim;
-    config.backend.release_claim = release;
-    config.backend.transfer = transfer;
-    config.backend.cancel = cancel;
+    config.usb = usb_ops_for(&backend);
     if (pix_l3_factory_create(&config, &factory) != DTV_L3_INVALID) {
         return 2;
     }
+    config.model = PIX_L3_MODEL_DT295;
+    config.usb = usb_ops_for(&backend);
+    config.usb.transfer = nullptr;
+    if (pix_l3_factory_create(&config, &factory) != DTV_L3_INVALID) {
+        return 3;
+    }
     return 0;
+}
+
+int firmware_bytes_and_callback()
+{
+    FakeBackend backend;
+    const std::uint8_t image[3] = {0x31U, 0x32U, 0x33U};
+    const dtv_l3_firmware bytes = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT295, bytes)) {
+        return 1;
+    }
+    if (backend.configure_calls != 1U ||
+        backend.seen_model != static_cast<std::uint32_t>(PIX_L3_MODEL_DT295) ||
+        backend.seen_selector != 0x55U ||
+        backend.seen_firmware.size() != sizeof(image) ||
+        backend.seen_firmware[0] != image[0] ||
+        backend.seen_firmware[2] != image[2]) {
+        return 2;
+    }
+    if (!session.finish()) {
+        return 3;
+    }
+
+    FakeBackend callback_backend;
+    dtv_l3_firmware callback{};
+    callback.source = DTV_L3_FIRMWARE_READ_CALLBACK;
+    callback.read = read_firmware;
+    callback.read_context = nullptr;
+    Session second;
+    if (!second.start(callback_backend, PIX_L3_MODEL_DT181, callback)) {
+        return 4;
+    }
+    if (callback_backend.seen_firmware.size() != 4U ||
+        callback_backend.seen_firmware[0] != 0x11U ||
+        callback_backend.seen_firmware[3] != 0x44U) {
+        return 5;
+    }
+    return second.finish() ? 0 : 6;
+}
+
+#ifndef _WIN32
+int firmware_path()
+{
+    char path[] = "/tmp/pix-l3-fw-XXXXXX";
+    const int fd = mkstemp(path);
+    if (fd < 0) {
+        return 1;
+    }
+    const std::uint8_t image[5] = {0x41U, 0x42U, 0x43U, 0x44U, 0x45U};
+    if (write(fd, image, sizeof(image)) != static_cast<ssize_t>(sizeof(image))) {
+        close(fd);
+        unlink(path);
+        return 2;
+    }
+    close(fd);
+    dtv_l3_firmware firmware{};
+    firmware.source = DTV_L3_FIRMWARE_PATH;
+    firmware.path = path;
+    FakeBackend backend;
+    Session session;
+    const bool started = session.start(backend, PIX_L3_MODEL_DT295, firmware);
+    unlink(path);
+    if (!started) {
+        return 3;
+    }
+    if (backend.seen_firmware.size() != sizeof(image) ||
+        backend.seen_firmware[0] != image[0] ||
+        backend.seen_firmware[4] != image[4]) {
+        return 4;
+    }
+    return session.finish() ? 0 : 5;
+}
+#endif
+
+int firmware_required()
+{
+    FakeBackend backend;
+    const dtv_l3_firmware none{};
+    Session session;
+    if (session.start(backend, PIX_L3_MODEL_DT295, none)) {
+        return 1;
+    }
+    return session.finish() ? 0 : 2;
 }
 
 int route_rejection_keeps_lease()
 {
     FakeBackend backend;
     backend.tunes = {DTV_L3_FAILED, DTV_L3_OK};
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
     Session session;
-    if (!session.start(ops_for(&backend), PIX_L3_MODEL_DT295)) {
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
         return 1;
     }
     dtv_l3_lease *lease = nullptr;
@@ -303,8 +481,10 @@ int transfer_copy_and_repeat_poll()
 {
     FakeBackend backend;
     backend.fill = 0x47U;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
     Session session;
-    if (!session.start(ops_for(&backend), PIX_L3_MODEL_DT181)) {
+    if (!session.start(backend, PIX_L3_MODEL_DT181, firmware)) {
         return 1;
     }
     dtv_l3_transfer_request request{};
@@ -374,8 +554,10 @@ int close_retention_and_cleanup_retry()
     backend.releases.push_back({DTV_L3_RELEASE_QUIESCENCE_UNKNOWN,
                                 DTV_L3_CLAIM_RETAINED,
                                 DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_FAILED});
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
     Session session;
-    if (!session.start(ops_for(&backend), PIX_L3_MODEL_DT295)) {
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
         return 1;
     }
     dtv_l3_op_release(session.open_op);
@@ -420,20 +602,34 @@ int close_retention_and_cleanup_retry()
 
 int main()
 {
-    if (const int rc = capability_differences()) {
+    if (const int rc = common_capabilities()) {
         return 10 + rc;
     }
-    if (const int rc = factory_rejects_incomplete()) {
+    if (const int rc = factory_capability_differences()) {
         return 20 + rc;
     }
-    if (const int rc = route_rejection_keeps_lease()) {
+    if (const int rc = factory_rejects_invalid()) {
         return 30 + rc;
     }
-    if (const int rc = transfer_copy_and_repeat_poll()) {
+    if (const int rc = firmware_bytes_and_callback()) {
         return 40 + rc;
     }
-    if (const int rc = close_retention_and_cleanup_retry()) {
+#ifndef _WIN32
+    if (const int rc = firmware_path()) {
         return 50 + rc;
+    }
+#endif
+    if (const int rc = firmware_required()) {
+        return 60 + rc;
+    }
+    if (const int rc = route_rejection_keeps_lease()) {
+        return 70 + rc;
+    }
+    if (const int rc = transfer_copy_and_repeat_poll()) {
+        return 80 + rc;
+    }
+    if (const int rc = close_retention_and_cleanup_retry()) {
+        return 90 + rc;
     }
     return 0;
 }

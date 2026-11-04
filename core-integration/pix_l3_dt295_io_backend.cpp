@@ -9,19 +9,22 @@ struct pix_l3_dt295_io_backend {
     dt295_io io{};
     pix_l3_dt295_tune_fn tune = nullptr;
     void *tune_context = nullptr;
+    std::vector<std::uint8_t> firmware;
+    std::uint32_t model = 0U;
+    std::uint64_t selector = 0U;
 };
 
 namespace {
 
-dtv_l3_claim_result claim(void *context, std::uint32_t claim_index) noexcept
+dtv_l3_claim_result usb_claim(void *context, std::uint32_t claim_index) noexcept
 {
     (void)context;
     (void)claim_index;
     return {DTV_L3_OK, DTV_L3_CLAIM_RETAINED};
 }
 
-dtv_l3_release_result release_claim(void *context,
-                                    std::uint32_t claim_index) noexcept
+dtv_l3_release_result usb_release_claim(void *context,
+                                        std::uint32_t claim_index) noexcept
 {
     (void)context;
     (void)claim_index;
@@ -29,10 +32,10 @@ dtv_l3_release_result release_claim(void *context,
             DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_OK};
 }
 
-dtv_l3_result transfer(void *context, std::uint64_t transfer_id,
-                       const pix_l3_transfer *request,
-                       std::uint8_t *in_buffer, std::size_t in_capacity,
-                       pix_l3_transfer_result *completion) noexcept
+dtv_l3_result usb_transfer(void *context, std::uint64_t transfer_id,
+                           const pix_l3_transfer *request,
+                           std::uint8_t *in_buffer, std::size_t in_capacity,
+                           pix_l3_transfer_result *completion) noexcept
 {
     (void)transfer_id;
     pix_l3_dt295_io_backend *backend =
@@ -113,7 +116,7 @@ dtv_l3_result transfer(void *context, std::uint64_t transfer_id,
     return DTV_L3_OK;
 }
 
-dtv_l3_result cancel(void *context, std::uint64_t transfer_id) noexcept
+dtv_l3_result usb_cancel(void *context, std::uint64_t transfer_id) noexcept
 {
     (void)context;
     (void)transfer_id;
@@ -121,10 +124,28 @@ dtv_l3_result cancel(void *context, std::uint64_t transfer_id) noexcept
     return DTV_L3_UNSUPPORTED;
 }
 
-dtv_l3_result tune(void *context, std::uint32_t receiver_id,
-                   std::uint64_t requested_hz,
-                   std::uint64_t *programmed_hz) noexcept
+dtv_l3_result product_configure(void *context, std::uint32_t model,
+                                std::uint64_t selector,
+                                const std::uint8_t *firmware,
+                                std::size_t firmware_size) noexcept
 {
+    pix_l3_dt295_io_backend *backend =
+        static_cast<pix_l3_dt295_io_backend *>(context);
+    if (backend == nullptr || firmware == nullptr || firmware_size == 0U) {
+        return DTV_L3_INVALID;
+    }
+    backend->model = model;
+    backend->selector = selector;
+    backend->firmware.assign(firmware, firmware + firmware_size);
+    return DTV_L3_OK;
+}
+
+dtv_l3_result product_tune(void *context, dtv_l3_provider_binding *binding,
+                           std::uint32_t receiver_id,
+                           std::uint64_t requested_hz,
+                           std::uint64_t *programmed_hz) noexcept
+{
+    (void)binding;
     pix_l3_dt295_io_backend *backend =
         static_cast<pix_l3_dt295_io_backend *>(context);
     if (backend == nullptr || programmed_hz == nullptr) {
@@ -158,15 +179,25 @@ extern "C" void pix_l3_dt295_io_backend_destroy(
     delete backend;
 }
 
-extern "C" pix_l3_backend_ops pix_l3_dt295_io_backend_ops(
+extern "C" pix_l3_usb_backend_ops pix_l3_dt295_io_backend_usb_ops(
     pix_l3_dt295_io_backend *backend)
 {
-    pix_l3_backend_ops ops{};
+    pix_l3_usb_backend_ops ops{};
     ops.context = backend;
-    ops.claim = claim;
-    ops.release_claim = release_claim;
-    ops.transfer = transfer;
-    ops.cancel = cancel;
-    ops.tune = tune;
+    ops.claim = usb_claim;
+    ops.release_claim = usb_release_claim;
+    ops.transfer = usb_transfer;
+    ops.cancel = usb_cancel;
+    return ops;
+}
+
+extern "C" pix_l3_product_ops pix_l3_dt295_io_backend_product_ops(
+    pix_l3_dt295_io_backend *backend)
+{
+    pix_l3_product_ops ops{};
+    ops.context = backend;
+    ops.configure = product_configure;
+    ops.tune = product_tune;
+    ops.scope_query = nullptr;
     return ops;
 }

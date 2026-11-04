@@ -25,7 +25,10 @@ pix_l3_dt181_backend *pix_l3_dt181_backend_create(
     usb_backend *backend, int owns_backend, pix_l3_dt181_tune_fn tune,
     void *tune_context);
 void pix_l3_dt181_backend_destroy(pix_l3_dt181_backend *backend);
-pix_l3_backend_ops pix_l3_dt181_backend_ops(pix_l3_dt181_backend *backend);
+pix_l3_usb_backend_ops pix_l3_dt181_backend_usb_ops(
+    pix_l3_dt181_backend *backend);
+pix_l3_product_ops pix_l3_dt181_backend_product_ops(
+    pix_l3_dt181_backend *backend);
 
 #ifdef __cplusplus
 }
