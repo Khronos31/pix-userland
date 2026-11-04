@@ -902,6 +902,14 @@ ReceiverAdapter::Result ReceiverAdapter::ensure_streaming() noexcept
         (void)dt295_stop(device_, &drained, error, sizeof(error));
         return started;
     }
+    const char* diagnostics = std::getenv("PIX_DT295_DIAGNOSTICS");
+    if (diagnostics != nullptr && diagnostics[0] == '1' && diagnostics[1] == '\0')
+        std::fprintf(stderr,
+                     "DT295 device stream ready: command=5 sub=0 value=2 "
+                     "completion_state=2 endpoint=0x81 transfer_bytes=%u transfers=%u "
+                     "callback=transfer_complete\n",
+                     static_cast<unsigned>(DT295_STREAM_TRANSFER_BYTES),
+                     static_cast<unsigned>(DT295_STREAM_TRANSFERS));
     streaming_ = true;
     plan_complete_ = false;
     plan_started_ = false;
