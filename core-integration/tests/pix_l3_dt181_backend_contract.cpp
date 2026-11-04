@@ -31,7 +31,8 @@ int main()
     }
     const pix_l3_product_ops product = pix_l3_dt181_backend_product_ops(seam);
     if (product.configure == nullptr || product.tune == nullptr ||
-        product.bind != nullptr || product.initialize != nullptr) {
+        product.bind == nullptr || product.initialize != nullptr ||
+        product.stream_attach == nullptr || product.stream_stop == nullptr) {
         return 3;
     }
     pix_l3_dt181_backend_destroy(seam);

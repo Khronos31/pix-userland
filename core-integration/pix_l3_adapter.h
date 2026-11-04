@@ -107,6 +107,12 @@ typedef struct pix_l3_usb_backend_ops {
  * product session. tune stays the route/plan-aware product entry point, so a
  * rejected route surfaces as a non-OK tune result.
  */
+typedef dtv_l3_result (*pix_l3_stream_attach_fn)(
+    void *context, dtv_l3_context *owner, uint64_t stream_id,
+    dtv_l3_ts_deliver_fn deliver, void *callback_context);
+typedef dtv_l3_result (*pix_l3_stream_stop_fn)(
+    void *context, dtv_l3_context *owner, uint64_t stream_id);
+
 typedef struct pix_l3_product_ops {
     void *context;
     dtv_l3_result (*configure)(void *context, uint32_t model,
@@ -119,6 +125,16 @@ typedef struct pix_l3_product_ops {
     dtv_l3_result (*tune)(void *context, dtv_l3_provider_binding *binding,
                           uint32_t receiver_id, uint64_t requested_hz,
                           uint64_t *programmed_hz);
+    /*
+     * One stream IN path through the owner: submit a bulk IN through the same
+     * provider, then deliver the completed TS bytes. PIX has no shared bridge;
+     * the bridge callbacks below only map the single logical receiver.
+     */
+    pix_l3_stream_attach_fn stream_attach;
+    pix_l3_stream_stop_fn stream_stop;
+    dtv_l3_result (*bridge_start)(void *context, uint32_t bridge_id,
+                                  uint32_t receiver_id);
+    dtv_l3_result (*bridge_stop)(void *context, uint32_t bridge_id);
     /* Optional; NULL defaults to one exclusive receiver 0 with bridge_id 0. */
     dtv_l3_result (*scope_query)(void *context, uint32_t receiver_id,
                                  dtv_l3_scope_info *scope);

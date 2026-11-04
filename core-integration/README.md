@@ -86,8 +86,14 @@ models.
 The fixtures cover factory/capability differences, all three firmware sources,
 G1 bind/initialize, a real owner transfer from initialize
 (`transfer_start` -> provider submit -> completion -> `op_wait`/`op_release` ->
-READY), failed-initialize open failure, and the capability catalog, route rejection keeping a free
-lease, transfer input copy and repeat polling, DT295 `dt295_io` control, bulk
-and deadline mapping, per-transfer/pipe cancel scope and terminal completion
-retention, and close retention with explicit cleanup retry. Physical USB, real receivers, CARD/TS concurrency and
+READY), failed-initialize open failure, and the capability catalog. They also
+cover one stream IN path through the same owner/provider route: `stream_attach`
+starts a bulk IN via `dtv_l3_transfer_start`, delivers the completed TS to the
+Core stream, and the test reads it back before stop/release; a second case lets
+close retire an active stream and verifies lease/claim recovery. Fake async
+completion and the DT295 `dt295_io` backend seam are exercised separately.
+Route rejection, transfer input copy and repeat polling, DT295 `dt295_io`
+control/bulk/deadline mapping, per-transfer/pipe cancel scope and terminal
+completion retention, and close retention with explicit cleanup retry remain
+covered. Physical USB, real receivers, CARD/TS concurrency and
 custom firmware are not verified by this target.

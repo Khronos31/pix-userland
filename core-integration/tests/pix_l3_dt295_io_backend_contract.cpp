@@ -123,8 +123,10 @@ int main()
         config.usb.cancel_supported != 0U ||
         config.usb.submit != nullptr || config.usb.cancel_async != nullptr ||
         config.usb.transfer == nullptr || config.usb.cancel == nullptr ||
-        config.product.bind != nullptr ||
-        config.product.initialize != nullptr) {
+        config.product.bind == nullptr ||
+        config.product.initialize != nullptr ||
+        config.product.stream_attach == nullptr ||
+        config.product.stream_stop == nullptr) {
         return 19;
     }
     pix_l3_factory *factory = nullptr;
@@ -169,8 +171,30 @@ int main()
         programmed != 522000000U || io.tune_value != 522000000U) {
         return 7;
     }
-    if (dtv_l3_lease_release(lease) != DTV_L3_OK) {
-        return 8;
+    if (dtv_l3_lease_start(lease) != DTV_L3_OK) {
+        return 20;
+    }
+    dtv_l3_stream *stream = nullptr;
+    if (dtv_l3_lease_attach(lease, &stream) != DTV_L3_OK ||
+        stream == nullptr) {
+        return 21;
+    }
+    std::uint8_t ts[188];
+    std::memset(ts, 0, sizeof(ts));
+    std::size_t ts_bytes = 0U;
+    dtv_l3_read_state ts_state = DTV_L3_READ_WAIT;
+    if (dtv_l3_stream_read_ts(stream, ts, sizeof(ts), &ts_bytes, &ts_state) !=
+            DTV_L3_OK ||
+        ts_state != DTV_L3_READ_DATA || ts_bytes != sizeof(ts) ||
+        ts[0] != 0xA5U || io.bulk_calls != 1U) {
+        return 22;
+    }
+    if (dtv_l3_stream_stop(stream, 0U) != DTV_L3_OK ||
+        dtv_l3_stream_release(stream, DTV_L3_STREAM_RELEASE_DISCARD_UNREAD) !=
+            DTV_L3_OK ||
+        dtv_l3_stream_destroy(stream) != DTV_L3_OK ||
+        dtv_l3_lease_release(lease) != DTV_L3_OK) {
+        return 23;
     }
 
     std::uint8_t out[4] = {1U, 2U, 3U, 4U};
@@ -189,7 +213,7 @@ int main()
     }
     dtv_l3_op_result result{};
     if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||
-        result.result != DTV_L3_OK || io.bulk_calls != 1U ||
+        result.result != DTV_L3_OK || io.bulk_calls != 2U ||
         io.last_out[0] != 1U || io.last_out[3] != 4U) {
         return 11;
     }

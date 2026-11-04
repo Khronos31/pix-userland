@@ -22,6 +22,7 @@ struct AdapterInstance final {
     std::vector<std::uint8_t> firmware_bytes;
     pix_l3_model model = PIX_L3_MODEL_DT181;
     std::uint64_t selector = 0U;
+    dtv_l3_context *owner = nullptr;
     dtv_l3_capabilities capabilities{};
     dtv_l3_capability_catalog catalog{};
 };
@@ -237,10 +238,79 @@ dtv_l3_result adapter_bind(void *context, dtv_l3_context *owner) noexcept
     if (instance == nullptr) {
         return DTV_L3_INVALID;
     }
+    instance->owner = owner;
     if (instance->product.bind == nullptr) {
         return DTV_L3_OK;
     }
     return instance->product.bind(instance->product.context, owner);
+}
+
+dtv_l3_result adapter_stream_attach(void *context,
+                                    dtv_l3_provider_binding *binding,
+                                    std::uint64_t stream_id,
+                                    dtv_l3_ts_deliver_fn deliver,
+                                    void *callback_context) noexcept
+{
+    (void)binding;
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr || instance->owner == nullptr ||
+        deliver == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    if (instance->product.stream_attach == nullptr) {
+        return DTV_L3_UNSUPPORTED;
+    }
+    return instance->product.stream_attach(instance->product.context,
+                                           instance->owner, stream_id,
+                                           deliver, callback_context);
+}
+
+dtv_l3_result adapter_stream_stop(void *context,
+                                  dtv_l3_provider_binding *binding,
+                                  std::uint64_t stream_id) noexcept
+{
+    (void)binding;
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr || instance->owner == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    if (instance->product.stream_stop == nullptr) {
+        return DTV_L3_UNSUPPORTED;
+    }
+    return instance->product.stream_stop(instance->product.context,
+                                         instance->owner, stream_id);
+}
+
+dtv_l3_result adapter_bridge_start(void *context,
+                                   dtv_l3_provider_binding *binding,
+                                   std::uint32_t bridge_id,
+                                   std::uint32_t receiver_id) noexcept
+{
+    (void)binding;
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    if (instance->product.bridge_start == nullptr) {
+        return DTV_L3_OK;
+    }
+    return instance->product.bridge_start(instance->product.context, bridge_id,
+                                          receiver_id);
+}
+
+dtv_l3_result adapter_bridge_stop(void *context,
+                                  dtv_l3_provider_binding *binding,
+                                  std::uint32_t bridge_id) noexcept
+{
+    (void)binding;
+    AdapterInstance *instance = static_cast<AdapterInstance *>(context);
+    if (instance == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    if (instance->product.bridge_stop == nullptr) {
+        return DTV_L3_OK;
+    }
+    return instance->product.bridge_stop(instance->product.context, bridge_id);
 }
 
 dtv_l3_result adapter_initialize(void *context,
@@ -360,10 +430,10 @@ dtv_l3_result factory_create(void *context,
     instance->adapter.initialize = adapter_initialize;
     instance->adapter.scope_query = adapter_scope_query;
     instance->adapter.tune = adapter_tune;
-    instance->adapter.bridge_start = nullptr;
-    instance->adapter.bridge_stop = nullptr;
-    instance->adapter.stream_attach = nullptr;
-    instance->adapter.stream_stop = nullptr;
+    instance->adapter.bridge_start = adapter_bridge_start;
+    instance->adapter.bridge_stop = adapter_bridge_stop;
+    instance->adapter.stream_attach = adapter_stream_attach;
+    instance->adapter.stream_stop = adapter_stream_stop;
 
     *adapter_out = &instance->adapter;
     *adapter_owner_out = instance.get();

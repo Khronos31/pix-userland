@@ -12,6 +12,7 @@ struct pix_l3_dt295_io_backend {
     std::vector<std::uint8_t> firmware;
     std::uint32_t model = 0U;
     std::uint64_t selector = 0U;
+    dtv_l3_context *owner = nullptr;
 };
 
 namespace {
@@ -124,6 +125,67 @@ dtv_l3_result usb_cancel(void *context, std::uint64_t transfer_id) noexcept
     return DTV_L3_UNSUPPORTED;
 }
 
+dtv_l3_result product_bind(void *context, dtv_l3_context *owner) noexcept
+{
+    pix_l3_dt295_io_backend *value = static_cast<pix_l3_dt295_io_backend *>(context);
+    if (value == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    value->owner = owner;
+    return DTV_L3_OK;
+}
+
+dtv_l3_result product_stream_attach(void *context, dtv_l3_context *owner,
+                                    std::uint64_t stream_id,
+                                    dtv_l3_ts_deliver_fn deliver,
+                                    void *callback_context) noexcept
+{
+    (void)stream_id;
+    pix_l3_dt295_io_backend *value = static_cast<pix_l3_dt295_io_backend *>(context);
+    if (value == nullptr || owner == nullptr || deliver == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    dtv_l3_transfer_request request{};
+    request.kind = DTV_L3_TRANSFER_BULK;
+    request.endpoint = 0x81U;
+    request.timeout_ms = 1000U;
+    request.in_capacity = 188U;
+    dtv_l3_op *op = nullptr;
+    const dtv_l3_result started =
+        dtv_l3_transfer_start(owner, &request, &op);
+    if (started != DTV_L3_ACCEPTED || op == nullptr) {
+        return started;
+    }
+    const dtv_l3_result waited = dtv_l3_op_wait(op, 5000U);
+    dtv_l3_op_result result{};
+    const dtv_l3_result polled = dtv_l3_op_poll(op, &result);
+    if (waited == DTV_L3_OK && polled == DTV_L3_OK &&
+        result.result == DTV_L3_OK && result.data != nullptr &&
+        result.data_size != 0U) {
+        deliver(callback_context, result.data, result.data_size);
+    }
+    const dtv_l3_result released = dtv_l3_op_release(op);
+    if (waited != DTV_L3_OK) {
+        return waited;
+    }
+    if (polled != DTV_L3_OK) {
+        return polled;
+    }
+    if (result.result != DTV_L3_OK) {
+        return result.result;
+    }
+    return released;
+}
+
+dtv_l3_result product_stream_stop(void *context, dtv_l3_context *owner,
+                                  std::uint64_t stream_id) noexcept
+{
+    (void)context;
+    (void)owner;
+    (void)stream_id;
+    return DTV_L3_OK;
+}
+
 dtv_l3_result product_configure(void *context, std::uint32_t model,
                                 std::uint64_t selector,
                                 const std::uint8_t *firmware,
@@ -200,7 +262,13 @@ extern "C" pix_l3_product_ops pix_l3_dt295_io_backend_product_ops(
     pix_l3_product_ops ops{};
     ops.context = backend;
     ops.configure = product_configure;
+    ops.bind = product_bind;
+    ops.initialize = nullptr;
     ops.tune = product_tune;
+    ops.stream_attach = product_stream_attach;
+    ops.stream_stop = product_stream_stop;
+    ops.bridge_start = nullptr;
+    ops.bridge_stop = nullptr;
     ops.scope_query = nullptr;
     return ops;
 }

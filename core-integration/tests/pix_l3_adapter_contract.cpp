@@ -52,6 +52,9 @@ struct FakeBackend final {
     dtv_l3_result initialize_transfer_result = DTV_L3_FAILED;
     std::size_t initialize_transfer_bytes = 0U;
     std::uint8_t initialize_transfer_first = 0U;
+    std::uint64_t stream_deliver_calls = 0U;
+    std::size_t stream_deliver_bytes = 0U;
+    std::uint8_t stream_deliver_first = 0U;
     std::vector<dtv_l3_release_result> releases;
     std::vector<dtv_l3_result> tunes;
     std::vector<std::uint8_t> last_out;
@@ -170,6 +173,60 @@ bool wait_pending(FakeBackend &backend, std::size_t count)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return false;
+}
+
+dtv_l3_result product_stream_attach(void *context, dtv_l3_context *owner,
+                                    uint64_t stream_id,
+                                    dtv_l3_ts_deliver_fn deliver,
+                                    void *callback_context)
+{
+    (void)stream_id;
+    FakeBackend *value = fake(context);
+    if (value == nullptr || owner == nullptr || deliver == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    dtv_l3_transfer_request request{};
+    request.kind = DTV_L3_TRANSFER_BULK;
+    request.endpoint = 0x81U;
+    request.timeout_ms = 100U;
+    request.in_capacity = 188U;
+    dtv_l3_op *op = nullptr;
+    const dtv_l3_result started =
+        dtv_l3_transfer_start(owner, &request, &op);
+    if (started != DTV_L3_ACCEPTED || op == nullptr) {
+        return started;
+    }
+    const dtv_l3_result waited = dtv_l3_op_wait(op, 2000U);
+    dtv_l3_op_result result{};
+    const dtv_l3_result polled = dtv_l3_op_poll(op, &result);
+    if (waited == DTV_L3_OK && polled == DTV_L3_OK &&
+        result.result == DTV_L3_OK && result.data != nullptr &&
+        result.data_size != 0U) {
+        ++value->stream_deliver_calls;
+        value->stream_deliver_bytes = result.data_size;
+        value->stream_deliver_first = result.data[0];
+        deliver(callback_context, result.data, result.data_size);
+    }
+    const dtv_l3_result released = dtv_l3_op_release(op);
+    if (waited != DTV_L3_OK) {
+        return waited;
+    }
+    if (polled != DTV_L3_OK) {
+        return polled;
+    }
+    if (result.result != DTV_L3_OK) {
+        return result.result;
+    }
+    return released;
+}
+
+dtv_l3_result product_stream_stop(void *context, dtv_l3_context *owner,
+                                  uint64_t stream_id)
+{
+    (void)context;
+    (void)owner;
+    (void)stream_id;
+    return DTV_L3_OK;
 }
 
 bool complete_pending(FakeBackend &backend, uint64_t id, dtv_l3_result result,
@@ -325,6 +382,10 @@ pix_l3_product_ops product_ops_for(FakeBackend *backend)
     ops.bind = product_bind;
     ops.initialize = product_initialize;
     ops.tune = tune;
+    ops.stream_attach = product_stream_attach;
+    ops.stream_stop = product_stream_stop;
+    ops.bridge_start = nullptr;
+    ops.bridge_stop = nullptr;
     ops.scope_query = nullptr;
     return ops;
 }
@@ -1060,6 +1121,123 @@ int failed_initialize_is_not_success()
     return 6;
 }
 
+
+int stream_in_through_owner()
+{
+    FakeBackend backend;
+    backend.async = true;
+    backend.complete_in_submit = true;
+    backend.fill = 0x47U;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
+        return 1;
+    }
+    dtv_l3_lease *lease = nullptr;
+    if (dtv_l3_lease_acquire(session.owner, 0U, &lease) != DTV_L3_OK ||
+        lease == nullptr) {
+        return 2;
+    }
+    uint64_t programmed = 0U;
+    uint64_t revision = 0U;
+    if (dtv_l3_lease_tune(lease, 522000000U, &programmed, &revision) !=
+            DTV_L3_OK ||
+        dtv_l3_lease_start(lease) != DTV_L3_OK) {
+        return 3;
+    }
+    dtv_l3_stream *stream = nullptr;
+    if (dtv_l3_lease_attach(lease, &stream) != DTV_L3_OK ||
+        stream == nullptr) {
+        return 4;
+    }
+    if (backend.stream_deliver_calls != 1U ||
+        backend.stream_deliver_bytes != 188U ||
+        backend.stream_deliver_first != 0x47U ||
+        backend.async_submit_calls != 1U) {
+        return 5;
+    }
+    uint8_t ts[188];
+    std::memset(ts, 0, sizeof(ts));
+    std::size_t bytes = 0U;
+    dtv_l3_read_state state = DTV_L3_READ_WAIT;
+    if (dtv_l3_stream_read_ts(stream, ts, sizeof(ts), &bytes, &state) !=
+            DTV_L3_OK ||
+        state != DTV_L3_READ_DATA || bytes != sizeof(ts) || ts[0] != 0x47U) {
+        return 6;
+    }
+    if (dtv_l3_stream_stop(stream, 0U) != DTV_L3_OK ||
+        dtv_l3_stream_release(stream, DTV_L3_STREAM_RELEASE_DISCARD_UNREAD) !=
+            DTV_L3_OK ||
+        dtv_l3_stream_destroy(stream) != DTV_L3_OK ||
+        dtv_l3_lease_release(lease) != DTV_L3_OK) {
+        return 7;
+    }
+    return session.finish() ? 0 : 8;
+}
+
+
+int close_retires_active_stream()
+{
+    FakeBackend backend;
+    backend.async = true;
+    backend.complete_in_submit = true;
+    backend.fill = 0x47U;
+    const std::uint8_t image[1] = {0x01U};
+    const dtv_l3_firmware firmware = firmware_bytes(image, sizeof(image));
+    Session session;
+    if (!session.start(backend, PIX_L3_MODEL_DT295, firmware)) {
+        return 1;
+    }
+    dtv_l3_lease *lease = nullptr;
+    if (dtv_l3_lease_acquire(session.owner, 0U, &lease) != DTV_L3_OK) {
+        return 2;
+    }
+    uint64_t programmed = 0U;
+    uint64_t revision = 0U;
+    if (dtv_l3_lease_tune(lease, 522000000U, &programmed, &revision) !=
+            DTV_L3_OK ||
+        dtv_l3_lease_start(lease) != DTV_L3_OK) {
+        return 3;
+    }
+    dtv_l3_stream *stream = nullptr;
+    if (dtv_l3_lease_attach(lease, &stream) != DTV_L3_OK ||
+        stream == nullptr) {
+        return 4;
+    }
+    uint8_t ts[188];
+    std::memset(ts, 0, sizeof(ts));
+    std::size_t bytes = 0U;
+    dtv_l3_read_state state = DTV_L3_READ_WAIT;
+    if (dtv_l3_stream_read_ts(stream, ts, sizeof(ts), &bytes, &state) !=
+            DTV_L3_OK ||
+        state != DTV_L3_READ_DATA || bytes != sizeof(ts) || ts[0] != 0x47U) {
+        return 5;
+    }
+    dtv_l3_op_release(session.open_op);
+    session.open_op = nullptr;
+    if (dtv_l3_close(session.owner, 1000U) != DTV_L3_OK) {
+        return 6;
+    }
+    dtv_l3_close_status status{};
+    if (dtv_l3_close_status_get(session.owner, &status) != DTV_L3_OK ||
+        status.physical_quiesced == 0U || status.cleanup_complete == 0U ||
+        status.releasable == 0U) {
+        return 7;
+    }
+    if (dtv_l3_stream_destroy(stream) != DTV_L3_OK) {
+        return 8;
+    }
+    if (dtv_l3_lease_release(lease) != DTV_L3_OK) {
+        return 9;
+    }
+    if (dtv_l3_context_release(session.owner) != DTV_L3_OK) {
+        return 10;
+    }
+    session.owner = nullptr;
+    return session.finish() ? 0 : 11;
+}
+
 }  // namespace
 
 int main()
@@ -1107,6 +1285,12 @@ int main()
     }
     if (const int rc = failed_initialize_is_not_success()) {
         return 140 + rc;
+    }
+    if (const int rc = stream_in_through_owner()) {
+        return 150 + rc;
+    }
+    if (const int rc = close_retires_active_stream()) {
+        return 160 + rc;
     }
     return 0;
 }
