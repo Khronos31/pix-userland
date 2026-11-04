@@ -585,7 +585,6 @@ void L3Dt181Runtime::reset_stream() noexcept
             stream_ = nullptr;
             break;
         }
-        (void)dtv_l3_progress(owner_);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     final_terminal_ = true;
@@ -596,7 +595,6 @@ void L3Dt181Runtime::reset_stream() noexcept
                 lease_ = nullptr;
                 break;
             }
-            (void)dtv_l3_progress(owner_);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
