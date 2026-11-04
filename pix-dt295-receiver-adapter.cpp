@@ -980,6 +980,11 @@ void ReceiverAdapter::pump() noexcept
     publish_buffer.reserve(65536U + 188U);
     std::uint8_t* chunk = pump_chunk_.data();
     std::uint64_t last_renew = clock_.monotonic_ms();
+    std::uint64_t read_calls = 0U;
+    std::uint64_t read_positive = 0U;
+    std::uint64_t read_zero = 0U;
+    std::uint64_t read_bytes = 0U;
+    std::uint64_t decoded_packets = 0U;
     const std::uint64_t generation = acquisition_generation_.load(std::memory_order_acquire);
     const std::uint64_t tune_generation =
         tune_generation_.load(std::memory_order_acquire);
@@ -1003,6 +1008,44 @@ void ReceiverAdapter::pump() noexcept
         if (acquisition_phase_.load(std::memory_order_acquire) ==
                 AcquisitionPhase::preparing && !normal_done &&
             clock_.monotonic_ms() - acquisition_started_ms_ >= kAcquisitionDeadlineMs) {
+            const char* diagnostics = std::getenv("PIX_DT295_DIAGNOSTICS");
+            if (diagnostics != nullptr && diagnostics[0] == '1' && diagnostics[1] == '\0') {
+                dt295_stream_stats usb{};
+                dt295_routes_snapshot routes{};
+                dt295_stream_snapshot(stream_, &usb);
+                dt295_routes_snapshot_get(routes_, &routes);
+                std::fprintf(stderr,
+                             "DT295 acquisition evidence: boundary=acquisition_deadline "
+                             "read_calls=%llu read_positive=%llu read_zero=%llu "
+                             "read_bytes=%llu decoded_packets=%llu residue_bytes=%llu "
+                             "usb_submitted=%llu usb_completed=%llu usb_completed_bytes=%llu "
+                             "usb_delivered=%llu usb_delivered_bytes=%llu "
+                             "usb_timeouts=%llu usb_error=%d usb_pending_blocks=%llu "
+                             "have_pat=%u have_cat=%u program_count=%u missing_pmts=%u "
+                             "tables_ready=%u invalid_sections=%u continuity_errors=%u "
+                             "unsupported_tables=%u\n",
+                             static_cast<unsigned long long>(read_calls),
+                             static_cast<unsigned long long>(read_positive),
+                             static_cast<unsigned long long>(read_zero),
+                             static_cast<unsigned long long>(read_bytes),
+                             static_cast<unsigned long long>(decoded_packets),
+                             static_cast<unsigned long long>(residue.size()),
+                             static_cast<unsigned long long>(usb.submitted),
+                             static_cast<unsigned long long>(usb.completed),
+                             static_cast<unsigned long long>(usb.completed_bytes),
+                             static_cast<unsigned long long>(usb.delivered),
+                             static_cast<unsigned long long>(usb.delivered_bytes),
+                             static_cast<unsigned long long>(usb.timeouts), usb.first_error,
+                             static_cast<unsigned long long>(usb.pending_blocks),
+                             static_cast<unsigned>(routes.have_pat),
+                             static_cast<unsigned>(routes.have_cat),
+                             static_cast<unsigned>(routes.program_count),
+                             static_cast<unsigned>(routes.missing_pmts),
+                             static_cast<unsigned>(routes.ready),
+                             static_cast<unsigned>(routes.invalid_sections),
+                             static_cast<unsigned>(routes.continuity_errors),
+                             static_cast<unsigned>(routes.unsupported_tables));
+            }
             fail_acquisition(AcquisitionFailure::deadline,
                              dtv::userland::detail::StreamTerminal::sync_error,
                              Error::TIMEOUT, "acquisition_deadline");
@@ -1011,6 +1054,7 @@ void ReceiverAdapter::pump() noexcept
         }
         std::uint64_t sequence = 0U;
         std::uint64_t completed_ns = 0U;
+        ++read_calls;
         const int count = dt295_stream_read(stream_, chunk, pump_chunk_.size(), &sequence,
                                             &completed_ns, 50U);
         if (count < 0) {
@@ -1021,7 +1065,13 @@ void ReceiverAdapter::pump() noexcept
             if (scan_mode) scan_terminate(SiEndReason::usb);
             break;
         }
-        if (count > 0) residue.insert(residue.end(), chunk, chunk + count);
+        if (count > 0) {
+            ++read_positive;
+            read_bytes += static_cast<std::uint64_t>(count);
+            residue.insert(residue.end(), chunk, chunk + count);
+        } else {
+            ++read_zero;
+        }
 
         std::size_t offset = 0U;
         bool terminal = false;
@@ -1043,6 +1093,7 @@ void ReceiverAdapter::pump() noexcept
                 }
             }
             dt295_routes_feed(routes_, packet);
+            ++decoded_packets;
             if (scan_mode) scan_append_packet(packet);
             if (!ready || scan_mode) continue;
             publish_buffer.insert(publish_buffer.end(), packet, packet + 188U);
