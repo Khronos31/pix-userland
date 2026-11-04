@@ -38,15 +38,14 @@ dtv_l3_result product_initialize(void *, dtv_l3_context *) noexcept
     return DTV_L3_OK;
 }
 
-dtv_l3_result product_tune(void *, dtv_l3_provider_binding *,
+dtv_l3_result product_tune(void *context, dtv_l3_provider_binding *,
                            std::uint32_t receiver_id, std::uint64_t requested_hz,
                            std::uint64_t *programmed_hz) noexcept
 {
-    if (receiver_id != 0U || programmed_hz == nullptr) {
-        return DTV_L3_INVALID;
-    }
-    *programmed_hz = requested_hz;
-    return DTV_L3_OK;
+    L3Dt181Runtime *runtime = static_cast<L3Dt181Runtime *>(context);
+    return runtime != nullptr
+               ? runtime->program_tune(receiver_id, requested_hz, programmed_hz)
+               : DTV_L3_INVALID;
 }
 
 dtv_l3_result product_stream_attach(void *context, dtv_l3_context *owner,
@@ -186,24 +185,46 @@ Result<void> L3Dt181Runtime::open_receiver(std::uint8_t receiver) noexcept
     return ensure_lease();
 }
 
-Result<void> L3Dt181Runtime::tune_lease(std::uint64_t hz) noexcept
+Result<void> L3Dt181Runtime::tune_lease(std::uint64_t hz, std::uint64_t *programmed_hz) noexcept
 {
     if (lease_ == nullptr) return Result<void>::failure(Error::NOT_READY);
     std::uint64_t programmed = 0U;
     std::uint64_t revision = 0U;
     const dtv_l3_result tuned = dtv_l3_lease_tune(lease_, hz, &programmed, &revision);
+    if (tuned == DTV_L3_OK && programmed_hz != nullptr) {
+        *programmed_hz = programmed;
+    }
     return tuned == DTV_L3_OK
                ? Result<void>::success()
                : Result<void>::failure(Error::USB_IO);
+}
+
+dtv_l3_result L3Dt181Runtime::program_tune(
+    std::uint32_t receiver, std::uint64_t requested_hz,
+    std::uint64_t *programmed_hz) noexcept
+{
+    if (receiver != 0U || programmed_hz == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    const auto tuned = tune_system_ == System::ISDB_T
+        ? frontend_.tune_terrestrial_hz(static_cast<std::uint8_t>(receiver),
+                                        requested_hz, tune_timeout_ms_)
+        : frontend_.tune_satellite_hz(static_cast<std::uint8_t>(receiver),
+                                      requested_hz, tune_timeout_ms_);
+    if (!tuned) {
+        return DTV_L3_FAILED;
+    }
+    *programmed_hz = tuned.value().programmed_hz.value_or(requested_hz);
+    return DTV_L3_OK;
 }
 
 Result<void> L3Dt181Runtime::tune_terrestrial(
     std::uint8_t receiver, std::uint32_t frequency_khz,
     std::uint32_t timeout_ms) noexcept
 {
-    const auto tuned = frontend_.tune_terrestrial(receiver, frequency_khz,
-                                                  timeout_ms);
-    if (!tuned) return tuned;
+    if (receiver != 0U) return Result<void>::failure(Error::UNSUPPORTED);
+    tune_system_ = System::ISDB_T;
+    tune_timeout_ms_ = timeout_ms;
     return tune_lease(static_cast<std::uint64_t>(frequency_khz) * 1000U);
 }
 
@@ -211,9 +232,9 @@ Result<void> L3Dt181Runtime::tune_satellite(std::uint8_t receiver,
                                             std::uint32_t frequency_khz,
                                             std::uint32_t timeout_ms) noexcept
 {
-    const auto tuned = frontend_.tune_satellite(receiver, frequency_khz,
-                                                timeout_ms);
-    if (!tuned) return tuned;
+    if (receiver != 0U) return Result<void>::failure(Error::UNSUPPORTED);
+    tune_system_ = System::ISDB_S;
+    tune_timeout_ms_ = timeout_ms;
     return tune_lease(static_cast<std::uint64_t>(frequency_khz) * 1000U);
 }
 
@@ -221,28 +242,30 @@ Result<TunerHzProgramming> L3Dt181Runtime::tune_terrestrial_hz(
     std::uint8_t receiver, std::uint64_t frequency_hz,
     std::uint32_t timeout_ms) noexcept
 {
-    const auto tuned = frontend_.tune_terrestrial_hz(receiver, frequency_hz,
-                                                     timeout_ms);
-    if (!tuned) return tuned;
-    const std::uint64_t programmed =
-        tuned.value().programmed_hz.value_or(frequency_hz);
-    const auto leased = tune_lease(programmed);
+    if (receiver != 0U) return Result<TunerHzProgramming>::failure(Error::UNSUPPORTED);
+    tune_system_ = System::ISDB_T;
+    tune_timeout_ms_ = timeout_ms;
+    std::uint64_t programmed_hz = frequency_hz;
+    const auto leased = tune_lease(frequency_hz, &programmed_hz);
     if (!leased) return Result<TunerHzProgramming>::failure(leased.error());
-    return tuned;
+    TunerHzProgramming tuned{};
+    tuned.programmed_hz = programmed_hz;
+    return Result<TunerHzProgramming>::success(tuned);
 }
 
 Result<TunerHzProgramming> L3Dt181Runtime::tune_satellite_hz(
     std::uint8_t receiver, std::uint64_t frequency_hz,
     std::uint32_t timeout_ms) noexcept
 {
-    const auto tuned = frontend_.tune_satellite_hz(receiver, frequency_hz,
-                                                   timeout_ms);
-    if (!tuned) return tuned;
-    const std::uint64_t programmed =
-        tuned.value().programmed_hz.value_or(frequency_hz);
-    const auto leased = tune_lease(programmed);
+    if (receiver != 0U) return Result<TunerHzProgramming>::failure(Error::UNSUPPORTED);
+    tune_system_ = System::ISDB_S;
+    tune_timeout_ms_ = timeout_ms;
+    std::uint64_t programmed_hz = frequency_hz;
+    const auto leased = tune_lease(frequency_hz, &programmed_hz);
     if (!leased) return Result<TunerHzProgramming>::failure(leased.error());
-    return tuned;
+    TunerHzProgramming tuned{};
+    tuned.programmed_hz = programmed_hz;
+    return Result<TunerHzProgramming>::success(tuned);
 }
 
 TunerStrictProfile L3Dt181Runtime::strict_profile(std::uint8_t receiver,
@@ -477,9 +500,6 @@ dtv_l3_result L3Dt181Runtime::stop_producer() noexcept
         feed_ = nullptr;
     }
     (void)pixy_stop(&session_.device);
-    if (session_.usb != nullptr) {
-        (void)usb_stream_stop(session_.usb);
-    }
     deliver_ = nullptr;
     deliver_context_ = nullptr;
     return DTV_L3_OK;
@@ -517,7 +537,7 @@ void L3Dt181Runtime::producer_loop(dtv_l3_ts_deliver_fn deliver,
         }
         dtv_l3_op_result result{};
         while (!producer_stop_.load()) {
-            (void)usb_poll(session_.usb, 1U);
+            (void)dtv_l3_op_wait(op, 100U);
             if (dtv_l3_op_poll(op, &result) != DTV_L3_OK) {
                 break;
             }
@@ -528,8 +548,8 @@ void L3Dt181Runtime::producer_loop(dtv_l3_ts_deliver_fn deliver,
         }
         if (producer_stop_.load()) {
             (void)dtv_l3_op_cancel(op);
-            for (unsigned attempt = 0U; attempt < 2000U; ++attempt) {
-                (void)usb_poll(session_.usb, 1U);
+            for (unsigned attempt = 0U; attempt < 20U; ++attempt) {
+                (void)dtv_l3_op_wait(op, 100U);
                 if (dtv_l3_op_poll(op, &result) != DTV_L3_OK ||
                     result.state == DTV_L3_OP_DONE ||
                     result.state == DTV_L3_OP_FAILED) {

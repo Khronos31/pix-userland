@@ -115,12 +115,16 @@ public:
                                  void *callback_context) noexcept;
     dtv_l3_result stop_producer() noexcept;
     int bridge_deliver(const std::uint8_t *data, std::size_t size) noexcept;
+    dtv_l3_result program_tune(std::uint32_t receiver,
+                               std::uint64_t requested_hz,
+                               std::uint64_t *programmed_hz) noexcept;
 
 private:
     void producer_loop(dtv_l3_ts_deliver_fn deliver,
                        void *callback_context) noexcept;
     px4::userland::Result<void> ensure_lease() noexcept;
-    px4::userland::Result<void> tune_lease(std::uint64_t hz) noexcept;
+    px4::userland::Result<void> tune_lease(
+        std::uint64_t hz, std::uint64_t *programmed_hz = nullptr) noexcept;
     void reset_stream() noexcept;
     void close_owner() noexcept;
 
@@ -148,6 +152,9 @@ private:
     std::uint64_t final_bytes_ = 0U;
     std::uint64_t final_queue_drops_ = 0U;
     bool final_terminal_ = false;
+    px4::userland::ipc::System tune_system_ =
+        px4::userland::ipc::System::ISDB_T;
+    std::uint32_t tune_timeout_ms_ = 5000U;
 };
 
 }  // namespace pix::runtime
