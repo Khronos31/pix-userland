@@ -254,6 +254,45 @@ static uint8_t capture_endpoint(void) {
     }
     return (uint8_t)cached;
 }
+
+typedef struct {
+    int synced;
+    uint64_t desyncs;
+    uint64_t dropped;
+} ts_align;
+
+/* Start offset of the next whole TS packet at or after pos. Two consecutive
+ * 0x47 bytes are required to lock, so a payload byte that happens to be 0x47
+ * does not anchor the stream. When the remaining bytes cannot be aligned yet,
+ * the offset of the pending tail is returned and the caller keeps it for the
+ * next read. */
+static size_t ts_align_next(ts_align *a, const uint8_t *data, size_t total, size_t pos) {
+    while (pos + 188 <= total) {
+        if (!a->synced) {
+            size_t off = pos;
+            while (off + 188 < total &&
+                   !(data[off] == 0x47 && data[off + 188] == 0x47))
+                off++;
+            if (off + 188 >= total) {
+                a->dropped += off - pos;
+                return off;
+            }
+            a->dropped += off - pos;
+            pos = off;
+            a->synced = 1;
+        }
+        if (data[pos] != 0x47) {
+            a->desyncs++;
+            a->dropped++;
+            pos++;
+            a->synced = 0;
+            continue;
+        }
+        return pos;
+    }
+    return pos;
+}
+
 #endif
 int dt295_capture_run(const dt295_capture_config *cfg) {
 #if !defined(__APPLE__) && !defined(DT295_CAPTURE_TESTING)
@@ -280,6 +319,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     dt295_stream_stats final_usb = {0};
     uint64_t packets = 0, renewals = 0, record_start = 0, elapsed = 0, live_add_count = 0;
     size_t remainder = 0, drained = 0;
+    ts_align align = {0};
     dt295_assets *assets = NULL;
     dt295 *d = NULL;
     dt295_routes *tables = NULL;
@@ -487,6 +527,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 cur_channel = next_channel;
                 cur_slot = next_slot;
                 remainder = 0;
+                align = (ts_align){0};
                 recording = 0;
                 ts_check_init(check);
                 last_input = now_ms();
@@ -534,9 +575,15 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         if (!actual)
             continue;
         last_input = now_ms();
-        size_t total = remainder + actual, length = total / 188 * 188, emitted = 0;
-        for (size_t at = 0; at < length; at += 188) {
-            uint8_t *packet = data + at;
+        size_t total = remainder + actual, pos = 0, emitted = 0;
+        while (pos + 188 <= total) {
+            size_t at = ts_align_next(&align, data, total, pos);
+            if (at + 188 > total) {
+                pos = at;
+                break;
+            }
+            pos = at;
+            uint8_t *packet = data + pos;
             if (dt295_decode_packet(d, packet) < 0) {
                 rc = 8;
                 snprintf(error, sizeof(error), "invalid DT295 TS packet");
@@ -552,11 +599,12 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                     emitted += 188;
                 }
             }
+            pos += 188;
         }
         if (rc)
             break;
-        remainder = total - length;
-        memmove(data, data + length, remainder);
+        remainder = total - pos;
+        memmove(data, data + pos, remainder);
         dt295_routes_snapshot snapshot;
         dt295_routes_snapshot_get(tables, &snapshot);
         if (cfg->system != PIXY_TERRESTRIAL && snapshot.have_pat &&
@@ -711,11 +759,13 @@ done:
             snprintf(end, sizeof(end),
                      "{\"event\":\"end\",\"exit\":%d,\"state\":%u,\"packets\":%llu,\"elapsed_ms\":%"
                      "llu,\"trailing_bytes\":%zu,\"stop_drained_bytes\":%zu,\"tei\":%llu,\"cc\":%"
-                     "llu,\"crc\":%llu,\"native_abandoned\":%d}\n",
+                     "llu,\"crc\":%llu,\"native_abandoned\":%d,\"ts_desyncs\":%llu,"
+                     "\"ts_dropped_bytes\":%llu}\n",
                      rc, d && !native_abandoned ? dt295_state(d) : 65535,
                      (unsigned long long)packets, (unsigned long long)elapsed, remainder, drained,
                      (unsigned long long)check->tei, (unsigned long long)check->continuity,
-                     (unsigned long long)check->crc_errors, native_abandoned);
+                     (unsigned long long)check->crc_errors, native_abandoned,
+                     (unsigned long long)align.desyncs, (unsigned long long)align.dropped);
         uint64_t id;
         if (n > 0 && (size_t)n < sizeof(end))
             ts_output_submit(diag, end, (size_t)n, &id);
