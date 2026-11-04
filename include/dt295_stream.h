@@ -24,7 +24,10 @@ typedef struct {
     uint64_t timeouts, cancellations, late_callbacks, late_actual_bytes;
     uint64_t last_completion_ns, max_completion_gap_ns;
     uint64_t first_error_ns, last_error_status, last_error_actual;
+    uint64_t event_dispatch_calls, event_dispatch_returns, event_dispatch_errors;
+    uint64_t callback_calls;
     int first_error;
+    int last_event_dispatch_result, last_callback_status, last_callback_actual;
     int stopping, thread_done;
 } dt295_stream_stats;
 

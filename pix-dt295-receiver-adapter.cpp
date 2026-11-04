@@ -1021,6 +1021,10 @@ void ReceiverAdapter::pump() noexcept
                              "usb_submitted=%llu usb_completed=%llu usb_completed_bytes=%llu "
                              "usb_delivered=%llu usb_delivered_bytes=%llu "
                              "usb_timeouts=%llu usb_error=%d usb_pending_blocks=%llu "
+                             "event_dispatch_calls=%llu event_dispatch_returns=%llu "
+                             "event_dispatch_errors=%llu event_dispatch_last=%d "
+                             "callback_calls=%llu callback_last_status=%d "
+                             "callback_last_actual=%d "
                              "have_pat=%u have_cat=%u program_count=%u missing_pmts=%u "
                              "tables_ready=%u invalid_sections=%u continuity_errors=%u "
                              "unsupported_tables=%u\n",
@@ -1037,6 +1041,12 @@ void ReceiverAdapter::pump() noexcept
                              static_cast<unsigned long long>(usb.delivered_bytes),
                              static_cast<unsigned long long>(usb.timeouts), usb.first_error,
                              static_cast<unsigned long long>(usb.pending_blocks),
+                             static_cast<unsigned long long>(usb.event_dispatch_calls),
+                             static_cast<unsigned long long>(usb.event_dispatch_returns),
+                             static_cast<unsigned long long>(usb.event_dispatch_errors),
+                             usb.last_event_dispatch_result,
+                             static_cast<unsigned long long>(usb.callback_calls),
+                             usb.last_callback_status, usb.last_callback_actual,
                              static_cast<unsigned>(routes.have_pat),
                              static_cast<unsigned>(routes.have_cat),
                              static_cast<unsigned>(routes.program_count),
