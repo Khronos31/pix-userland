@@ -162,7 +162,6 @@ private:
     std::thread producer_;
     bool producer_started_ = false;
     bool initialization_attempted_ = false;
-    bool initialized_ = false;
     dt181_capture_host *feed_ = nullptr;
     dtv_l3_ts_deliver_fn deliver_ = nullptr;
     void *deliver_context_ = nullptr;

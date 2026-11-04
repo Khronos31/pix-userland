@@ -166,7 +166,6 @@ Result<void> L3Dt181Runtime::start() noexcept
         DTV_L3_PUBLIC_OK) {
         if (initialization_attempted_ &&
             dt181_session_shutdown(&session_) == 0) {
-            initialized_ = false;
             initialization_attempted_ = false;
         }
         (void)close_owner();
@@ -243,7 +242,6 @@ dtv_l3_result L3Dt181Runtime::initialize_product() noexcept
     initialization_attempted_ = true;
     if (dt181_session_initialize(&session_, asset_firmware_, bootstrap_, validation_) != 0)
         return DTV_L3_FAILED;
-    initialized_ = true;
     return DTV_L3_OK;
 }
 
@@ -258,7 +256,6 @@ Result<void> L3Dt181Runtime::shutdown() noexcept
     if (initialization_attempted_) {
         if (dt181_session_shutdown(&session_) != 0)
             return Result<void>::failure(Error::USB_IO);
-        initialized_ = false;
         initialization_attempted_ = false;
     }
     if (close_owner() != DTV_L3_PUBLIC_OK)
