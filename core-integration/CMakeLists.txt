@@ -499,8 +499,7 @@ if(PIX_BUILD_L3_ADAPTER)
         "${CMAKE_BINARY_DIR}/pix-l3-core-prototype")
 
     add_library(pix_l3_adapter STATIC
-        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_adapter.cpp"
-        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt295_io_backend.cpp")
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_adapter.cpp")
     target_compile_features(pix_l3_adapter PUBLIC cxx_std_17)
     target_include_directories(pix_l3_adapter PUBLIC
         "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/include")
@@ -508,6 +507,16 @@ if(PIX_BUILD_L3_ADAPTER)
         -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
     target_link_libraries(pix_l3_adapter PUBLIC
         l3_owner_model Threads::Threads)
+
+    add_library(pix_l3_dt295_io_backend STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt295_io_backend.cpp")
+    target_compile_features(pix_l3_dt295_io_backend PUBLIC cxx_std_17)
+    target_include_directories(pix_l3_dt295_io_backend PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/include")
+    target_compile_options(pix_l3_dt295_io_backend PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_dt295_io_backend PUBLIC
+        pix_l3_adapter PkgConfig::LIBUSB Threads::Threads)
 
     add_library(pix_l3_dt181_backend STATIC
         "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt181_backend.cpp")
@@ -541,7 +550,7 @@ if(PIX_BUILD_L3_ADAPTER)
     target_compile_options(pix_l3_dt295_io_backend_contract PRIVATE
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
     target_link_libraries(pix_l3_dt295_io_backend_contract PRIVATE
-        pix_l3_adapter Threads::Threads)
+        pix_l3_dt295_io_backend pix_dt295_c_backend Threads::Threads)
     add_test(NAME pix_l3_dt295_io_backend_contract
         COMMAND pix_l3_dt295_io_backend_contract)
 
@@ -554,4 +563,37 @@ if(PIX_BUILD_L3_ADAPTER)
         pix_l3_dt181_backend pix_dt181_c_backend Threads::Threads)
     add_test(NAME pix_l3_dt181_backend_contract
         COMMAND pix_l3_dt181_backend_contract)
+
+    if(NOT WIN32)
+    add_executable(pix_l3_dt181_real_cancel_contract
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_dt181_real_cancel_contract.cpp"
+        "${PIX_SOURCE_DIR}/tests/pix_libusb_bottom.c")
+    target_include_directories(pix_l3_dt181_real_cancel_contract PRIVATE
+        "${PIX_SOURCE_DIR}/tests")
+    target_compile_features(pix_l3_dt181_real_cancel_contract PRIVATE cxx_std_17)
+    target_compile_definitions(pix_l3_dt181_real_cancel_contract PRIVATE
+        _POSIX_C_SOURCE=200809L)
+    target_compile_options(pix_l3_dt181_real_cancel_contract PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_dt181_real_cancel_contract PRIVATE
+        pix_l3_dt181_backend pix_dt181_c_backend Threads::Threads)
+    add_test(NAME pix_l3_dt181_real_cancel_contract
+        COMMAND pix_l3_dt181_real_cancel_contract)
+
+    add_executable(pix_l3_dt295_real_cancel_contract
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_dt295_real_cancel_contract.cpp"
+        "${PIX_SOURCE_DIR}/src/dt295_stream.c")
+    target_include_directories(pix_l3_dt295_real_cancel_contract PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/include")
+    target_compile_definitions(pix_l3_dt295_real_cancel_contract PRIVATE
+        DT295_STREAM_TESTING)
+    target_compile_features(pix_l3_dt295_real_cancel_contract PRIVATE cxx_std_17)
+    target_compile_options(pix_l3_dt295_real_cancel_contract PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti
+        "$<$<COMPILE_LANGUAGE:C>:-Wall;-Wextra;-Werror>")
+    target_link_libraries(pix_l3_dt295_real_cancel_contract PRIVATE
+        pix_l3_dt295_io_backend PkgConfig::LIBUSB Threads::Threads)
+    add_test(NAME pix_l3_dt295_real_cancel_contract
+        COMMAND pix_l3_dt295_real_cancel_contract)
+    endif()
 endif()

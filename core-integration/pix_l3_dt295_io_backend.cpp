@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 struct pix_l3_dt295_io_backend {
@@ -13,9 +15,23 @@ struct pix_l3_dt295_io_backend {
     std::uint32_t model = 0U;
     std::uint64_t selector = 0U;
     dtv_l3_context *owner = nullptr;
+    dt295_stream *stream = nullptr;
+    std::mutex mutex;
+    std::thread worker;
+    bool active = false;
+    bool cancelled = false;
+    dtv_l3_provider_binding *active_binding = nullptr;
+    std::uint64_t active_id = 0U;
+    dtv_l3_transfer_complete_fn active_complete = nullptr;
+    void *active_context = nullptr;
 };
 
 namespace {
+
+dtv_l3_result async_cancel(void *context, dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id) noexcept;
+
+static void reader_main(pix_l3_dt295_io_backend *value) noexcept;
 
 dtv_l3_claim_result usb_claim(void *context, std::uint32_t claim_index) noexcept
 {
@@ -27,8 +43,25 @@ dtv_l3_claim_result usb_claim(void *context, std::uint32_t claim_index) noexcept
 dtv_l3_release_result usb_release_claim(void *context,
                                         std::uint32_t claim_index) noexcept
 {
-    (void)context;
     (void)claim_index;
+    pix_l3_dt295_io_backend *value =
+        static_cast<pix_l3_dt295_io_backend *>(context);
+    if (value == nullptr) {
+        return {DTV_L3_RELEASE_QUIESCENCE_UNKNOWN, DTV_L3_CLAIM_NONE,
+                DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_INVALID};
+    }
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (value->active) {
+            value->cancelled = true;
+        }
+    }
+    if (value->stream != nullptr) {
+        (void)dt295_stream_stop(value->stream, 200U);
+    }
+    if (value->worker.joinable()) {
+        value->worker.join();
+    }
     return {DTV_L3_RELEASE_QUIESCED, DTV_L3_CLAIM_NONE,
             DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_OK};
 }
@@ -123,6 +156,131 @@ dtv_l3_result usb_cancel(void *context, std::uint64_t transfer_id) noexcept
     (void)transfer_id;
     /* The existing dt295_io has no transfer cancellation seam. */
     return DTV_L3_UNSUPPORTED;
+}
+
+static void complete_active(pix_l3_dt295_io_backend *value,
+                            dtv_l3_result result,
+                            const std::uint8_t *data, std::size_t size) noexcept
+{
+    dtv_l3_provider_binding *binding = nullptr;
+    std::uint64_t id = 0U;
+    dtv_l3_transfer_complete_fn complete = nullptr;
+    void *callback_context = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (!value->active || value->active_complete == nullptr) {
+            return;
+        }
+        binding = value->active_binding;
+        id = value->active_id;
+        complete = value->active_complete;
+        callback_context = value->active_context;
+        value->active = false;
+        value->active_complete = nullptr;
+    }
+    dtv_l3_transfer_completion completion{};
+    completion.result = result;
+    if (data != nullptr && size != 0U) {
+        completion.data = data;
+        completion.size = size;
+        completion.actual_length = size;
+        completion.actual_length_known = 1U;
+    }
+    complete(binding, id, &completion, callback_context);
+}
+
+static void reader_main(pix_l3_dt295_io_backend *value) noexcept
+{
+    std::vector<std::uint8_t> buffer(DT295_STREAM_TRANSFER_BYTES);
+    for (;;) {
+        bool cancelled = false;
+        {
+            std::lock_guard<std::mutex> lock(value->mutex);
+            cancelled = value->cancelled;
+        }
+        if (cancelled) {
+            complete_active(value, DTV_L3_CANCELLED, nullptr, 0U);
+            return;
+        }
+        std::uint64_t sequence = 0U;
+        std::uint64_t completed_ns = 0U;
+        const int length = dt295_stream_read(
+            value->stream, buffer.data(), buffer.size(), &sequence,
+            &completed_ns, 50U);
+        if (length > 0) {
+            complete_active(value, DTV_L3_OK, buffer.data(),
+                            static_cast<std::size_t>(length));
+            return;
+        }
+        if (length < 0) {
+            bool was_cancelled = false;
+            {
+                std::lock_guard<std::mutex> lock(value->mutex);
+                was_cancelled = value->cancelled;
+            }
+            complete_active(
+                value,
+                (was_cancelled || length == DT295_STREAM_CLOSED ||
+                 length == DT295_STREAM_ABANDONED)
+                    ? DTV_L3_CANCELLED
+                    : DTV_L3_FAILED,
+                nullptr, 0U);
+            return;
+        }
+    }
+}
+
+dtv_l3_result async_submit(void *context,
+                           dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id,
+                           const dtv_l3_transfer_request *request,
+                           dtv_l3_transfer_complete_fn complete,
+                           void *callback_context) noexcept
+{
+    pix_l3_dt295_io_backend *value =
+        static_cast<pix_l3_dt295_io_backend *>(context);
+    if (value == nullptr || value->stream == nullptr || binding == nullptr ||
+        request == nullptr || complete == nullptr) {
+        return DTV_L3_UNSUPPORTED;
+    }
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (value->worker.joinable() && !value->active) {
+            value->worker.join();
+        }
+        if (value->active || value->worker.joinable()) {
+            return DTV_L3_BUSY;
+        }
+        value->active = true;
+        value->cancelled = false;
+        value->active_binding = binding;
+        value->active_id = transfer_id;
+        value->active_complete = complete;
+        value->active_context = callback_context;
+        value->worker = std::thread(reader_main, value);
+    }
+    return DTV_L3_ACCEPTED;
+}
+
+dtv_l3_result async_cancel(void *context, dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id) noexcept
+{
+    (void)binding;
+    (void)transfer_id;
+    pix_l3_dt295_io_backend *value =
+        static_cast<pix_l3_dt295_io_backend *>(context);
+    if (value == nullptr || value->stream == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (!value->active) {
+            return DTV_L3_ACCEPTED;
+        }
+        value->cancelled = true;
+    }
+    (void)dt295_stream_stop(value->stream, 200U);
+    return DTV_L3_ACCEPTED;
 }
 
 dtv_l3_result product_bind(void *context, dtv_l3_context *owner) noexcept
@@ -238,7 +396,27 @@ extern "C" pix_l3_dt295_io_backend *pix_l3_dt295_io_backend_create(
 extern "C" void pix_l3_dt295_io_backend_destroy(
     pix_l3_dt295_io_backend *backend)
 {
+    if (backend == nullptr) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(backend->mutex);
+        if (backend->active) {
+            backend->cancelled = true;
+        }
+    }
+    if (backend->worker.joinable()) {
+        backend->worker.join();
+    }
     delete backend;
+}
+
+extern "C" void pix_l3_dt295_io_backend_set_stream(
+    pix_l3_dt295_io_backend *backend, dt295_stream *stream)
+{
+    if (backend != nullptr) {
+        backend->stream = stream;
+    }
 }
 
 extern "C" pix_l3_usb_backend_ops pix_l3_dt295_io_backend_usb_ops(
@@ -247,12 +425,18 @@ extern "C" pix_l3_usb_backend_ops pix_l3_dt295_io_backend_usb_ops(
     pix_l3_usb_backend_ops ops{};
     ops.context = backend;
     ops.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
-    ops.cancel_supported = 0U;
     ops.call_flags = 0U;
     ops.claim = usb_claim;
     ops.release_claim = usb_release_claim;
-    ops.transfer = usb_transfer;
-    ops.cancel = usb_cancel;
+    if (backend != nullptr && backend->stream != nullptr) {
+        ops.cancel_supported = 1U;
+        ops.submit = async_submit;
+        ops.cancel_async = async_cancel;
+    } else {
+        ops.cancel_supported = 0U;
+        ops.transfer = usb_transfer;
+        ops.cancel = usb_cancel;
+    }
     return ops;
 }
 

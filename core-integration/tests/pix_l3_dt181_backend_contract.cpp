@@ -24,9 +24,9 @@ int main()
     }
     const pix_l3_usb_backend_ops usb = pix_l3_dt181_backend_usb_ops(seam);
     if (usb.cancel_scope != DTV_L3_CANCEL_SCOPE_PIPE ||
-        usb.cancel_supported != 0U ||
+        usb.cancel_supported != 1U ||
         usb.transfer == nullptr || usb.cancel == nullptr ||
-        usb.submit != nullptr || usb.cancel_async != nullptr) {
+        usb.submit == nullptr || usb.cancel_async == nullptr) {
         return 2;
     }
     const pix_l3_product_ops product = pix_l3_dt181_backend_product_ops(seam);

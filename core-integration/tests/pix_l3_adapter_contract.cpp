@@ -531,7 +531,9 @@ int common_capabilities()
         DTV_L3_UNSUPPORTED) {
         return 3;
     }
-    if (dtv_l3_lnb_set(session.owner, 0U, 1U) != DTV_L3_UNSUPPORTED) {
+    dtv_l3_lnb_state lnb_state{};
+    if (dtv_l3_lnb_status(session.owner, 0U, &lnb_state) !=
+        DTV_L3_UNSUPPORTED) {
         return 4;
     }
     if (!session.finish()) {

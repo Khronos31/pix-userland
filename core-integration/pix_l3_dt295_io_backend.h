@@ -8,6 +8,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "dt295_stream.h"
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Optional DT295 seam. The product already owns the USB device session; this
@@ -25,6 +33,9 @@ typedef struct pix_l3_dt295_io_backend pix_l3_dt295_io_backend;
 pix_l3_dt295_io_backend *pix_l3_dt295_io_backend_create(
     const dt295_io *io, pix_l3_dt295_tune_fn tune, void *tune_context);
 void pix_l3_dt295_io_backend_destroy(pix_l3_dt295_io_backend *backend);
+/* Optional existing DT295 stream handle used for the pipe-wide cancel path. */
+void pix_l3_dt295_io_backend_set_stream(pix_l3_dt295_io_backend *backend,
+                                        dt295_stream *stream);
 pix_l3_usb_backend_ops pix_l3_dt295_io_backend_usb_ops(
     pix_l3_dt295_io_backend *backend);
 pix_l3_product_ops pix_l3_dt295_io_backend_product_ops(

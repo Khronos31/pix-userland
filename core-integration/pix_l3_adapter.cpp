@@ -63,7 +63,8 @@ const dtv_l3_receiver_capability kReceivers[] = {
     {0U, DTV_L3_SYSTEM_ISDB_T | DTV_L3_SYSTEM_ISDB_S,
      DTV_L3_PID_FILTER_SOFTWARE, DTV_L3_SUPPORT_SUPPORTED}};
 const dtv_l3_reader_capability kReaders[] = {
-    {0U, DTV_L3_SUPPORT_UNSUPPORTED, DTV_L3_SUPPORT_SUPPORTED}};
+    {0U, DTV_L3_SUPPORT_UNSUPPORTED, DTV_L3_SUPPORT_SUPPORTED,
+     DTV_L3_SUPPORT_SUPPORTED, 0U, 0U, 0U, DTV_L3_SUPPORT_UNKNOWN}};
 
 dtv_l3_result read_firmware_file(const char *path,
                                  std::vector<std::uint8_t> &out) noexcept

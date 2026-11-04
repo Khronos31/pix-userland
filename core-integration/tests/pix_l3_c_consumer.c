@@ -158,7 +158,10 @@ int main(void)
         fprintf(stderr, "PIX external APDU must stay unsupported\n");
         return 1;
     }
-    if (dtv_l3_lnb_set(opened.owner, 0U, 1U) != DTV_L3_UNSUPPORTED) {
+    dtv_l3_lnb_state lnb_state;
+    memset(&lnb_state, 0, sizeof(lnb_state));
+    if (dtv_l3_lnb_status(opened.owner, 0U, &lnb_state) !=
+        DTV_L3_UNSUPPORTED) {
         fprintf(stderr, "PIX LNB must stay unsupported\n");
         return 1;
     }

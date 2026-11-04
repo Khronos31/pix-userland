@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 struct pix_l3_dt181_backend {
@@ -17,9 +18,20 @@ struct pix_l3_dt181_backend {
     std::uint32_t model = 0U;
     std::uint64_t selector = 0U;
     dtv_l3_context *owner = nullptr;
+    std::mutex mutex;
+    dtv_l3_provider_binding *active_binding = nullptr;
+    std::uint64_t active_id = 0U;
+    dtv_l3_transfer_complete_fn active_complete = nullptr;
+    void *active_context = nullptr;
+    bool active_completed = false;
+    bool active_cancelled = false;
+    bool stream_started = false;
 };
 
 namespace {
+
+dtv_l3_result async_cancel(void *context, dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id) noexcept;
 
 dtv_l3_claim_result usb_claim(void *context, std::uint32_t claim_index) noexcept
 {
@@ -37,6 +49,9 @@ dtv_l3_release_result usb_release_claim(void *context,
     if (value == nullptr) {
         return {DTV_L3_RELEASE_QUIESCENCE_UNKNOWN, DTV_L3_CLAIM_NONE,
                 DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_INVALID};
+    }
+    if (value->active_binding != nullptr && !value->active_completed) {
+        (void)async_cancel(value, nullptr, 0U);
     }
     if (value->owns_backend != 0 && value->released == 0) {
         /* usb_stream_stop drains callbacks/logger before usb_close. */
@@ -125,6 +140,132 @@ dtv_l3_result usb_cancel(void *context, std::uint64_t transfer_id) noexcept
     (void)transfer_id;
     /* usb_backend has no per-transfer cancel seam. */
     return DTV_L3_UNSUPPORTED;
+}
+
+int stream_sink(void *user, const std::uint8_t *data, std::size_t size) noexcept
+{
+    pix_l3_dt181_backend *value =
+        static_cast<pix_l3_dt181_backend *>(user);
+    if (value == nullptr) {
+        return 0;
+    }
+    dtv_l3_provider_binding *binding = nullptr;
+    std::uint64_t id = 0U;
+    dtv_l3_transfer_complete_fn complete = nullptr;
+    void *callback_context = nullptr;
+    bool cancelled = false;
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (value->active_binding == nullptr || value->active_completed) {
+            return 0;
+        }
+        value->active_completed = true;
+        binding = value->active_binding;
+        id = value->active_id;
+        complete = value->active_complete;
+        callback_context = value->active_context;
+        cancelled = value->active_cancelled;
+    }
+    if (complete == nullptr) {
+        return 0;
+    }
+    dtv_l3_transfer_completion completion{};
+    completion.result = cancelled ? DTV_L3_CANCELLED : DTV_L3_OK;
+    if (!cancelled) {
+        completion.data = data;
+        completion.size = size;
+        completion.actual_length = size;
+        completion.actual_length_known = 1U;
+    }
+    complete(binding, id, &completion, callback_context);
+    return 0;
+}
+
+dtv_l3_result async_submit(void *context,
+                           dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id,
+                           const dtv_l3_transfer_request *request,
+                           dtv_l3_transfer_complete_fn complete,
+                           void *callback_context) noexcept
+{
+    pix_l3_dt181_backend *value =
+        static_cast<pix_l3_dt181_backend *>(context);
+    if (value == nullptr || value->backend == nullptr || binding == nullptr ||
+        request == nullptr || complete == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    bool need_start = false;
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (value->active_binding != nullptr && !value->active_completed) {
+            return DTV_L3_BUSY;
+        }
+        value->active_binding = binding;
+        value->active_id = transfer_id;
+        value->active_complete = complete;
+        value->active_context = callback_context;
+        value->active_completed = false;
+        value->active_cancelled = false;
+        need_start = !value->stream_started;
+        value->stream_started = true;
+    }
+    if (need_start) {
+        const int started = usb_stream_start(value->backend, stream_sink, value);
+        if (started != 0) {
+            std::lock_guard<std::mutex> lock(value->mutex);
+            value->active_binding = nullptr;
+            value->active_complete = nullptr;
+            value->active_context = nullptr;
+            value->active_completed = true;
+            value->stream_started = false;
+            return DTV_L3_FAILED;
+        }
+    }
+    return DTV_L3_ACCEPTED;
+}
+
+dtv_l3_result async_cancel(void *context,
+                           dtv_l3_provider_binding *binding,
+                           std::uint64_t transfer_id) noexcept
+{
+    (void)binding;
+    (void)transfer_id;
+    pix_l3_dt181_backend *value =
+        static_cast<pix_l3_dt181_backend *>(context);
+    if (value == nullptr || value->backend == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    dtv_l3_provider_binding *active_binding = nullptr;
+    std::uint64_t active_id = 0U;
+    dtv_l3_transfer_complete_fn complete = nullptr;
+    void *callback_context = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        if (value->active_binding == nullptr || value->active_completed) {
+            return DTV_L3_ACCEPTED;
+        }
+        value->active_cancelled = true;
+        active_binding = value->active_binding;
+        active_id = value->active_id;
+    }
+    /* Existing backend cancel is pipe-wide: stop drains all stream transfers. */
+    (void)usb_stream_stop(value->backend);
+    {
+        std::lock_guard<std::mutex> lock(value->mutex);
+        value->stream_started = false;
+        if (value->active_binding == nullptr || value->active_completed) {
+            return DTV_L3_ACCEPTED;
+        }
+        value->active_completed = true;
+        complete = value->active_complete;
+        callback_context = value->active_context;
+    }
+    if (complete != nullptr) {
+        dtv_l3_transfer_completion completion{};
+        completion.result = DTV_L3_CANCELLED;
+        complete(active_binding, active_id, &completion, callback_context);
+    }
+    return DTV_L3_ACCEPTED;
 }
 
 dtv_l3_result product_bind(void *context, dtv_l3_context *owner) noexcept
@@ -257,12 +398,14 @@ extern "C" pix_l3_usb_backend_ops pix_l3_dt181_backend_usb_ops(
     pix_l3_usb_backend_ops ops{};
     ops.context = value;
     ops.cancel_scope = DTV_L3_CANCEL_SCOPE_PIPE;
-    ops.cancel_supported = 0U;
+    ops.cancel_supported = 1U;
     ops.call_flags = 0U;
     ops.claim = usb_claim;
     ops.release_claim = usb_release_claim;
     ops.transfer = usb_transfer;
     ops.cancel = usb_cancel;
+    ops.submit = async_submit;
+    ops.cancel_async = async_cancel;
     return ops;
 }
 

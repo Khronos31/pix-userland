@@ -39,8 +39,10 @@ workflow are unchanged. The adapter consumes the Core prototype header at
 `${PIX_CORE_SOURCE_DIR}/prototype/l3_owner`). The current candidate is Core
 branch `wip-l3-product-integration-20261104`, API
 `253053da51184af03abebb15e7c129c465d90dee` plus G1
-`c5a54eec5c335b09b550db1dcb44a0bdf539236d` and initialization transfer
-`01c995170f9459da44b0fda176eb79e2a12eecbd`, build/CI
+`c5a54eec5c335b09b550db1dcb44a0bdf539236d`, initialization transfer
+`01c995170f9459da44b0fda176eb79e2a12eecbd`, queue
+`bdc5a03c3087b0906a198cf793fae77195ea19c3` and G8
+`2681542fe7abd51520121df8afff9fe1546cd76f`, build/CI
 `347f1ff54d1e6381a7690f404a9c0e5e708b7752`.
 
 ```sh
@@ -71,13 +73,23 @@ the backend implementations. Their underlying stop is pipe-wide, so both report
 so `cancel_supported` is 0 and a cancel request is reported as `UNSUPPORTED`
 rather than treated as success.
 
-The USB seam also accepts an optional asynchronous `submit`/`cancel_async` pair
-for a future G1 owner-backed transport. When present, submit must copy OUT data
-and retained state before returning `ACCEPTED` and cancel must return without
-waiting for a completion callback. PIX keeps `call_flags` at zero by default:
-an async shape alone is not a promise that a Linux provider cannot wait on a
-lock inside a callback frame. The common owner keeps the claim, buffers and
-terminal completion when a cancel races a normal completion. The fixtures use a
+The USB seam also accepts an optional asynchronous `submit`/`cancel_async` pair.
+When present, submit must copy OUT data and retained state before returning
+`ACCEPTED` and cancel must return without waiting for a completion callback.
+PIX keeps `call_flags` at zero by default: an async shape alone is not a
+promise that a Linux provider cannot wait on a lock inside a callback frame.
+The common owner keeps the claim, buffers and terminal completion when a cancel
+races a normal completion.
+
+The real PIX backends now use their existing pipe-wide cancel:
+- DT181 starts the existing `usb_stream_start` path and `cancel_async` calls
+  `usb_stream_stop`, which cancels the existing libusb stream transfers and
+  drains their terminal callbacks.
+- DT295 uses an existing `dt295_stream` handle: a reader thread waits on
+  `dt295_stream_read`, and cancel calls `dt295_stream_stop` (PIPE).
+Both report `cancel_scope=PIPE`, not transfer-level cancel. A per-transfer
+cancel still needs a product-side transfer handle that the current backends do
+not expose. The fixtures use a
 fake asynchronous pipe provider to verify CANCELLED/terminal retention, a raced
 normal completion, ownership retention until both completions, and an
 `UNSUPPORTED` cancel that does not become success. Firmware is required for both
@@ -86,7 +98,10 @@ models.
 The fixtures cover factory/capability differences, all three firmware sources,
 G1 bind/initialize, a real owner transfer from initialize
 (`transfer_start` -> provider submit -> completion -> `op_wait`/`op_release` ->
-READY), failed-initialize open failure, and the capability catalog. They also
+READY), failed-initialize open failure, and the capability catalog. The real
+DT181/DT295 cancel fixtures drive the existing stream handles through the owner
+provider, assert PIPE scope, terminal CANCELLED completion, release BUSY while
+an op is outstanding, and release/close after completion. They also
 cover one stream IN path through the same owner/provider route: `stream_attach`
 starts a bulk IN via `dtv_l3_transfer_start`, delivers the completed TS to the
 Core stream, and the test reads it back before stop/release; a second case lets
