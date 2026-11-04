@@ -41,8 +41,9 @@ branch `wip-l3-product-integration-20261104`, API
 `253053da51184af03abebb15e7c129c465d90dee` plus G1
 `c5a54eec5c335b09b550db1dcb44a0bdf539236d`, initialization transfer
 `01c995170f9459da44b0fda176eb79e2a12eecbd`, queue
-`bdc5a03c3087b0906a198cf793fae77195ea19c3` and G8
-`2681542fe7abd51520121df8afff9fe1546cd76f`, build/CI
+`bdc5a03c3087b0906a198cf793fae77195ea19c3`, G8
+`2681542fe7abd51520121df8afff9fe1546cd76f`, and close-quiescence
+`eaf9400ee98f15ada01da3f6dd174abbad23dfc7`, build/CI
 `347f1ff54d1e6381a7690f404a9c0e5e708b7752`.
 
 ```sh
