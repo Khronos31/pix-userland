@@ -897,6 +897,7 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
                                     diagnostic);
     if (!assets) return dtv::userland::Result<std::unique_ptr<Family>>::failure(assets.error());
     family->impl_->assets = std::move(assets.value());
+#ifndef PIX_DT181_L3_DAEMON
     const int opened = dt181_session_open(&family->impl_->session, &device.selector,
                                           device.fd, 0);
     if (opened != 0)
@@ -906,6 +907,7 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
             family->impl_->assets->bootstrap.data(), family->impl_->assets->validation.data()) != 0)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::USB_IO);
     family->impl_->initialized = true;
+#endif
     family->impl_->adapter.reset(new (std::nothrow) dt181::ReceiverAdapter(
         family->impl_->session, family->impl_->consumer, family->impl_->clock, 0U,
         kTsQueuePackets));
@@ -920,8 +922,10 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
 #ifdef PIX_DT181_L3_DAEMON
     family->impl_->l3.reset(new (std::nothrow) L3Dt181Runtime(
-        family->impl_->session, *family->impl_->tuner,
-        bundle_view.bytes, bundle_view.size));
+        family->impl_->session, *family->impl_->tuner, device.path,
+        bundle_view.bytes, bundle_view.size, family->impl_->assets->firmware,
+        family->impl_->assets->bootstrap.data(),
+        family->impl_->assets->validation.data()));
     if (!family->impl_->l3)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
     if (!family->impl_->l3->start())
@@ -946,11 +950,13 @@ Family::~Family() noexcept
         impl_->shim.reset();
         impl_->tuner.reset();
         impl_->adapter.reset();
+#ifndef PIX_DT181_L3_DAEMON
         if (impl_->initialized) {
             (void)dt181_session_shutdown(&impl_->session);
             impl_->initialized = false;
         }
         if (impl_->session.opened) dt181_session_close(&impl_->session);
+#endif
         impl_->assets.reset();
     }
 }
@@ -967,6 +973,7 @@ Result<void> Family::shutdown() noexcept
         if (!stopped) return stopped;
         /* Keep the runtime object alive: TunerService's destructor still calls
          * back into this backend during EnclosureContext cleanup. */
+        return Result<void>::success();
     }
 #endif
     if (impl_->adapter) {

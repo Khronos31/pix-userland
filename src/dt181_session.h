@@ -9,6 +9,7 @@ typedef struct {
 } dt181_session;
 
 int dt181_session_open(dt181_session *, const usb_selector *, int fd, int detach);
+int dt181_session_bind(dt181_session *, usb_backend *);
 void dt181_session_diagnostics(dt181_session *, int enabled);
 int dt181_session_initialize(dt181_session *, const uint8_t *, const uint8_t[16],
                              const uint8_t[64]);

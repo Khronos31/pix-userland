@@ -8,6 +8,14 @@ int dt181_session_open(dt181_session *s, const usb_selector *selector, int fd, i
     return rc;
 }
 
+int dt181_session_bind(dt181_session *s, usb_backend *usb) {
+    if (!s || !usb) return -1;
+    s->usb = usb;
+    s->opened = 1;
+    pixy_init(&s->device, usb_io(usb));
+    return 0;
+}
+
 void dt181_session_diagnostics(dt181_session *s, int enabled) {
     usb_diagnostics(s->usb, enabled);
 }

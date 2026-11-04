@@ -3,7 +3,8 @@
 #define PIX_L3_DT181_RUNTIME_H
 
 #include "pix_l3_adapter.h"
-#include "pix_l3_dt181_backend.h"
+#include "native_product.h"
+#include <dtv/l3.h>
 
 extern "C" {
 #include "dt181_capture_host.h"
@@ -16,6 +17,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <thread>
 
 namespace pix::runtime {
@@ -31,8 +33,11 @@ class L3Dt181Runtime final : public px4::userland::TunerServiceBackend,
 public:
     L3Dt181Runtime(dt181_session &session,
                    px4::userland::TunerServiceBackend &frontend,
+                   std::string location,
+                   const std::uint8_t *bundle, std::size_t bundle_size,
                    const std::uint8_t *firmware,
-                   std::size_t firmware_size) noexcept;
+                   const std::uint8_t *bootstrap,
+                   const std::uint8_t *validation) noexcept;
     ~L3Dt181Runtime() noexcept override;
 
     L3Dt181Runtime(const L3Dt181Runtime &) = delete;
@@ -118,6 +123,8 @@ public:
     dtv_l3_result program_tune(std::uint32_t receiver,
                                std::uint64_t requested_hz,
                                std::uint64_t *programmed_hz) noexcept;
+    void bind_owner(dtv_l3_context *owner) noexcept;
+    dtv_l3_result initialize_product() noexcept;
 
 private:
     void producer_loop(dtv_l3_ts_deliver_fn deliver,
@@ -126,14 +133,26 @@ private:
     px4::userland::Result<void> tune_lease(
         std::uint64_t hz, std::uint64_t *programmed_hz = nullptr) noexcept;
     void reset_stream() noexcept;
-    void close_owner() noexcept;
+    dtv_l3_public_result close_owner() noexcept;
+    static dtv_l3_result native_create(
+        void *context, libusb_device_handle *handle,
+        const dtv_l3_firmware *firmware,
+        const dtv_l3_product_adapter **adapter_out,
+        dtv_l3_native_claim *claims, std::uint32_t claim_capacity,
+        std::uint32_t *claim_count_out, void **adapter_owner_out);
+    static void native_release(void *adapter_owner) noexcept;
 
     dt181_session &session_;
     px4::userland::TunerServiceBackend &frontend_;
     const std::uint8_t *firmware_ = nullptr;
+    const std::uint8_t *asset_firmware_ = nullptr;
     std::size_t firmware_size_ = 0U;
+    const std::uint8_t *bootstrap_ = nullptr;
+    const std::uint8_t *validation_ = nullptr;
+    std::string location_;
+    dtv_l3_product native_product_{};
+    dtv_l3_public_context *public_context_ = nullptr;
 
-    pix_l3_dt181_backend *adapter_ = nullptr;
     pix_l3_factory *factory_ = nullptr;
     dtv_l3_context *owner_ = nullptr;
     dtv_l3_lease *lease_ = nullptr;
@@ -142,6 +161,8 @@ private:
     std::atomic<bool> producer_stop_{false};
     std::thread producer_;
     bool producer_started_ = false;
+    bool initialization_attempted_ = false;
+    bool initialized_ = false;
     dt181_capture_host *feed_ = nullptr;
     dtv_l3_ts_deliver_fn deliver_ = nullptr;
     void *deliver_context_ = nullptr;

@@ -2,11 +2,14 @@
 #include "pix_l3_dt181_runtime.h"
 
 #include "dt181_capture_host.h"
+#include "usb_backend.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <new>
 #include <thread>
+#include <utility>
 
 namespace pix::runtime {
 namespace {
@@ -22,20 +25,53 @@ using px4::userland::TunerStreamReadResult;
 using px4::userland::TunerStreamTerminal;
 using px4::userland::ipc::System;
 
+struct NativeAdapterOwner final {
+    L3Dt181Runtime *runtime;
+    dtv_l3_adapter_release_fn release;
+    void *adapter_owner;
+};
+
 dtv_l3_result product_configure(void *, std::uint32_t, std::uint64_t,
                                 const std::uint8_t *, std::size_t) noexcept
 {
     return DTV_L3_OK;
 }
 
-dtv_l3_result product_bind(void *, dtv_l3_context *) noexcept
+dtv_l3_claim_result product_claim(void *, std::uint32_t) noexcept
 {
+    return {DTV_L3_OK, DTV_L3_CLAIM_RETAINED};
+}
+
+dtv_l3_release_result product_release_claim(void *, std::uint32_t) noexcept
+{
+    return {DTV_L3_RELEASE_QUIESCED, DTV_L3_CLAIM_NONE,
+            DTV_L3_RESTORE_NOT_ATTEMPTED, DTV_L3_OK};
+}
+
+dtv_l3_result product_transfer(void *, std::uint64_t,
+                               const pix_l3_transfer *, std::uint8_t *,
+                               std::size_t, pix_l3_transfer_result *) noexcept
+{
+    return DTV_L3_UNSUPPORTED;
+}
+
+dtv_l3_result product_cancel(void *, std::uint64_t) noexcept
+{
+    return DTV_L3_UNSUPPORTED;
+}
+
+dtv_l3_result product_bind(void *context, dtv_l3_context *owner) noexcept
+{
+    L3Dt181Runtime *runtime = static_cast<L3Dt181Runtime *>(context);
+    if (runtime == nullptr || owner == nullptr) return DTV_L3_INVALID;
+    runtime->bind_owner(owner);
     return DTV_L3_OK;
 }
 
-dtv_l3_result product_initialize(void *, dtv_l3_context *) noexcept
+dtv_l3_result product_initialize(void *context, dtv_l3_context *) noexcept
 {
-    return DTV_L3_OK;
+    L3Dt181Runtime *runtime = static_cast<L3Dt181Runtime *>(context);
+    return runtime != nullptr ? runtime->initialize_product() : DTV_L3_INVALID;
 }
 
 dtv_l3_result product_tune(void *context, dtv_l3_provider_binding *,
@@ -69,11 +105,21 @@ dtv_l3_result product_stream_stop(void *context, dtv_l3_context *,
 
 L3Dt181Runtime::L3Dt181Runtime(dt181_session &session,
                                px4::userland::TunerServiceBackend &frontend,
+                               std::string location,
+                               const std::uint8_t *bundle,
+                               std::size_t bundle_size,
                                const std::uint8_t *firmware,
-                               std::size_t firmware_size) noexcept
-    : session_(session), frontend_(frontend), firmware_(firmware),
-      firmware_size_(firmware_size)
+                               const std::uint8_t *bootstrap,
+                               const std::uint8_t *validation) noexcept
+    : session_(session), frontend_(frontend), firmware_(bundle),
+      asset_firmware_(firmware), firmware_size_(bundle_size), bootstrap_(bootstrap),
+      validation_(validation), location_(std::move(location))
 {
+    native_product_.vendor_id = 0x06b8U;
+    native_product_.product_id = 0x102bU;
+    native_product_.product_context = this;
+    native_product_.create = native_create;
+    native_product_.release = native_release;
 }
 
 L3Dt181Runtime::~L3Dt181Runtime() noexcept
@@ -86,16 +132,18 @@ Result<void> L3Dt181Runtime::start() noexcept
     if (owner_ != nullptr) {
         return Result<void>::success();
     }
-    if (session_.usb == nullptr || firmware_ == nullptr || firmware_size_ == 0U) {
+    if (firmware_ == nullptr || firmware_size_ == 0U || location_.empty() ||
+        asset_firmware_ == nullptr || bootstrap_ == nullptr || validation_ == nullptr) {
         return Result<void>::failure(Error::INVALID_ARGUMENT);
-    }
-    adapter_ = pix_l3_dt181_backend_create(session_.usb, 0, nullptr, nullptr);
-    if (adapter_ == nullptr) {
-        return Result<void>::failure(Error::INTERNAL);
     }
     pix_l3_factory_config config{};
     config.model = PIX_L3_MODEL_DT181;
-    config.usb = pix_l3_dt181_backend_usb_ops(adapter_);
+    config.usb.cancel_scope = DTV_L3_CANCEL_SCOPE_TRANSFER;
+    config.usb.cancel_supported = 1U;
+    config.usb.claim = product_claim;
+    config.usb.release_claim = product_release_claim;
+    config.usb.transfer = product_transfer;
+    config.usb.cancel = product_cancel;
     config.product.context = this;
     config.product.configure = product_configure;
     config.product.bind = product_bind;
@@ -107,42 +155,114 @@ Result<void> L3Dt181Runtime::start() noexcept
         factory_ == nullptr) {
         return Result<void>::failure(Error::INTERNAL);
     }
-    dtv_l3_usb_provider usb{};
-    dtv_l3_adapter_factory adapter_factory{};
-    if (pix_l3_factory_usb_provider(factory_, &usb) != DTV_L3_OK ||
-        pix_l3_factory_adapter_factory(factory_, &adapter_factory) !=
-            DTV_L3_OK) {
-        return Result<void>::failure(Error::INTERNAL);
-    }
-    const dtv_l3_firmware firmware_view = {
-        DTV_L3_FIRMWARE_BYTES, nullptr, nullptr, firmware_, firmware_size_,
-        nullptr, nullptr};
-    dtv_l3_open_config open_config{};
-    open_config.model = PIX_L3_MODEL_DT181;
-    open_config.selector = 0U;
-    open_config.firmware = &firmware_view;
-    dtv_l3_open_result opened =
-        dtv_l3_open_factory(&usb, &adapter_factory, &open_config, 1U);
-    if (opened.result != DTV_L3_ACCEPTED || opened.owner == nullptr ||
-        opened.op == nullptr) {
+    const dtv_l3_public_open_args args = {
+        sizeof(dtv_l3_public_open_args), &native_product_, location_.c_str(),
+        {firmware_, firmware_size_, nullptr, 0U}, {}, 0U};
+    if (dtv_l3_public_open(&args, &public_context_) !=
+            DTV_L3_PUBLIC_ACCEPTED || public_context_ == nullptr) {
         return Result<void>::failure(Error::USB_IO);
     }
-    dtv_l3_op_result op{};
-    if (dtv_l3_op_wait(opened.op, 5000U) != DTV_L3_OK ||
-        dtv_l3_op_poll(opened.op, &op) != DTV_L3_OK ||
-        op.state != DTV_L3_OP_DONE || op.result != DTV_L3_OK) {
-        (void)dtv_l3_op_release(opened.op);
+    if (dtv_l3_public_wait_ready(public_context_, 10000U) !=
+        DTV_L3_PUBLIC_OK) {
+        if (initialization_attempted_ &&
+            dt181_session_shutdown(&session_) == 0) {
+            initialized_ = false;
+            initialization_attempted_ = false;
+        }
+        (void)close_owner();
         return Result<void>::failure(Error::USB_IO);
     }
-    (void)dtv_l3_op_release(opened.op);
-    owner_ = opened.owner;
     return Result<void>::success();
+}
+
+dtv_l3_result L3Dt181Runtime::native_create(
+    void *context, libusb_device_handle *handle,
+    const dtv_l3_firmware *firmware,
+    const dtv_l3_product_adapter **adapter_out,
+    dtv_l3_native_claim *claims, std::uint32_t claim_capacity,
+    std::uint32_t *claim_count_out, void **adapter_owner_out)
+{
+    L3Dt181Runtime *runtime = static_cast<L3Dt181Runtime *>(context);
+    if (runtime == nullptr || handle == nullptr || firmware == nullptr ||
+        adapter_out == nullptr || claims == nullptr || claim_capacity < 1U ||
+        claim_count_out == nullptr || adapter_owner_out == nullptr ||
+        runtime->factory_ == nullptr) {
+        return DTV_L3_INVALID;
+    }
+    *adapter_out = nullptr;
+    *claim_count_out = 0U;
+    *adapter_owner_out = nullptr;
+    usb_backend *backend = nullptr;
+    if (usb_wrap_libusb_handle(&backend, handle) != 0 || backend == nullptr ||
+        dt181_session_bind(&runtime->session_, backend) != 0) {
+        usb_close(backend);
+        return DTV_L3_FAILED;
+    }
+    dtv_l3_adapter_factory factory{};
+    if (pix_l3_factory_adapter_factory(runtime->factory_, &factory) != DTV_L3_OK) {
+        dt181_session_close(&runtime->session_);
+        return DTV_L3_FAILED;
+    }
+    const dtv_l3_open_config config = {
+        PIX_L3_MODEL_DT181, 0U, firmware};
+    void *adapter_owner = nullptr;
+    const dtv_l3_result created = factory.create(
+        factory.factory_context, &config, adapter_out, &adapter_owner);
+    if (created != DTV_L3_OK || *adapter_out == nullptr ||
+        adapter_owner == nullptr) {
+        if (adapter_owner != nullptr && factory.release != nullptr)
+            factory.release(adapter_owner);
+        dt181_session_close(&runtime->session_);
+        return created == DTV_L3_OK ? DTV_L3_FAILED : created;
+    }
+    NativeAdapterOwner *owner = new (std::nothrow) NativeAdapterOwner{
+        runtime, factory.release, adapter_owner};
+    if (owner == nullptr) {
+        if (factory.release != nullptr) factory.release(adapter_owner);
+        dt181_session_close(&runtime->session_);
+        return DTV_L3_FAILED;
+    }
+    claims[0] = {0, -1};
+    *claim_count_out = 1U;
+    *adapter_owner_out = owner;
+    return DTV_L3_OK;
+}
+
+void L3Dt181Runtime::native_release(void *adapter_owner) noexcept
+{
+    NativeAdapterOwner *owner = static_cast<NativeAdapterOwner *>(adapter_owner);
+    if (owner == nullptr) return;
+    if (owner->release != nullptr) owner->release(owner->adapter_owner);
+    if (owner->runtime != nullptr && owner->runtime->session_.opened)
+        dt181_session_close(&owner->runtime->session_);
+    delete owner;
+}
+
+dtv_l3_result L3Dt181Runtime::initialize_product() noexcept
+{
+    initialization_attempted_ = true;
+    if (dt181_session_initialize(&session_, asset_firmware_, bootstrap_, validation_) != 0)
+        return DTV_L3_FAILED;
+    initialized_ = true;
+    return DTV_L3_OK;
+}
+
+void L3Dt181Runtime::bind_owner(dtv_l3_context *owner) noexcept
+{
+    owner_ = owner;
 }
 
 Result<void> L3Dt181Runtime::shutdown() noexcept
 {
     reset_stream();
-    close_owner();
+    if (initialization_attempted_) {
+        if (dt181_session_shutdown(&session_) != 0)
+            return Result<void>::failure(Error::USB_IO);
+        initialized_ = false;
+        initialization_attempted_ = false;
+    }
+    if (close_owner() != DTV_L3_PUBLIC_OK)
+        return Result<void>::failure(Error::USB_IO);
     return Result<void>::success();
 }
 
@@ -620,7 +740,7 @@ void L3Dt181Runtime::reset_stream() noexcept
     }
 }
 
-void L3Dt181Runtime::close_owner() noexcept
+dtv_l3_public_result L3Dt181Runtime::close_owner() noexcept
 {
     if (producer_started_ || feed_ != nullptr) {
         (void)stop_producer();
@@ -629,35 +749,17 @@ void L3Dt181Runtime::close_owner() noexcept
         producer_stop_.store(true);
         producer_.join();
     }
-    if (owner_ != nullptr) {
-        (void)dtv_l3_close(owner_, 1000U);
-        dtv_l3_close_status status{};
-        for (unsigned attempt = 0U; attempt < 1000U; ++attempt) {
-            if (dtv_l3_close_status_get(owner_, &status) != DTV_L3_OK ||
-                (status.cleanup_complete != 0U &&
-                 status.all_ops_recovered != 0U)) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        dtv_l3_result released = DTV_L3_BUSY;
-        for (unsigned attempt = 0U; attempt < 5000U; ++attempt) {
-            released = dtv_l3_context_release(owner_);
-            if (released != DTV_L3_BUSY) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        owner_ = nullptr;
-    }
+    dtv_l3_public_result closed = DTV_L3_PUBLIC_OK;
+    if (public_context_ != nullptr)
+        closed = dtv_l3_public_close(public_context_, 5000U);
+    if (closed != DTV_L3_PUBLIC_OK) return closed;
+    public_context_ = nullptr;
+    owner_ = nullptr;
     if (factory_ != nullptr) {
         pix_l3_factory_destroy(factory_);
         factory_ = nullptr;
     }
-    if (adapter_ != nullptr) {
-        pix_l3_dt181_backend_destroy(adapter_);
-        adapter_ = nullptr;
-    }
+    return DTV_L3_PUBLIC_OK;
 }
 
 }  // namespace pix::runtime

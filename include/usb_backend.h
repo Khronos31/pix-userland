@@ -16,6 +16,7 @@ int usb_list(int json);
 /* Returns 0, or a shared CLI exit class: 3 absent, 4 busy/kernel-bound,
  * 7 USB/access/disconnect, 70 internal. Failure sets *result to NULL. */
 int usb_open(usb_backend **, const usb_selector *, int fd, int detach);
+int usb_wrap_libusb_handle(usb_backend **, void *handle);
 /* First failure, preserved through cleanup: 0 healthy, 7 USB, 8 sink,
  * 70 internal/diagnostics. NULL is an internal failure (70). */
 int usb_failure_exit(const usb_backend *);

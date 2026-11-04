@@ -607,7 +607,8 @@ if(PIX_DT181_L3_DAEMON)
         "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt181_runtime.cpp")
     target_compile_definitions(pix_product_runtime PRIVATE PIX_DT181_L3_DAEMON)
     target_include_directories(pix_product_runtime PRIVATE
-        "${CMAKE_CURRENT_LIST_DIR}")
+        "${CMAKE_CURRENT_LIST_DIR}"
+        "${PIX_L3_CORE_PROTOTYPE_DIR}/src")
     target_link_libraries(pix_product_runtime PUBLIC
         pix_l3_adapter pix_l3_dt181_backend)
 

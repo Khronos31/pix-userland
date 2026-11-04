@@ -23,6 +23,7 @@ struct usb_backend {
     struct libusb_transfer *transfers[TRANSFERS];
     uint8_t buffers[TRANSFERS][32768];
     int pending, stopping, error, failure_exit, claimed, detached;
+    int owns_context, owns_handle;
     int diagnostic, model;
     usb_log *log;
     uint64_t completions, short_reads, last_ms, max_gap, next_log;
@@ -282,6 +283,7 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
         free(b);
         return code;
     }
+    b->owns_context = 1;
     if (fd >= 0) {
 #ifndef _WIN32
         b->wrapped_fd = dup(fd);
@@ -297,6 +299,7 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
 #endif
         if (open_usb_error(b, libusb_wrap_sys_device(b->ctx, device_fd, &b->handle), "wrap USB fd"))
             goto error;
+        b->owns_handle = 1;
         r = model_state(libusb_get_device(b->handle));
         if (r < 0) {
             open_usb_error(b, r, "read USB descriptor");
@@ -363,6 +366,7 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
         if (matches == 1) {
             b->model = expected_model;
             open_usb_error(b, libusb_open(selected, &b->handle), "open tuner");
+            if (b->handle) b->owns_handle = 1;
         }
         if (matches > 1) {
             fprintf(stderr, expected_model == USB_MODEL_DT181
@@ -428,6 +432,19 @@ error:;
 }
 int usb_open(usb_backend **out, const usb_selector *selector, int fd, int detach) {
     return usb_open_model(out, selector, fd, detach, USB_MODEL_DT181);
+}
+int usb_wrap_libusb_handle(usb_backend **out, void *handle) {
+    if (!out || !handle) return 70;
+    *out = NULL;
+    usb_backend *b = calloc(1, sizeof(*b));
+    if (!b) return 70;
+#ifndef _WIN32
+    b->wrapped_fd = -1;
+#endif
+    b->handle = handle;
+    b->model = USB_MODEL_DT181;
+    *out = b;
+    return 0;
 }
 int usb_model(const usb_backend *b) { return b ? b->model : 0; }
 void *usb_native_context(usb_backend *b) { return b ? b->ctx : NULL; }
@@ -619,13 +636,14 @@ void usb_close(usb_backend *b) {
             libusb_release_interface(b->handle, 0);
         if (b->detached)
             libusb_attach_kernel_driver(b->handle, 0);
-        libusb_close(b->handle);
+        if (b->owns_handle)
+            libusb_close(b->handle);
     }
 #ifndef _WIN32
     if (b->wrapped_fd >= 0)
         close(b->wrapped_fd);
 #endif
-    if (b->ctx)
+    if (b->ctx && b->owns_context)
         libusb_exit(b->ctx);
     free(b);
 }
