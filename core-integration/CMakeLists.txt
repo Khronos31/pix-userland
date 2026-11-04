@@ -479,3 +479,69 @@ target_link_options(pix_dt295_family_contract_proof PRIVATE
 add_test(NAME pix_dt295_family_contract_proof
     COMMAND pix_dt295_family_contract_proof)
 endif()
+
+# Optional PIX L3 adapter skeleton. It consumes an external Core prototype
+# header/source candidate (fixed ref 8bf496c9 at the time of writing) and does
+# not change the existing CLI, daemon or custom-FW targets.
+option(PIX_BUILD_L3_ADAPTER "Build the optional PIX L3 product adapter" OFF)
+set(PIX_L3_CORE_PROTOTYPE_DIR "" CACHE PATH
+    "Core prototype/l3_owner directory for the PIX L3 adapter")
+if(PIX_BUILD_L3_ADAPTER)
+    if(NOT PIX_L3_CORE_PROTOTYPE_DIR)
+        set(PIX_L3_CORE_PROTOTYPE_DIR
+            "${PIX_CORE_SOURCE_DIR}/prototype/l3_owner")
+    endif()
+    if(NOT EXISTS "${PIX_L3_CORE_PROTOTYPE_DIR}/include/dtv/l3_owner.h")
+        message(FATAL_ERROR
+            "PIX L3 adapter needs PIX_L3_CORE_PROTOTYPE_DIR with include/dtv/l3_owner.h")
+    endif()
+    add_subdirectory("${PIX_L3_CORE_PROTOTYPE_DIR}"
+        "${CMAKE_BINARY_DIR}/pix-l3-core-prototype")
+
+    add_library(pix_l3_adapter STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_adapter.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt295_io_backend.cpp")
+    target_compile_features(pix_l3_adapter PUBLIC cxx_std_17)
+    target_include_directories(pix_l3_adapter PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/include")
+    target_compile_options(pix_l3_adapter PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_adapter PUBLIC
+        l3_owner_model Threads::Threads)
+
+    add_library(pix_l3_dt181_backend STATIC
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt181_backend.cpp")
+    target_compile_features(pix_l3_dt181_backend PUBLIC cxx_std_17)
+    target_include_directories(pix_l3_dt181_backend PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}")
+    target_compile_options(pix_l3_dt181_backend PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_dt181_backend PUBLIC
+        pix_l3_adapter pix_dt181_c_backend)
+
+    add_executable(pix_l3_c_consumer
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_c_consumer.c")
+    target_compile_options(pix_l3_c_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    set_target_properties(pix_l3_c_consumer PROPERTIES LINKER_LANGUAGE CXX)
+    target_link_libraries(pix_l3_c_consumer PRIVATE pix_l3_adapter)
+    add_test(NAME pix_l3_c_consumer COMMAND pix_l3_c_consumer)
+
+    add_executable(pix_l3_adapter_contract
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_adapter_contract.cpp")
+    target_compile_features(pix_l3_adapter_contract PRIVATE cxx_std_17)
+    target_compile_options(pix_l3_adapter_contract PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_adapter_contract PRIVATE
+        pix_l3_adapter Threads::Threads)
+    add_test(NAME pix_l3_adapter_contract COMMAND pix_l3_adapter_contract)
+
+    add_executable(pix_l3_dt295_io_backend_contract
+        "${CMAKE_CURRENT_LIST_DIR}/tests/pix_l3_dt295_io_backend_contract.cpp")
+    target_compile_features(pix_l3_dt295_io_backend_contract PRIVATE cxx_std_17)
+    target_compile_options(pix_l3_dt295_io_backend_contract PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    target_link_libraries(pix_l3_dt295_io_backend_contract PRIVATE
+        pix_l3_adapter Threads::Threads)
+    add_test(NAME pix_l3_dt295_io_backend_contract
+        COMMAND pix_l3_dt295_io_backend_contract)
+endif()
