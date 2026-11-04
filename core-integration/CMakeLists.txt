@@ -597,3 +597,52 @@ if(PIX_BUILD_L3_ADAPTER)
         COMMAND pix_l3_dt295_real_cancel_contract)
     endif()
 endif()
+
+option(PIX_DT181_L3_DAEMON "Build the standard pixd with the DT181 L3 runtime" OFF)
+if(PIX_DT181_L3_DAEMON)
+    if(NOT PIX_BUILD_L3_ADAPTER)
+        message(FATAL_ERROR "PIX_DT181_L3_DAEMON requires PIX_BUILD_L3_ADAPTER=ON")
+    endif()
+    target_sources(pix_product_runtime PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/pix_l3_dt181_runtime.cpp")
+    target_compile_definitions(pix_product_runtime PRIVATE PIX_DT181_L3_DAEMON)
+    target_include_directories(pix_product_runtime PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}")
+    target_link_libraries(pix_product_runtime PUBLIC
+        pix_l3_adapter pix_l3_dt181_backend)
+
+    if(NOT WIN32)
+    add_executable(pixd_l3_fixture pixd.cpp
+        tests/pix-public-runtime-bottom.c tests/pix-public-runtime-libusb-bottom.c
+        tests/pix-l3-random-bottom.c)
+    target_include_directories(pixd_l3_fixture PRIVATE
+        tests "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests"
+        "${PIX_SOURCE_DIR}/include" "${PIX_SOURCE_DIR}/src")
+    target_compile_definitions(pixd_l3_fixture PRIVATE
+        _POSIX_C_SOURCE=200809L PIX_CAPTURE_BRIDGE_EXTERNAL
+        PIX_RUNTIME_VERSION="${PIX_RUNTIME_VERSION}")
+    target_compile_features(pixd_l3_fixture PRIVATE cxx_std_17)
+    target_link_libraries(pixd_l3_fixture PRIVATE
+        pix_product_runtime dtv::json)
+    target_link_options(pixd_l3_fixture PRIVATE
+        -Wl,--wrap=pixy_power -Wl,--wrap=pixy_session -Wl,--wrap=pixy_tuner_init
+        -Wl,--wrap=pixy_tune_slot -Wl,--wrap=pixy_status
+        -Wl,--wrap=pixy_fifo_clear -Wl,--wrap=pixy_start
+        -Wl,--wrap=pixy_stop -Wl,--wrap=pixy_certify -Wl,--wrap=pixy_shutdown
+        -Wl,--wrap=libusb_release_interface -Wl,--wrap=libusb_close
+        -Wl,--wrap=random_bytes -Wl,--wrap=pthread_create)
+
+    add_executable(pix_l3_daemon_proof tests/pix_l3_daemon_proof.cpp)
+    target_include_directories(pix_l3_daemon_proof PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}" "${PIX_SOURCE_DIR}/tests")
+    target_compile_definitions(pix_l3_daemon_proof PRIVATE
+        PIXD_L3_PATH="$<TARGET_FILE:pixd_l3_fixture>"
+        PIXTS_PATH="$<TARGET_FILE:pix-ts>"
+        PIXCTL_PATH="$<TARGET_FILE:pixctl>"
+        PIX_FIRMWARE_DT181_PATH="${PIX_SOURCE_DIR}/firmware/dt181.bin")
+    target_compile_features(pix_l3_daemon_proof PRIVATE cxx_std_17)
+    target_link_libraries(pix_l3_daemon_proof PRIVATE Threads::Threads)
+    add_dependencies(pix_l3_daemon_proof pixd_l3_fixture pix-ts pixctl)
+    add_test(NAME pix_l3_daemon_proof COMMAND pix_l3_daemon_proof)
+    endif()
+endif()

@@ -113,3 +113,25 @@ control/bulk/deadline mapping, per-transfer/pipe cancel scope and terminal
 completion retention, and close retention with explicit cleanup retry remain
 covered. Physical USB, real receivers, CARD/TS concurrency and
 custom firmware are not verified by this target.
+
+## Optional DT181 L3 standard-daemon route
+
+`PIX_DT181_L3_DAEMON=ON` (which requires `PIX_BUILD_L3_ADAPTER=ON`) builds the
+standard `pixd.cpp` assembly with an internal DT181 L3 runtime. The public CLI,
+runtime paths, control IPC, JSON and exit codes are unchanged; DT295 continues
+on its existing path. The option is off by default.
+
+The existing DT181 frontend/setup/tune backend remains the product owner of
+`dt181_session` and the selector/fd. The L3 runtime owns the stream lease,
+owner transfer submit/cancel/completion and holder recovery. Raw USB chunks
+from the owner path are fed through the existing DT181 capture decoder (the new
+internal `dt181_capture_host_start_feed/feed/stop_feed` seam), so `pix-ts`
+continues to receive the same decrypted TS rather than raw USB bytes.
+
+The offline proof `pix_l3_daemon_proof` starts the standard daemon and the
+existing `pixctl`/`pix-ts` clients as separate processes with fake USB. It
+checks client setup/tune/lease_start/attach/read/stop, exact TS bytes, daemon
+close, and the owner/cancel/holder path. On POSIX there is no daemon stdin-EOF
+option (that remains Windows-only), so this proof covers client stop/exit and
+daemon close; Windows stdin EOF is not claimed here. Physical USB/receiver is
+not used.

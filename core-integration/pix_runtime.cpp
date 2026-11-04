@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "pix_runtime.h"
+#ifdef PIX_DT181_L3_DAEMON
+#include "pix_l3_dt181_runtime.h"
+#endif
 
 #include "pix-dt295-receiver-adapter.h"
 #include "pix-firmware-bundle.h"
@@ -443,6 +446,9 @@ struct Family::Impl final {
     std::unique_ptr<dt295::ReceiverAdapter> dt295_adapter;
     std::unique_ptr<Dt295TunerBackend> dt295_tuner;
     std::unique_ptr<Dt295StreamShim> dt295_shim;
+#ifdef PIX_DT181_L3_DAEMON
+    std::unique_ptr<L3Dt181Runtime> l3;
+#endif
     bool initialized = false;
 };
 
@@ -912,6 +918,15 @@ dtv::userland::Result<std::unique_ptr<Family>> Family::create(
     family->impl_->shim.reset(new (std::nothrow) PixStreamShim(*family->impl_->adapter));
     if (!family->impl_->shim)
         return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+#ifdef PIX_DT181_L3_DAEMON
+    family->impl_->l3.reset(new (std::nothrow) L3Dt181Runtime(
+        family->impl_->session, *family->impl_->tuner,
+        bundle_view.bytes, bundle_view.size));
+    if (!family->impl_->l3)
+        return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::INTERNAL);
+    if (!family->impl_->l3->start())
+        return dtv::userland::Result<std::unique_ptr<Family>>::failure(Error::USB_IO);
+#endif
     return dtv::userland::Result<std::unique_ptr<Family>>::success(std::move(family));
 }
 
@@ -925,6 +940,9 @@ Family::~Family() noexcept
             impl_->dt295_adapter.reset();
             return;
         }
+#ifdef PIX_DT181_L3_DAEMON
+        impl_->l3.reset();
+#endif
         impl_->shim.reset();
         impl_->tuner.reset();
         impl_->adapter.reset();
@@ -943,6 +961,14 @@ Result<void> Family::shutdown() noexcept
     if (impl_->model == Model::dt295)
         return impl_->dt295_adapter ? impl_->dt295_adapter->shutdown()
                                     : Result<void>::success();
+#ifdef PIX_DT181_L3_DAEMON
+    if (impl_->l3) {
+        const auto stopped = impl_->l3->shutdown();
+        if (!stopped) return stopped;
+        /* Keep the runtime object alive: TunerService's destructor still calls
+         * back into this backend during EnclosureContext cleanup. */
+    }
+#endif
     if (impl_->adapter) {
         const auto stopped = impl_->adapter->shutdown();
         if (!stopped) return stopped;
@@ -959,6 +985,9 @@ Result<void> Family::shutdown() noexcept
 
 TunerServiceBackend& Family::tuner_backend() noexcept
 {
+#ifdef PIX_DT181_L3_DAEMON
+    if (impl_->l3) return *impl_->l3;
+#endif
     return impl_->model == Model::dt295
         ? static_cast<TunerServiceBackend&>(*impl_->dt295_tuner)
         : static_cast<TunerServiceBackend&>(*impl_->tuner);
@@ -973,6 +1002,9 @@ CardProtocolSession& Family::card_protocol() noexcept { return impl_->protocol; 
 TunerServiceTime& Family::time() noexcept { return impl_->clock; }
 TunerStreamControl* Family::stream_control() noexcept
 {
+#ifdef PIX_DT181_L3_DAEMON
+    if (impl_->l3) return impl_->l3.get();
+#endif
     return impl_->model == Model::dt295
         ? static_cast<TunerStreamControl*>(impl_->dt295_shim.get())
         : static_cast<TunerStreamControl*>(impl_->shim.get());
