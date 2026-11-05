@@ -104,6 +104,8 @@ fd=$((10#$fd))
 raw_client_arguments=("${arguments[@]:0:$((${#arguments[@]} - 1))}")
 client_arguments=()
 firmware_path=
+instance=
+have_instance=false
 for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
     argument=${raw_client_arguments[index]}
     if [[ $argument == -F || $argument == -V ]]; then
@@ -111,6 +113,19 @@ for ((index = 0; index < ${#raw_client_arguments[@]}; ++index)); do
         exit 2
     fi
     if takes_ts_value "$argument"; then
+        if [[ $argument == --instance ]]; then
+            if [[ $have_instance == true || $((index + 1)) -ge ${#raw_client_arguments[@]} ]]; then
+                echo 'pix-termux: provide exactly one non-empty --instance VALUE argument' >&2
+                exit 2
+            fi
+            instance=${raw_client_arguments[++index]}
+            if [[ -z $instance ]]; then
+                echo 'pix-termux: provide exactly one non-empty --instance VALUE argument' >&2
+                exit 2
+            fi
+            have_instance=true
+            continue
+        fi
         client_arguments+=("$argument")
         if ((index + 1 < ${#raw_client_arguments[@]})); then
             client_arguments+=("${raw_client_arguments[++index]}")
@@ -135,10 +150,14 @@ if [[ -z $firmware_path ]]; then
     echo 'pix-termux: --firmware FILE is required' >&2
     exit 2
 fi
+if [[ $have_instance != true ]]; then
+    echo 'pix-termux: --instance VALUE is required' >&2
+    exit 2
+fi
 
 for argument in "${client_arguments[@]}"; do
-    if [[ $argument == --instance || $argument == --runtime-dir || $argument == --group ]]; then
-        echo 'pix-termux: instance and runtime options are managed by the launcher' >&2
+    if [[ $argument == --runtime-dir || $argument == --group ]]; then
+        echo 'pix-termux: runtime options are managed by the launcher' >&2
         exit 2
     fi
 done
@@ -170,7 +189,7 @@ if [[ $have_output == false ]]; then
 fi
 validation_status=0
 if validation_output=$(run_without_usb_fd "$root/pix-ts" \
-    --runtime-dir "$validation_runtime_directory" --instance pix-fd \
+    --runtime-dir "$validation_runtime_directory" --instance "$instance" \
     "${validation_client_arguments[@]}" 2>&1); then
     printf '%s\n' "$validation_output" >&2
     exit 70
@@ -265,14 +284,14 @@ trap 'handle_signal TERM' TERM
 
 cd "$root"
 "$root/pixd" --fd "$fd" --firmware "$firmware_path" --runtime-dir "$runtime_directory" \
-    --instance pix-fd >"$runtime_directory/pixd.log" 2>&1 &
+    --instance "$instance" >"$runtime_directory/pixd.log" 2>&1 &
 daemon_pid=$!
 
 ready=false
 for ((attempt = 0; attempt < 100; ++attempt)); do
     if [[ -n $stop_signal ]]; then exit 0; fi
     run_without_usb_fd "$root/pixctl" --runtime-dir "$runtime_directory" \
-        --instance pix-fd status >/dev/null 2>&1 &
+        --instance "$instance" status >/dev/null 2>&1 &
     helper_pid=$!
     if wait "$helper_pid"; then
         ready=true
@@ -294,7 +313,7 @@ fi
 
 if [[ -n $stop_signal ]]; then exit 0; fi
 run_without_usb_fd "$root/pix-ts" --runtime-dir "$runtime_directory" \
-    --instance pix-fd "${client_arguments[@]}" &
+    --instance "$instance" "${client_arguments[@]}" &
 client_pid=$!
 if [[ -n $stop_signal ]]; then
     if ! kill -s "$stop_signal" "$client_pid" 2>/dev/null; then :; fi
