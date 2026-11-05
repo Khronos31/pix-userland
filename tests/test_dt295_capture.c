@@ -677,6 +677,28 @@ static void test_apply_plan_does_not_commit_failed_write(void) {
            memcmp(&live, &before, sizeof(live)) == 0);
     free(d);
 }
+static void test_ts_alignment_recovers(void) {
+    enum { JUNK = 8, PACKETS = 4 };
+    static uint8_t buf[JUNK + PACKETS * 188];
+    ts_align a = {0};
+    memset(buf, 0x22, sizeof(buf));
+    for (unsigned i = 0; i < PACKETS; i++)
+        buf[JUNK + i * 188] = 0x47;
+    size_t total = sizeof(buf);
+    assert(ts_align_next(&a, buf, total, 0) == JUNK);
+    assert(a.synced && a.dropped == JUNK && a.desyncs == 0);
+    assert(ts_align_next(&a, buf, total, JUNK) == JUNK);
+    /* One dropped byte costs the rest of that packet; the next two sync bytes
+     * restore the alignment. */
+    buf[JUNK + 188] = 0x22;
+    assert(ts_align_next(&a, buf, total, JUNK + 188) == JUNK + 2 * 188);
+    assert(a.synced && a.desyncs == 1 && a.dropped == JUNK + 1 + 187);
+    /* A tail that cannot hold two packets stays pending. */
+    ts_align b = {0};
+    assert(ts_align_next(&b, buf, 188, 0) == 0);
+    assert(!b.synced);
+}
+
 int main(void) {
     uint8_t mask[8192] = {0};
     volatile sig_atomic_t stop = 0;
@@ -819,6 +841,7 @@ int main(void) {
            live_add_summary_value == 1);
     reset();
     test_apply_plan_does_not_commit_failed_write();
+    test_ts_alignment_recovers();
     puts("DT295 capture orchestration: bootstrap/rearm, validation-before-USB, full queue and "
          "cleanup/live-addition regressions passed");
     return 0;
