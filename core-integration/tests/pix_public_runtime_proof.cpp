@@ -474,7 +474,7 @@ int main()
     int duplicate_status = 0;
     const bool duplicate_failed = duplicate > 0 &&
         ::waitpid(duplicate, &duplicate_status, 0) == duplicate &&
-        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 70;
+        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 4;
     const auto duplicate_bytes = read_file(duplicate_log);
     const std::string duplicate_text(duplicate_bytes.begin(), duplicate_bytes.end());
     if (!duplicate_failed ||

@@ -368,11 +368,39 @@ int write_discovery_json()
     return 0;
 }
 
+constexpr int exit_status(Error error) noexcept
+{
+    switch (error) {
+    case Error::OK: return 0;
+    case Error::INVALID_ARGUMENT: return 2;
+    case Error::NOT_FOUND:
+    case Error::NOT_READY:
+    case Error::UNSUPPORTED: return 3;
+    case Error::BUSY: return 4;
+    case Error::TIMEOUT: return 5;
+    case Error::VERSION_MISMATCH:
+    case Error::PROTOCOL_ERROR: return 6;
+    case Error::USB_IO:
+    case Error::DISCONNECTED: return 7;
+    case Error::SLOW_CONSUMER: return 8;
+    case Error::NO_CARD:
+    case Error::CARD_REMOVED: return 9;
+    case Error::FIRMWARE_REJECTED: return 10;
+    case Error::RESOURCE_LIMIT:
+    case Error::INTERNAL: return 70;
+    default: return 70;
+    }
+}
+
+static_assert(exit_status(Error::BUSY) == 4);
+static_assert(exit_status(Error::TIMEOUT) == 5);
+static_assert(exit_status(Error::NO_CARD) == 9);
+static_assert(exit_status(Error::RESOURCE_LIMIT) == 70);
+
 int fail(Error error) noexcept
 {
     std::fprintf(stderr, "pixd: %s\n", error_string(error));
-    return error == Error::INVALID_ARGUMENT ? 2 : error == Error::NOT_FOUND ? 3 :
-        error == Error::USB_IO ? 7 : 70;
+    return exit_status(error);
 }
 
 // "pixd ready" reports the model the running enclosure family was built from.
@@ -670,6 +698,10 @@ int run(int argc, char** argv)
     if (!reserved) {
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
         print_listener_error(listener_diagnostic, reserved.error());
+        if (listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_mode ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_owner ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_security)
+            return 70;
         return fail(reserved.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
