@@ -339,7 +339,7 @@ int main()
          "--runtime-dir", root}, mode_log);
     int mode_status = 0;
     if (mode_process <= 0 || ::waitpid(mode_process, &mode_status, 0) != mode_process ||
-        !WIFEXITED(mode_status) || WEXITSTATUS(mode_status) != 70) return 51;
+        !WIFEXITED(mode_status) || WEXITSTATUS(mode_status) != 3) return 51;
     const auto mode_bytes = read_file(mode_log);
     const std::string mode_text(mode_bytes.begin(), mode_bytes.end());
     if (mode_text.find("runtime directory permissions are too broad") == std::string::npos ||
@@ -358,7 +358,7 @@ int main()
     int nested_mode_status = 0;
     if (nested_mode_process <= 0 ||
         ::waitpid(nested_mode_process, &nested_mode_status, 0) != nested_mode_process ||
-        !WIFEXITED(nested_mode_status) || WEXITSTATUS(nested_mode_status) != 70) return 53;
+        !WIFEXITED(nested_mode_status) || WEXITSTATUS(nested_mode_status) != 3) return 53;
     const auto nested_mode_bytes = read_file(nested_mode_log);
     const std::string nested_mode_text(nested_mode_bytes.begin(), nested_mode_bytes.end());
     if (nested_mode_text.find("runtime directory permissions are too broad") ==
@@ -474,7 +474,7 @@ int main()
     int duplicate_status = 0;
     const bool duplicate_failed = duplicate > 0 &&
         ::waitpid(duplicate, &duplicate_status, 0) == duplicate &&
-        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 70;
+        WIFEXITED(duplicate_status) && WEXITSTATUS(duplicate_status) == 4;
     const auto duplicate_bytes = read_file(duplicate_log);
     const std::string duplicate_text(duplicate_bytes.begin(), duplicate_bytes.end());
     if (!duplicate_failed ||
