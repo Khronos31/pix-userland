@@ -63,6 +63,62 @@ static int usb_configure_interface(usb_backend *b, int *changed) {
     }
     return 0;
 }
+static void usb_dt295_stream_diagnostics(usb_backend *b) {
+    const char *diagnostics = getenv("PIX_DT295_DIAGNOSTICS");
+    if (!b || b->model != USB_MODEL_DT295 || diagnostics == NULL ||
+        diagnostics[0] != '1' || diagnostics[1] != '\0')
+        return;
+    int configuration = -1;
+    const int configuration_result = libusb_get_configuration(b->handle, &configuration);
+    unsigned char alternate = 0xffU;
+    const int alternate_result = libusb_control_transfer(
+        b->handle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_STANDARD |
+                       LIBUSB_RECIPIENT_INTERFACE,
+        LIBUSB_REQUEST_GET_INTERFACE, 0U, 0U, &alternate, sizeof(alternate), 1000U);
+    fprintf(stderr,
+            "DT295 USB interface: configuration_result=%d configuration=%d "
+            "interface=0 get_interface_result=%d active_alternate=%u\n",
+            configuration_result, configuration, alternate_result,
+            alternate_result == 1 ? (unsigned)alternate : 0xffU);
+    struct libusb_config_descriptor *descriptor = NULL;
+    const int descriptor_result = libusb_get_active_config_descriptor(
+        libusb_get_device(b->handle), &descriptor);
+    if (descriptor_result != LIBUSB_SUCCESS || descriptor == NULL) {
+        fprintf(stderr, "DT295 USB descriptors: result=%d\n", descriptor_result);
+        return;
+    }
+    int interface_found = 0;
+    for (unsigned i = 0; i < descriptor->bNumInterfaces; ++i) {
+        const struct libusb_interface *interface = &descriptor->interface[i];
+        for (int j = 0; j < interface->num_altsetting; ++j) {
+            const struct libusb_interface_descriptor *setting = &interface->altsetting[j];
+            if (setting->bInterfaceNumber != 0U)
+                continue;
+            interface_found = 1;
+            int endpoint_found = 0;
+            for (unsigned k = 0; k < setting->bNumEndpoints; ++k) {
+                const struct libusb_endpoint_descriptor *endpoint = &setting->endpoint[k];
+                if (endpoint->bEndpointAddress != 0x81U)
+                    continue;
+                endpoint_found = 1;
+                fprintf(stderr,
+                        "DT295 USB endpoint: interface=0 alternate=%u address=0x%02x "
+                        "transfer_type=%u max_packet=%u\n",
+                        (unsigned)setting->bAlternateSetting,
+                        (unsigned)endpoint->bEndpointAddress,
+                        (unsigned)(endpoint->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK),
+                        (unsigned)endpoint->wMaxPacketSize);
+            }
+            if (!endpoint_found)
+                fprintf(stderr,
+                        "DT295 USB endpoint: interface=0 alternate=%u address=0x81 absent\n",
+                        (unsigned)setting->bAlternateSetting);
+        }
+    }
+    if (!interface_found)
+        fprintf(stderr, "DT295 USB descriptors: interface=0 absent\n");
+    libusb_free_config_descriptor(descriptor);
+}
 #if defined(__APPLE__) || (defined(PIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY) && !defined(_WIN32))
 static int usb_interface_wait_expired(const struct timespec *start) {
     struct timespec now;
@@ -362,6 +418,7 @@ int usb_open_model(usb_backend **result, const usb_selector *selector, int fd, i
     if (open_usb_error(b, libusb_claim_interface(b->handle, 0), "claim interface"))
         goto error;
     b->claimed = 1;
+    usb_dt295_stream_diagnostics(b);
     *result = b;
     return 0;
 error:;

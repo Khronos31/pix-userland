@@ -134,6 +134,9 @@ static void LIBUSB_CALL transfer_complete(struct libusb_transfer *transfer) {
     struct dt295_slot *slot = transfer->user_data;
     dt295_stream *s = slot->owner;
     pthread_mutex_lock(&s->mutex);
+    ++s->stats.callback_calls;
+    s->stats.last_callback_status = transfer->status;
+    s->stats.last_callback_actual = transfer->actual_length;
     if (!slot->active) {
         ++s->stats.late_callbacks;
         if (transfer->actual_length > 0 && transfer->actual_length <= DT295_STREAM_TRANSFER_BYTES)
@@ -218,12 +221,18 @@ static void *event_main(void *argument) {
         if (done)
             break;
         struct timeval timeout = {0, EVENT_WAIT_US};
+        pthread_mutex_lock(&s->mutex);
+        ++s->stats.event_dispatch_calls;
+        pthread_mutex_unlock(&s->mutex);
         int rc = libusb_handle_events_timeout_completed(s->context, &timeout, NULL);
+        pthread_mutex_lock(&s->mutex);
+        ++s->stats.event_dispatch_returns;
+        s->stats.last_event_dispatch_result = rc;
         if (rc < 0 && rc != LIBUSB_ERROR_INTERRUPTED) {
-            pthread_mutex_lock(&s->mutex);
+            ++s->stats.event_dispatch_errors;
             first_error_locked(s, rc, -1, 0);
-            pthread_mutex_unlock(&s->mutex);
         }
+        pthread_mutex_unlock(&s->mutex);
     }
     pthread_mutex_lock(&s->mutex);
     s->thread_done = 1;

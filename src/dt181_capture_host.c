@@ -15,6 +15,56 @@ struct dt181_capture_host {
     int first_error;
 };
 
+int dt181_capture_host_start_feed(dt181_capture_host **out, const uint8_t context[32],
+                                  usb_sink sink, void *user)
+{
+    dt181_capture_host *host;
+    if (!out || !context || !sink) return -1;
+    *out = NULL;
+    host = calloc(1, sizeof(*host));
+    if (!host) return -1;
+    host->bridge = calloc(1, sizeof(*host->bridge));
+    if (!host->bridge) { free(host); return -1; }
+    if (os_mutex_init(&host->bridge->mutex, NULL) != 0) goto fail;
+    if (os_cond_init(&host->bridge->cond, NULL) != 0) goto fail_sync;
+    ts_check_init(&host->bridge->check);
+    dt181_capture_bridge_init_decoder(host->bridge, context, sink, user,
+                                     &host->bridge->check);
+    if (os_thread_create(&host->worker_thread, NULL, worker, host->bridge) != 0)
+        goto fail_sync;
+    host->worker_started = 1;
+    *out = host;
+    return 0;
+fail_sync:
+    os_cond_destroy(&host->bridge->cond);
+    os_mutex_destroy(&host->bridge->mutex);
+fail:
+    free(host->bridge);
+    free(host);
+    return -1;
+}
+
+int dt181_capture_host_feed(dt181_capture_host *host, const uint8_t *bytes,
+                            size_t length)
+{
+    return host && host->bridge ? enqueue(host->bridge, bytes, length) : -1;
+}
+
+int dt181_capture_host_stop_feed(dt181_capture_host *host)
+{
+    if (!host) return -1;
+    if (host->worker_started) {
+        os_mutex_lock(&host->bridge->mutex);
+        host->bridge->done = 1;
+        os_cond_signal(&host->bridge->cond);
+        os_mutex_unlock(&host->bridge->mutex);
+        if (os_thread_join(host->worker_thread, 0) != 0) return -1;
+        host->worker_started = 0;
+    }
+    if (host->bridge->error) return -1;
+    return 0;
+}
+
 int dt181_capture_host_start(dt181_capture_host **out, void *opaque_session,
                              usb_sink sink, void *user)
 {

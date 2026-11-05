@@ -299,7 +299,9 @@ static int run_retry(pix::capture::dt295::ReceiverAdapter *adapter)
     REQUIRE(g_saved.load() != nullptr);
     dt295_stream_stats stats{};
     dt295_stream_snapshot(g_saved.load(), &stats);
-    REQUIRE(stats.active_transfers == 8U && !stats.thread_done);
+    REQUIRE(stats.submitted == 8U && stats.active_transfers == 8U && !stats.thread_done);
+    REQUIRE(stats.event_dispatch_calls > 0U && stats.event_dispatch_returns > 0U &&
+            stats.event_dispatch_errors == 0U && stats.callback_calls == 0U);
     g_release_callbacks.store(true, std::memory_order_release);
     REQUIRE(wait_stream_done());
     REQUIRE(g_closes.load() == 0U && g_early_close.load() == 0U && g_destroyed.load() == 0U);

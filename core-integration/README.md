@@ -29,3 +29,109 @@ reception and long-running behavior remain separate verification.
 Core's owner lifecycle releases/detaches the receiver before backend shutdown.
 The adapter proof covers that order; direct shutdown while still attached is
 not part of this increment.
+
+## Optional L3 adapter skeleton
+
+`PIX_BUILD_L3_ADAPTER=ON` builds the optional PIX L3 product adapter. It is
+off by default, so the released `pixd`, `pixctl`, `pix-ts` and the custom-FW
+workflow are unchanged. The adapter consumes the Core prototype header at
+`PIX_L3_CORE_PROTOTYPE_DIR` (default:
+`${PIX_CORE_SOURCE_DIR}/prototype/l3_owner`). The current candidate is Core
+branch `wip-l3-product-integration-20261104`, API
+`253053da51184af03abebb15e7c129c465d90dee` plus G1
+`c5a54eec5c335b09b550db1dcb44a0bdf539236d`, initialization transfer
+`01c995170f9459da44b0fda176eb79e2a12eecbd`, queue
+`bdc5a03c3087b0906a198cf793fae77195ea19c3`, G8
+`2681542fe7abd51520121df8afff9fe1546cd76f`, and close-quiescence
+`eaf9400ee98f15ada01da3f6dd174abbad23dfc7`, build/CI
+`347f1ff54d1e6381a7690f404a9c0e5e708b7752`.
+
+```sh
+cmake -S core-integration -B build/pix-l3 \
+  -DPIX_CORE_SOURCE_DIR=/path/to/dtv-userland-core \
+  -DPIX_L3_CORE_PROTOTYPE_DIR=/path/to/dtv-userland-core/prototype/l3_owner \
+  -DPIX_BUILD_L3_ADAPTER=ON
+cmake --build build/pix-l3 --target pix_l3_adapter_contract
+ctest --test-dir build/pix-l3 -R pix_l3_ --output-on-failure
+```
+
+The host side is the Core `dtv_l3_usb_provider`; PIX supplies
+`dtv_l3_product_adapter` and `dtv_l3_adapter_factory`. `pix_l3_factory_create`
+takes the USB-only backend seam and product semantics, then
+`pix_l3_factory_usb_provider` / `pix_l3_factory_adapter_factory` produce the
+two Core inputs. `dtv_l3_open_factory` receives model, selector and the
+firmware source (`PATH`, `BYTES` or `READ_CALLBACK`); the adapter copies the
+image because the Core view is valid only during create, passes it to the
+product configure callback, and keeps it alive through the owner lifetime.
+
+The adapter keeps PIX product meaning out of Core: DT181 starts the satellite
+stream before tune while DT295 tunes first, both expose presence observation
+without external APDU, neither has an LNB power scope, and route/plan, firmware
+bootstrap, decoded TS output and custom firmware remain product-side. The
+existing DT181 `usb_backend` bulk path and DT295 `dt295_io` synchronous seam are
+the backend implementations. Their underlying stop is pipe-wide, so both report
+`DTV_L3_CANCEL_SCOPE_PIPE`; neither currently has a per-transfer cancel handle,
+so `cancel_supported` is 0 and a cancel request is reported as `UNSUPPORTED`
+rather than treated as success.
+
+The USB seam also accepts an optional asynchronous `submit`/`cancel_async` pair.
+When present, submit must copy OUT data and retained state before returning
+`ACCEPTED` and cancel must return without waiting for a completion callback.
+PIX keeps `call_flags` at zero by default: an async shape alone is not a
+promise that a Linux provider cannot wait on a lock inside a callback frame.
+The common owner keeps the claim, buffers and terminal completion when a cancel
+races a normal completion.
+
+The real PIX backends now use their existing pipe-wide cancel:
+- DT181 starts the existing `usb_stream_start` path and `cancel_async` calls
+  `usb_stream_stop`, which cancels the existing libusb stream transfers and
+  drains their terminal callbacks.
+- DT295 uses an existing `dt295_stream` handle: a reader thread waits on
+  `dt295_stream_read`, and cancel calls `dt295_stream_stop` (PIPE).
+Both report `cancel_scope=PIPE`, not transfer-level cancel. A per-transfer
+cancel still needs a product-side transfer handle that the current backends do
+not expose. The fixtures use a
+fake asynchronous pipe provider to verify CANCELLED/terminal retention, a raced
+normal completion, ownership retention until both completions, and an
+`UNSUPPORTED` cancel that does not become success. Firmware is required for both
+models.
+
+The fixtures cover factory/capability differences, all three firmware sources,
+G1 bind/initialize, a real owner transfer from initialize
+(`transfer_start` -> provider submit -> completion -> `op_wait`/`op_release` ->
+READY), failed-initialize open failure, and the capability catalog. The real
+DT181/DT295 cancel fixtures drive the existing stream handles through the owner
+provider, assert PIPE scope, terminal CANCELLED completion, release BUSY while
+an op is outstanding, and release/close after completion. They also
+cover one stream IN path through the same owner/provider route: `stream_attach`
+starts a bulk IN via `dtv_l3_transfer_start`, delivers the completed TS to the
+Core stream, and the test reads it back before stop/release; a second case lets
+close retire an active stream and verifies lease/claim recovery. Fake async
+completion and the DT295 `dt295_io` backend seam are exercised separately.
+Route rejection, transfer input copy and repeat polling, DT295 `dt295_io`
+control/bulk/deadline mapping, per-transfer/pipe cancel scope and terminal
+completion retention, and close retention with explicit cleanup retry remain
+covered. Physical USB, real receivers, CARD/TS concurrency and
+custom firmware are not verified by this target.
+
+## Optional DT181 L3 standard-daemon route
+
+`PIX_DT181_L3_DAEMON=ON` (which requires `PIX_BUILD_L3_ADAPTER=ON`) builds the
+standard `pixd.cpp` assembly with an internal DT181 L3 runtime. The public CLI,
+runtime paths, control IPC, JSON and exit codes are unchanged; DT295 continues
+on its existing path. The option is off by default.
+
+The existing DT181 frontend/setup/tune backend remains the product owner of
+`dt181_session` and the selector/fd. The L3 runtime owns the stream lease,
+owner transfer submit/cancel/completion and holder recovery. Raw USB chunks
+from the owner path are fed through the existing DT181 capture decoder (the new
+internal `dt181_capture_host_start_feed/feed/stop_feed` seam), so `pix-ts`
+continues to receive the same decrypted TS rather than raw USB bytes.
+
+The offline proof `pix_l3_daemon_proof` starts the standard daemon and the
+existing `pixctl`/`pix-ts` clients as separate processes with fake USB. It
+checks client setup/tune/lease_start/attach/read/stop, exact TS bytes, daemon
+close, and the owner/cancel/holder path. On POSIX there is no daemon stdin-EOF
+option (that remains Windows-only), so this proof covers client stop/exit and
+daemon close; Windows stdin EOF is not claimed here. Physical USB/receiver is
+not used.
