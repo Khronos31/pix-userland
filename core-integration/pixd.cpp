@@ -56,7 +56,7 @@ void usage(FILE* output) noexcept
 {
     std::fprintf(output,
         "usage: pixd (--device serial:SELECTOR|usb:SELECTOR | --fd N [--device SELECTOR]) "
-        "[--firmware FILE|-F FILE] [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
+        "--firmware FILE [--runtime-dir DIR] [--instance TOKEN] [--group] [-h|--help]\n"
         "       pixd --version\n"
         "       pixd --models\n"
         "       pixd --list-json\n"
@@ -77,13 +77,40 @@ void usage(FILE* output) noexcept
         );
 }
 
-bool parse(int argc, char** argv, Arguments& out, bool& help,
+bool parse(int argc, char** argv, Arguments& out, bool& help, bool& version,
            const char*& error) noexcept
 {
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view option(argv[i] != nullptr ? argv[i] : "");
+        if (option == "-h" || option == "--help") help = true;
+        else if (option == "--version") version = true;
+        if ((option == "--runtime-dir" || option == "--firmware") &&
+            i + 1 < argc && argv[i + 1] != nullptr &&
+            std::string_view(argv[i + 1]).rfind("--", 0U) != 0U) {
+            ++i;
+        } else if ((option == "--device" || option == "--instance") &&
+                   i + 1 < argc && argv[i + 1] != nullptr &&
+                   std::string_view(argv[i + 1]).rfind("-", 0U) != 0U) {
+            ++i;
+        }
+#ifndef _WIN32
+        else if (option == "--fd" && i + 1 < argc && argv[i + 1] != nullptr &&
+                 std::string_view(argv[i + 1]) != "-h" &&
+                 std::string_view(argv[i + 1]) != "--help" &&
+                 std::string_view(argv[i + 1]) != "--version") {
+            ++i;
+        }
+#endif
+    }
+    if (help || version) return true;
     bool device = false, fd = false, instance = false, runtime = false, firmware = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view option(argv[i]);
         if (option == "-h" || option == "--help") { help = true; return true; }
+        if (option == "-F" || option == "-V") {
+            error = "unknown argument";
+            return false;
+        }
 #ifdef _WIN32
         if (option == "--exit-on-stdin-eof") {
             if (out.exit_on_stdin_eof) {
@@ -103,7 +130,7 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
             continue;
         }
         const bool value_option = option == "--device" || option == "--instance" ||
-            option == "--runtime-dir" || option == "--firmware" || option == "-F"
+            option == "--runtime-dir" || option == "--firmware"
 #ifndef _WIN32
             || option == "--fd"
 #endif
@@ -139,19 +166,19 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         if (option == "--device" && !device) { out.device = value; device = true; }
         else if (option == "--instance" && !instance) { out.instance = value; instance = true; }
         else if (option == "--runtime-dir" && !runtime) { out.runtime_directory = value; runtime = true; }
-        else if ((option == "--firmware" || option == "-F") && !firmware && value[0] != '\0') {
+        else if (option == "--firmware" && !firmware && value[0] != '\0') {
             out.firmware_path = value;
             firmware = true;
         }
         else if (option == "--instance") {
             error = "--instance may be used once";
             return false;
-        } else if (option == "--firmware" || option == "-F") {
+        } else if (option == "--firmware") {
             error = firmware ? "--firmware may be used once" :
                 "--firmware requires a non-empty file path";
             return false;
         } else if (option == "--device" || option == "--runtime-dir" ||
-                   option == "--firmware" || option == "-F") {
+                   option == "--firmware") {
             error = "option may be used once";
             return false;
         } else {
@@ -163,12 +190,10 @@ bool parse(int argc, char** argv, Arguments& out, bool& help,
         error = "--device or --fd is required";
         return false;
     }
-#if !defined(PIX_EMBEDDED_ASSETS)
     if (!firmware) {
-        error = "--firmware FILE is required in this build";
+        error = "--firmware FILE is required";
         return false;
     }
-#endif
     if (out.group && (!runtime || out.runtime_directory.empty())) {
         error = "--group requires an explicit non-empty --runtime-dir";
         return false;
@@ -343,11 +368,39 @@ int write_discovery_json()
     return 0;
 }
 
+constexpr int exit_status(Error error) noexcept
+{
+    switch (error) {
+    case Error::OK: return 0;
+    case Error::INVALID_ARGUMENT: return 2;
+    case Error::NOT_FOUND:
+    case Error::NOT_READY:
+    case Error::UNSUPPORTED: return 3;
+    case Error::BUSY: return 4;
+    case Error::TIMEOUT: return 5;
+    case Error::VERSION_MISMATCH:
+    case Error::PROTOCOL_ERROR: return 6;
+    case Error::USB_IO:
+    case Error::DISCONNECTED: return 7;
+    case Error::SLOW_CONSUMER: return 8;
+    case Error::NO_CARD:
+    case Error::CARD_REMOVED: return 9;
+    case Error::FIRMWARE_REJECTED: return 10;
+    case Error::RESOURCE_LIMIT:
+    case Error::INTERNAL: return 70;
+    default: return 70;
+    }
+}
+
+static_assert(exit_status(Error::BUSY) == 4);
+static_assert(exit_status(Error::TIMEOUT) == 5);
+static_assert(exit_status(Error::NO_CARD) == 9);
+static_assert(exit_status(Error::RESOURCE_LIMIT) == 70);
+
 int fail(Error error) noexcept
 {
     std::fprintf(stderr, "pixd: %s\n", error_string(error));
-    return error == Error::INVALID_ARGUMENT ? 2 : error == Error::NOT_FOUND ? 3 :
-        error == Error::USB_IO ? 7 : 70;
+    return exit_status(error);
 }
 
 // "pixd ready" reports the model the running enclosure family was built from.
@@ -469,12 +522,17 @@ int run(int argc, char** argv)
     Arguments arguments;
     bool help = false;
     const char* parse_error = "invalid command line";
-    if (!parse(argc, argv, arguments, help, parse_error)) {
+    bool version = false;
+    if (!parse(argc, argv, arguments, help, version, parse_error)) {
         std::fprintf(stderr, "pixd: %s\n", parse_error);
         usage(stderr);
         return 2;
     }
     if (help) { usage(stdout); return 0; }
+    if (version) {
+        std::printf("pix-userland %s\n", PIX_RUNTIME_VERSION);
+        return 0;
+    }
 
     if (!arguments.device.empty()) {
         const auto parsed_selector =
@@ -501,9 +559,6 @@ int run(int argc, char** argv)
         }
     }
 #if defined(PIX_RUNTIME_TEST_CLOSE_BUDGET_MS)
-#if defined(PIX_EMBEDDED_ASSETS)
-    const bool fake_dt295 = false;
-#else
     const char* fd_model = std::getenv("PIX_TEST_USB_FD_MODEL");
     const bool fake_dt295 = std::getenv("PIX_TEST_DT295_FAKE") != nullptr &&
         (arguments.device == "serial:PIXDT29501" ||
@@ -519,7 +574,6 @@ int run(int argc, char** argv)
         const int notification = std::getenv("PIX_TEST_DT295_NOTIFICATION") != nullptr;
         dt295_actual_fixture_configure_presence(raw_state, notification);
     }
-#endif
 #endif
 
     const auto located = arguments.fd >= 0
@@ -644,6 +698,10 @@ int run(int argc, char** argv)
     if (!reserved) {
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
         print_listener_error(listener_diagnostic, reserved.error());
+        if (listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_mode ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_owner ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_security)
+            return 70;
         return fail(reserved.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
