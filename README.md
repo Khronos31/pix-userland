@@ -180,10 +180,10 @@ Termux 環境では、Termux:API の `termux-usb` コマンドで USB のファ�
 
 ```sh
 # termux-usb -l でデバイスパスを確認
-termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --system isdb-t --receiver 0 --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
+termux-usb -r -e './packaging/pix-termux --firmware ./firmware/dt181.bin --instance dt181 --system isdb-t --receiver 0 --channel T27 --time 15 -o terrestrial.ts' /dev/bus/usb/001/002
 ```
 
-ランチャーがデーモン（`pixd --fd`）の起動、状態確認、`pix-ts` による受信、および終了時の後始末を一括して行います。詳細は [Android / Termux](docs/android-termux.md) を参照してください。
+ランチャーは呼出元が指定した `--instance <instance-name>` をデーモン（`pixd --fd`）、状態確認（`pixctl status`）、および受信クライアント（`pix-ts`）へ渡し、起動・受信・後始末を一括して行います（`--instance` の未指定・値欠落・空値は終了コード `2`）。詳細は [Android / Termux](docs/android-termux.md) を参照してください。
 
 ## 受信部とチャンネル・CLI 仕様
 
