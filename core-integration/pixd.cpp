@@ -698,6 +698,10 @@ int run(int argc, char** argv)
     if (!reserved) {
         std::fprintf(stderr, "PIX_STAGE reserve error=%u\n", static_cast<unsigned>(reserved.error()));
         print_listener_error(listener_diagnostic, reserved.error());
+        if (listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_mode ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_owner ||
+            listener_diagnostic.reason == ListenerDiagnosticReason::runtime_directory_security)
+            return 70;
         return fail(reserved.error());
     }
     if (!px4::userland::px4d::install_signal_handlers()) return 70;
