@@ -59,11 +59,12 @@ jobs:
         with:
           persist-credentials: false
       - run: |
-          docker run --rm -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
+          docker run --rm -e PIX_SOURCE_REVISION_OVERRIDE="$GITHUB_SHA" -v "$PWD:/src" -w /src alpine:3.22 sh -ec '
             apk add --no-cache build-base linux-headers curl bzip2 pkgconf cmake git python3 ca-certificates
             sh tests/test_mdev.sh
-            CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
+            PIX_EMBEDDED_ASSETS=ON CFLAGS="-O2 -g -Werror" tools/build-portable.sh musl
           '
+      - run: python3 tools/verify-embedded-assets.py build/musl/pixd "$PWD/assets" "$PWD/assets/dt295.assets" build/musl/embedded-assets.json --build-info build/musl/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py '${{ matrix.target }}' "build/musl/$program"; done
       - run: python3 tools/package-release.py '${{ matrix.target }}' build/musl
       - run: tools/check-private.sh
@@ -75,13 +76,14 @@ jobs:
           retention-days: 3
   macos:
     needs: preflight
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
       - run: brew install cmake pkgconf
-      - run: CFLAGS='-O2 -g -Werror' tools/build-portable.sh native
+      - run: PIX_EMBEDDED_ASSETS=ON CFLAGS='-O2 -g -Werror' tools/build-portable.sh native
+      - run: python3 tools/verify-embedded-assets.py build/native/pixd "$PWD/assets" "$PWD/assets/dt295.assets" build/native/embedded-assets.json --build-info build/native/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py darwin-arm64 "build/native/$program"; done
       - run: python3 tools/package-release.py darwin-arm64 build/native
       - run: tools/check-private.sh
@@ -112,6 +114,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_ABI: ${{ matrix.abi }}
           CFLAGS: -O2 -g -Werror
+          PIX_EMBEDDED_ASSETS: ON
+      - run: python3 tools/verify-embedded-assets.py "build/android-${{ matrix.abi }}/pixd" "$PWD/assets" "$PWD/assets/dt295.assets" "build/android-${{ matrix.abi }}/embedded-assets.json" --build-info "build/android-${{ matrix.abi }}/build-info.txt"
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py 'android-${{ matrix.abi }}' "build/android-${{ matrix.abi }}/$program"; done
       - run: python3 tools/package-release.py 'android-${{ matrix.abi }}' 'build/android-${{ matrix.abi }}'
       - run: tools/check-private.sh
@@ -129,7 +133,8 @@ jobs:
         with:
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y cmake pkg-config make curl xz-utils bzip2 binutils
-      - run: tools/build-windows.sh
+      - run: PIX_EMBEDDED_ASSETS=ON tools/build-windows.sh
+      - run: python3 tools/verify-embedded-assets.py build/windows-x64/pixd.exe "$PWD/assets" "$PWD/assets/dt295.assets" build/windows-x64/embedded-assets.json --build-info build/windows-x64/build-info.txt
       - run: for program in pixd pixctl pix-ts; do python3 tools/audit-binary.py windows-x64 "build/windows-x64/$program.exe"; done
       - shell: bash
         run: python3 tools/package-release.py windows-x64 build/windows-x64
@@ -191,7 +196,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Verify release set and checksums
-        run: python3 tools/verify-release.py
+        run: python3 tools/verify-release.py --with-embedded-assets
       - run: tools/check-private.sh
   release:
     if: needs.preflight.outputs.publish == 'true' && github.ref == 'refs/heads/main'

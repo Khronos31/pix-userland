@@ -3,6 +3,7 @@
 #endif
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "dt295_capture.h"
+#include "control.h"
 #include "dt295.h"
 #include "dt295_live_policy.h"
 #include "dt295_routes.h"
@@ -25,6 +26,17 @@
 #endif
 
 #if defined(__APPLE__) || defined(DT295_CAPTURE_TESTING)
+static int allow_ecm_conflict(void);
+
+static int allow_ecm_conflict(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("DT295_ALLOW_ECM_CONFLICT");
+        cached = v && *v && *v != '0';
+    }
+    return cached;
+}
+
 typedef struct {
     usb_backend *usb;
     dt295_stream *stream;
@@ -233,6 +245,54 @@ static int capture_status(ts_output *diag, unsigned phase, uint64_t packets, uin
                                               : ts_output_submit(diag, line, (size_t)n, NULL);
 }
 
+static uint8_t capture_endpoint(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("DT295_CAPTURE_EP");
+        unsigned long ep = (v && *v) ? strtoul(v, NULL, 0) : 0x81u;
+        cached = (ep >= 0x01u && ep <= 0x8fu) ? (int)ep : 0x81;
+    }
+    return (uint8_t)cached;
+}
+
+typedef struct {
+    int synced;
+    uint64_t desyncs;
+    uint64_t dropped;
+} ts_align;
+
+/* Start offset of the next whole TS packet at or after pos. Two consecutive
+ * 0x47 bytes are required to lock, so a payload byte that happens to be 0x47
+ * does not anchor the stream. When the remaining bytes cannot be aligned yet,
+ * the offset of the pending tail is returned and the caller keeps it for the
+ * next read. */
+static size_t ts_align_next(ts_align *a, const uint8_t *data, size_t total, size_t pos) {
+    while (pos + 188 <= total) {
+        if (!a->synced) {
+            size_t off = pos;
+            while (off + 188 < total &&
+                   !(data[off] == 0x47 && data[off + 188] == 0x47))
+                off++;
+            if (off + 188 >= total) {
+                a->dropped += off - pos;
+                return off;
+            }
+            a->dropped += off - pos;
+            pos = off;
+            a->synced = 1;
+        }
+        if (data[pos] != 0x47) {
+            a->desyncs++;
+            a->dropped++;
+            pos++;
+            a->synced = 0;
+            continue;
+        }
+        return pos;
+    }
+    return pos;
+}
+
 #endif
 int dt295_capture_run(const dt295_capture_config *cfg) {
 #if !defined(__APPLE__) && !defined(DT295_CAPTURE_TESTING)
@@ -259,6 +319,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     dt295_stream_stats final_usb = {0};
     uint64_t packets = 0, renewals = 0, record_start = 0, elapsed = 0, live_add_count = 0;
     size_t remainder = 0, drained = 0;
+    ts_align align = {0};
     dt295_assets *assets = NULL;
     dt295 *d = NULL;
     dt295_routes *tables = NULL;
@@ -387,7 +448,97 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
     uint64_t preparation_start = now_ms(), last_input = preparation_start,
              next_status = preparation_start;
     uint8_t data[65536 + 188], out[65536 + 188];
+    /* DT295_CONTROL=1 のとき、標準入力から選局指示 ("T21" / "BS01_0" / "quit") を
+     * 受け付ける。切替は「セッションを維持したまま stop -> tune -> prepare ->
+     * start」で行う (認証をやり直さないので 0xffff に落ちない)。 */
+    pix_control control = {0};
+    const char *control_env = getenv("DT295_CONTROL");
+    int control_on = control_env && *control_env && *control_env != '0';
+    unsigned cur_channel = cfg->channel;
+    int cur_slot = cfg->slot;
+    pixy_system cur_system = cfg->system;
+
     while (!cfg->interrupted || !*cfg->interrupted) {
+        if (control_on) {
+            pix_command cmd = {0};
+            int pr = pix_control_poll(&control, cur_system, &cmd);
+            if (pr == 2 || (pr == 1 && cmd.quit))
+                break;
+            if (pr == 1 && (cmd.channel.system != cur_system ||
+                            cmd.channel.channel != cur_channel || cmd.channel.slot != cur_slot)) {
+                int next_system = cmd.channel.system;
+                unsigned next_channel = cmd.channel.channel;
+                int next_slot = cmd.channel.slot;
+                if (u.stream) {
+                    (void)dt295_stream_stop(u.stream, 3000);
+                    if (dt295_stream_destroy(u.stream)) {
+                        native_abandoned = 1;
+                        rc = 7;
+                        break;
+                    }
+                    u.stream = NULL;
+                }
+                if (dt295_stop(d, &drained, error, sizeof(error))) {
+                    rc = 7;
+                    break;
+                }
+                dt295_routes_destroy(tables);
+                tables = dt295_routes_create();
+                if (!tables) {
+                    rc = 70;
+                    break;
+                }
+                dt295_routes_set_satellite(tables, next_system != PIXY_TERRESTRIAL);
+                int tuned_rc = 0;
+                if (next_system == PIXY_TERRESTRIAL) {
+                    tuned_rc = dt295_tune_terrestrial(d, next_channel, error, sizeof(error));
+                } else {
+                    uint32_t hz = 0;
+                    if (pixy_frequency((pixy_system)next_system, next_channel, &hz))
+                        tuned_rc = -1;
+                    else if (dt295_tune_satellite(d, hz, -1, error, sizeof(error)))
+                        tuned_rc = -1;
+                    else if (next_slot >= 0 &&
+                             dt295_select_satellite_slot(d, (unsigned)next_slot, error,
+                                                         sizeof(error)))
+                        tuned_rc = -1;
+                }
+                if (tuned_rc) {
+                    rc = 5;
+                    break;
+                }
+                dt295_route_plan next_plan = {0};
+                char next_error[DT295_ROUTE_ERROR] = {0};
+                if (dt295_routes_initial_plan(tables, &next_plan, next_error) ||
+                    dt295_prepare_plan(d, &next_plan, error, sizeof(error)) ||
+                    dt295_start(d, error, sizeof(error))) {
+                    rc = 7;
+                    break;
+                }
+                e = dt295_stream_start(usb_native_context(u.usb), usb_native_handle(u.usb),
+                                       &u.stream);
+                if (e) {
+                    rc = 7;
+                    snprintf(error, sizeof(error), "switch USB start error %d", e);
+                    break;
+                }
+                live = next_plan;
+                cur_system = (pixy_system)next_system;
+                cur_channel = next_channel;
+                cur_slot = next_slot;
+                remainder = 0;
+                align = (ts_align){0};
+                recording = 0;
+                ts_check_init(check);
+                last_input = now_ms();
+                fprintf(stderr,
+                        "{\"event\":\"tuned\",\"type\":\"%s\",\"channel\":\"%u\","
+                        "\"slot\":%d}\n",
+                        next_system == PIXY_TERRESTRIAL ? "GR"
+                                                        : (next_system == PIXY_BS ? "BS" : "CS"),
+                        next_channel, next_slot);
+            }
+        }
         uint64_t now = now_ms();
         if (recording) {
             elapsed = now - record_start;
@@ -413,7 +564,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         }
         renewals += (unsigned)renewed;
         size_t actual = 0;
-        e = capture_bulk(&u, 0x81, data + remainder, 65536, 100, &actual);
+        e = capture_bulk(&u, capture_endpoint(), data + remainder, 65536, 100, &actual);
         if (e && !(e == LIBUSB_ERROR_TIMEOUT && actual)) {
             if (e == LIBUSB_ERROR_TIMEOUT && now_ms() - last_input < 10000)
                 continue;
@@ -424,9 +575,15 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         if (!actual)
             continue;
         last_input = now_ms();
-        size_t total = remainder + actual, length = total / 188 * 188, emitted = 0;
-        for (size_t at = 0; at < length; at += 188) {
-            uint8_t *packet = data + at;
+        size_t total = remainder + actual, pos = 0, emitted = 0;
+        while (pos + 188 <= total) {
+            size_t at = ts_align_next(&align, data, total, pos);
+            if (at + 188 > total) {
+                pos = at;
+                break;
+            }
+            pos = at;
+            uint8_t *packet = data + pos;
             if (dt295_decode_packet(d, packet) < 0) {
                 rc = 8;
                 snprintf(error, sizeof(error), "invalid DT295 TS packet");
@@ -442,11 +599,12 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                     emitted += 188;
                 }
             }
+            pos += 188;
         }
         if (rc)
             break;
-        remainder = total - length;
-        memmove(data, data + length, remainder);
+        remainder = total - pos;
+        memmove(data, data + pos, remainder);
         dt295_routes_snapshot snapshot;
         dt295_routes_snapshot_get(tables, &snapshot);
         if (cfg->system != PIXY_TERRESTRIAL && snapshot.have_pat &&
@@ -457,7 +615,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                      (unsigned)sat_state.selected_tsid);
             break;
         }
-        if (snapshot.unsupported_tables) {
+        if (snapshot.unsupported_tables &&
+            !getenv("DT295_TOLERATE_PSI")) {
             rc = 8;
             snprintf(error, sizeof(error),
                      "unsupported or ambiguous PAT/PMT/CAT configuration; reacquisition required");
@@ -505,7 +664,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 snprintf(error, sizeof(error), "initial complete plan: %s", route_error);
                 break;
             }
-            if (!dt295_initial_ecm_gate_allowed(&full, snapshot.invalid_sections)) {
+            if (!dt295_initial_ecm_gate_allowed(&full, snapshot.invalid_sections) &&
+                !allow_ecm_conflict()) {
                 rc = 8;
                 snprintf(error, sizeof(error),
                          "multiple independent ECMs are outside the verified DT295 scope");
@@ -599,11 +759,13 @@ done:
             snprintf(end, sizeof(end),
                      "{\"event\":\"end\",\"exit\":%d,\"state\":%u,\"packets\":%llu,\"elapsed_ms\":%"
                      "llu,\"trailing_bytes\":%zu,\"stop_drained_bytes\":%zu,\"tei\":%llu,\"cc\":%"
-                     "llu,\"crc\":%llu,\"native_abandoned\":%d}\n",
+                     "llu,\"crc\":%llu,\"native_abandoned\":%d,\"ts_desyncs\":%llu,"
+                     "\"ts_dropped_bytes\":%llu}\n",
                      rc, d && !native_abandoned ? dt295_state(d) : 65535,
                      (unsigned long long)packets, (unsigned long long)elapsed, remainder, drained,
                      (unsigned long long)check->tei, (unsigned long long)check->continuity,
-                     (unsigned long long)check->crc_errors, native_abandoned);
+                     (unsigned long long)check->crc_errors, native_abandoned,
+                     (unsigned long long)align.desyncs, (unsigned long long)align.dropped);
         uint64_t id;
         if (n > 0 && (size_t)n < sizeof(end))
             ts_output_submit(diag, end, (size_t)n, &id);

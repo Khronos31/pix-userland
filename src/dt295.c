@@ -1143,6 +1143,18 @@ static int tuner_initialize(dt295 *d) {
         return -1;
     return 0;
 }
+/* A failed tune can leave the receiver owning the session (state 0x02). Stop
+ * it before the context is retired, so the next open starts from idle instead
+ * of "busy" (which otherwise needs a cold recovery). Best effort: the state
+ * may already be unusable. */
+static void stop_after_failed_tune(dt295 *d) {
+    char error[128];
+    size_t drained = 0;
+    if (!d)
+        return;
+    (void)dt295_stop(d, &drained, error, sizeof(error));
+}
+
 int dt295_tune_terrestrial(dt295 *d, unsigned channel, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->has_session || channel < 13 || channel > 62)
         return fail(d, e, en, "only terrestrial channels T13..T62 are supported");
@@ -1352,12 +1364,16 @@ int dt295_tune_satellite(dt295 *d, uint32_t if_hz, int tsid, char *e, size_t en)
         dt295_satellite_state state = {0};
         const uint64_t end = now_ms(d) + 3000;
         for (;;) {
-            if (dt295_satellite_status(d, &state, e, en))
+            if (dt295_satellite_status(d, &state, e, en)) {
+                stop_after_failed_tune(d);
                 return -1;
+            }
             if (state.locked && state.selected_tsid == (uint16_t)tsid)
                 break;
-            if (now_ms(d) >= end)
+            if (now_ms(d) >= end) {
+                stop_after_failed_tune(d);
                 return fail(d, e, en, "satellite did not lock the target TSID");
+            }
             sleep_ms(d, 100);
         }
     }
@@ -1549,6 +1565,26 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
         if (field(d, f->address, f->shift, f->width, f->value))
             return fail(d, e, en, "private receive profile apply failed");
     }
+
+    /* test hook: DT295_XREG="addr:shift:width:value[,addr:...]" (hex) */
+    {
+        const char *xr = getenv("DT295_XREG");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
     /* Replace every route register so stale private channel PIDs cannot survive. */
     dt295_route_op blank = {0};
     for (unsigned slot = 0; slot < 64; slot++) {
@@ -1566,6 +1602,26 @@ static int prepare_config(dt295 *d, const dt295_route_op *routes, size_t count, 
     if (putword(d, 0x1018, program) || field(d, 0x101c, 8, 8, video_type) ||
         field(d, 0x101c, 0, 8, audio_type))
         return fail(d, e, en, "program metadata apply failed");
+    /* >>> DT295_XREG2 test hook (patch-xreg2.py) */
+    {
+        const char *xr = getenv("DT295_XREG2");
+        char *dup = (xr && *xr) ? strdup(xr) : NULL;
+        if (dup) {
+            for (char *p = strtok(dup, ","); p; p = strtok(NULL, ",")) {
+                unsigned a = 0, sh = 0, w = 0, v = 0;
+                if (sscanf(p, "%x:%u:%u:%x", &a, &sh, &w, &v) != 4) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 parse error");
+                }
+                if (field(d, a, sh, w, v)) {
+                    free(dup);
+                    return fail(d, e, en, "DT295_XREG2 register write failed");
+                }
+            }
+            free(dup);
+        }
+    }
+    /* <<< DT295_XREG2 test hook */
     if (putword(d, 0x82028, 0) || command(d, 4, 0x20, 0, 0, NULL) || wait_state(d, 1, 30000))
         return fail(d, e, en, "receive acquisition did not reach configured state");
     uint16_t dma = 0;
@@ -1649,8 +1705,10 @@ int dt295_start(dt295 *d, char *e, size_t en) {
     if (!d || d->cleanup_only || !d->prepared || d->started || !d->has_ts_key || drain_state(d) || d->state != 1)
         return fail(d, e, en, "receive start requires prepared state 1");
     d->prepared = 0;
-    if (command(d, 5, 0, 2, 0, NULL) || wait_state(d, 2, 30000))
+    if (command(d, 5, 0, 2, 0, NULL) || wait_state(d, 2, 30000)) {
+        stop_after_failed_tune(d);
         return fail(d, e, en, "receive start failed; start command was not retried");
+    }
     d->started = 1;
     seterr(e, en, "");
     return 0;

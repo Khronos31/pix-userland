@@ -55,7 +55,30 @@ static const uint8_t ibox[256] = {
     0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
     0x17, 0x2b, 0x4,  0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0xc,  0x7d,
 };
+/* MixColumns constants. The field multiply is a bit loop, which costs more than
+ * everything else per packet: the transport descrambler runs it on every 188-byte
+ * packet, and at 38 Mbps that loop alone limits the capture to ~12 Mbps. The
+ * tables hold exactly the same products, built once on first use. */
+static uint8_t mul2[256], mul3[256], mul9[256], mul11[256], mul13[256], mul14[256];
+static int mul_ready;
+static void mul_init(void) {
+    for (unsigned i = 0; i < 256; i++) {
+        uint8_t x2 = mul((uint8_t)i, 2);
+        uint8_t x4 = mul(x2, 2);
+        uint8_t x8 = mul(x4, 2);
+        mul2[i] = x2;
+        mul3[i] = (uint8_t)(x2 ^ i);
+        mul9[i] = (uint8_t)(x8 ^ i);
+        mul11[i] = (uint8_t)(x8 ^ x2 ^ i);
+        mul13[i] = (uint8_t)(x8 ^ x4 ^ i);
+        mul14[i] = (uint8_t)(x8 ^ x4 ^ x2);
+    }
+}
 void aes_init(aes128 *a, const uint8_t key[16]) {
+    if (!mul_ready) {
+        mul_init();
+        mul_ready = 1;
+    }
     memcpy(a->round, key, 16);
     uint8_t rc = 1, t[4];
     for (unsigned i = 16; i < 176; i += 4) {
@@ -87,15 +110,15 @@ static void mix(uint8_t s[16], int inv) {
     for (unsigned i = 0; i < 16; i += 4) {
         uint8_t a = s[i], b = s[i + 1], c = s[i + 2], d = s[i + 3];
         if (inv) {
-            s[i] = mul(a, 14) ^ mul(b, 11) ^ mul(c, 13) ^ mul(d, 9);
-            s[i + 1] = mul(a, 9) ^ mul(b, 14) ^ mul(c, 11) ^ mul(d, 13);
-            s[i + 2] = mul(a, 13) ^ mul(b, 9) ^ mul(c, 14) ^ mul(d, 11);
-            s[i + 3] = mul(a, 11) ^ mul(b, 13) ^ mul(c, 9) ^ mul(d, 14);
+            s[i] = mul14[a] ^ mul11[b] ^ mul13[c] ^ mul9[d];
+            s[i + 1] = mul9[a] ^ mul14[b] ^ mul11[c] ^ mul13[d];
+            s[i + 2] = mul13[a] ^ mul9[b] ^ mul14[c] ^ mul11[d];
+            s[i + 3] = mul11[a] ^ mul13[b] ^ mul9[c] ^ mul14[d];
         } else {
-            s[i] = mul(a, 2) ^ mul(b, 3) ^ c ^ d;
-            s[i + 1] = a ^ mul(b, 2) ^ mul(c, 3) ^ d;
-            s[i + 2] = a ^ b ^ mul(c, 2) ^ mul(d, 3);
-            s[i + 3] = mul(a, 3) ^ b ^ c ^ mul(d, 2);
+            s[i] = mul2[a] ^ mul3[b] ^ c ^ d;
+            s[i + 1] = a ^ mul2[b] ^ mul3[c] ^ d;
+            s[i + 2] = a ^ b ^ mul2[c] ^ mul3[d];
+            s[i + 3] = mul3[a] ^ b ^ c ^ mul2[d];
         }
     }
 }

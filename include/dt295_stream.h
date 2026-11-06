@@ -10,8 +10,8 @@ typedef struct dt295_stream dt295_stream;
 
 enum {
     DT295_STREAM_TRANSFERS = 8,
-    DT295_STREAM_TRANSFER_BYTES = 65536,
-    DT295_STREAM_RING_BYTES = 32 * 1024 * 1024,
+    DT295_STREAM_TRANSFER_BYTES = 16384,
+    DT295_STREAM_RING_BYTES = 128 * 1024 * 1024,
     DT295_STREAM_RING_BLOCKS = DT295_STREAM_RING_BYTES / DT295_STREAM_TRANSFER_BYTES,
     DT295_STREAM_ABANDONED = -20001,
     DT295_STREAM_CLOSED = -20002
@@ -25,6 +25,8 @@ typedef struct {
     uint64_t last_completion_ns, max_completion_gap_ns;
     uint64_t first_error_ns, last_error_status, last_error_actual;
     int first_error;
+    uint64_t dropped_blocks, ring_drops;
+    int retried_submits;
     int stopping, thread_done;
 } dt295_stream_stats;
 

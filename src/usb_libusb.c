@@ -122,6 +122,13 @@ static int model_state(libusb_device *d) {
     return desc.idProduct == 0x102b ? USB_MODEL_DT181 :
            desc.idProduct == 0x103b ? USB_MODEL_DT295 : 0;
 }
+/* Any PIX identity this build can name, for the empty-list notice. */
+static const usb_pix_model *known_model(libusb_device *d) {
+    struct libusb_device_descriptor desc;
+    if (libusb_get_device_descriptor(d, &desc) < 0)
+        return NULL;
+    return usb_pix_model_find(desc.idVendor, desc.idProduct);
+}
 /* Reads the descriptor serial without claiming an interface. A missing serial
  * number is absent; an open or read failure is unreadable, never an empty
  * string, so callers can distinguish unknown from a real empty value. */
@@ -184,6 +191,8 @@ int usb_list_model(int json, int expected_model) {
         return 70;
     }
     unsigned count = 0;
+    const usb_pix_model *sibling[8];
+    unsigned siblings = 0;
     for (ssize_t i = 0; i < n; i++) {
         int model = model_state(list[i]);
         if (model < 0) {
@@ -194,10 +203,27 @@ int usb_list_model(int json, int expected_model) {
         if (model == expected_model) {
             device_info(list[i], count, expected_model, 1, &found[count]);
             count++;
+        } else if (siblings < sizeof sibling / sizeof *sibling) {
+            const usb_pix_model *pix = known_model(list[i]);
+            if (pix)
+                sibling[siblings++] = pix;
         }
     }
     libusb_free_device_list(list, 1);
     libusb_exit(ctx);
+    /* An empty list for a device that is plainly plugged in is a dead end.
+     * Name the siblings this build knows about; the list itself keeps the
+     * "devices this build can claim" contract. */
+    if (count == 0)
+        for (unsigned i = 0; i < siblings; i++) {
+            if (sibling[i]->flag)
+                fprintf(stderr, "Found %s (%04x:%04x); pass --model %s to use it\n",
+                        sibling[i]->name, sibling[i]->vendor, sibling[i]->product,
+                        sibling[i]->flag);
+            else
+                fprintf(stderr, "Found %s (%04x:%04x), which this build cannot drive\n",
+                        sibling[i]->name, sibling[i]->vendor, sibling[i]->product);
+        }
     int result = usb_listing_write(stdout, found, count, json);
     free(found);
     if (result)

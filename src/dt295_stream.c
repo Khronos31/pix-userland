@@ -39,6 +39,7 @@ int dt295_stream_destroy(dt295_stream *s) {
 }
 #else
 #include <pthread.h>
+#include <stdio.h>
 #include <sys/time.h>
 
 #define EVENT_WAIT_US 20000
@@ -107,8 +108,17 @@ static int submit_locked(struct dt295_slot *slot) {
     if (s->stopping)
         return s->stats.first_error ? s->stats.first_error : DT295_STREAM_CLOSED;
     if (s->next_submit - s->next_read >= s->ring_blocks) {
-        first_error_locked(s, LIBUSB_ERROR_NO_MEM, -1, 0);
-        return LIBUSB_ERROR_NO_MEM;
+        /* Slow consumer: the ring is full. Dropping the oldest block keeps the
+         * session alive (a short TS gap) instead of failing it with NO_MEM. */
+        struct dt295_block *oldest = &s->blocks[s->next_read % s->ring_blocks];
+        oldest->ready = 0;
+        ++s->next_read;
+        ++s->stats.dropped_blocks;
+        if (!s->stats.ring_drops) {
+            fprintf(stderr,
+                    "{\"event\":\"detail\",\"message\":\"ring full; dropped oldest block\"}\n");
+            s->stats.ring_drops = 1;
+        }
     }
     slot->sequence = s->next_submit++;
     slot->active = 1;
@@ -118,6 +128,26 @@ static int submit_locked(struct dt295_slot *slot) {
     if (pending > s->stats.peak_pending_blocks)
         s->stats.peak_pending_blocks = pending;
     int rc = s->submit_fn(slot->transfer);
+    if (rc == LIBUSB_ERROR_NO_MEM) {
+        /* The kernel can transiently fail to allocate a URB buffer
+         * after long streaming. Back off and retry instead of
+         * aborting the session. */
+        for (unsigned attempt = 0; attempt < 200 && rc == LIBUSB_ERROR_NO_MEM;
+             ++attempt) {
+            pthread_mutex_unlock(&s->mutex);
+            struct timespec pause = {0, 2000000L};
+            nanosleep(&pause, NULL);
+            pthread_mutex_lock(&s->mutex);
+            if (s->stopping)
+                break;
+            rc = s->submit_fn(slot->transfer);
+            if (!rc && !s->stats.retried_submits) {
+                fprintf(stderr, "{\"event\":\"detail\",\"message\":\""
+                                "USB submit retried after transient NO_MEM\"}\n");
+                s->stats.retried_submits = 1;
+            }
+        }
+    }
     if (rc) {
         slot->active = 0;
         --s->active;

@@ -11,6 +11,16 @@ typedef struct {
     usb_serial_state serial_state;
     char serial[USB_SERIAL_MAX];
 } usb_device_info;
+/* A PIX boot-mode identity this build can name, whether or not it can drive it.
+ * "supported" means a receiver path exists here; the other entries exist so a
+ * plugged-in sibling explains itself instead of looking like no device. */
+typedef struct {
+    unsigned vendor, product;
+    const char *name;
+    int supported;
+    const char *flag; /* --model value that selects it; NULL if undrivable. */
+} usb_pix_model;
+const usb_pix_model *usb_pix_model_find(unsigned vendor, unsigned product);
 /* DT181/DT295 descriptor enumeration only; never claims the receiver. A serial
  * string is read without claiming and is absent, unreadable, or readable; JSON
  * exposes unreadable/absent as null rather than guessing. "ready" describes the
