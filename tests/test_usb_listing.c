@@ -77,6 +77,23 @@ int main(int argc, char **argv) {
     output(duplicate, 2, 1, text, sizeof(text));
     assert(strstr(text, "\"serial\":\"A\\\"b\\\\c\""));
     assert(strstr(text, "\"serial_unique\":true"));
+    /* Siblings this build cannot drive are still named, so an empty device list
+     * can say what it saw. Only the two receiver paths count as supported. */
+    const usb_pix_model *dt295w = usb_pix_model_find(0x06b8, 0x103c);
+    assert(dt295w && !dt295w->supported && !strcmp(dt295w->name, "PIX-DT295W"));
+    const usb_pix_model *dt410 = usb_pix_model_find(0x06b8, 0x1038);
+    assert(dt410 && !dt410->supported && !strcmp(dt410->name, "PIX-DT410"));
+    const usb_pix_model *dt420 = usb_pix_model_find(0x06b8, 0x1039);
+    assert(dt420 && !dt420->supported && !strcmp(dt420->name, "PIX-DT420"));
+    const usb_pix_model *dtxxx = usb_pix_model_find(0x04c5, 0x202f);
+    assert(dtxxx && !dtxxx->supported && !strcmp(dtxxx->name, "PIX-DTxxx"));
+    assert(usb_pix_model_find(0x06b8, 0x103b)->supported);
+    assert(usb_pix_model_find(0x06b8, 0x102b)->supported);
+    assert(!strcmp(usb_pix_model_find(0x06b8, 0x103b)->flag, "dt295"));
+    assert(!strcmp(usb_pix_model_find(0x06b8, 0x102b)->flag, "dt181"));
+    assert(!dt295w->flag);
+    assert(!usb_pix_model_find(0x06b8, 0x9999));
+
     puts("USB enumeration text/JSON, serial identity and unknown-topology tests passed");
     return 0;
 }
