@@ -26,6 +26,14 @@ typedef struct {
     uint16_t cn_raw;
 } dt295_satellite_state;
 
+/* 受信の状態と C/N。C/N は 0.001 dB (mdB)。式は Linux の tc90522.c と同じ
+ * (smpn2/pix-dt295 の signal.rs と同じ多項式。MIT)。 */
+typedef struct {
+    uint8_t locked;
+    uint32_t cn_raw;
+    int cn_mdb;
+} dt295_signal_state;
+
 typedef struct {
     unsigned raw_state;
     uint64_t notification_generation;
@@ -93,6 +101,8 @@ int dt295_select_satellite_slot(dt295 *device, unsigned slot, char *error, size_
 int dt295_sleep_satellite(dt295 *device, char *error, size_t error_size);
 int dt295_satellite_status(dt295 *device, dt295_satellite_state *status, char *error,
                            size_t error_size);
+int dt295_signal(dt295 *device, int satellite, dt295_signal_state *status, char *error,
+                 size_t error_size);
 
 /* Routes must already have passed dt295_routes validation. Fields are the
  * bounded, private TRC configuration supplied in the asset bundle. */

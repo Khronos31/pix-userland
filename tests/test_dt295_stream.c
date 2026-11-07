@@ -70,11 +70,13 @@ int main(void) {
     assert(!complete(s, 1, LIBUSB_TRANSFER_COMPLETED, 1, 0x61));
     assert(!complete(s, 0, LIBUSB_TRANSFER_COMPLETED, 1, 0x62));
     dt295_stream_snapshot(s, &stats);
-    assert(stats.first_error == LIBUSB_ERROR_NO_MEM && stats.peak_pending_blocks == 4);
-    for (unsigned i = 0; i < 3; ++i) {
-        assert(dt295_stream_read(s, buffer, sizeof(buffer), &seq, &when, 0) == 1);
-        assert(seq == i && buffer[0] == (unsigned char)(0x60 + i));
-    }
+    assert(stats.first_error == 0 && stats.dropped_blocks == 1 &&
+           stats.peak_pending_blocks == 4);
+    /* Ring saturation advances the consumer past seq 0 and retains newest TS. */
+    assert(dt295_stream_read(s, buffer, sizeof(buffer), &seq, &when, 0) == 1);
+    assert(seq == 1 && buffer[0] == 0x61);
+    assert(dt295_stream_read(s, buffer, sizeof(buffer), &seq, &when, 0) == 1);
+    assert(seq == 2 && buffer[0] == 0x62);
     dispose(s);
 
     /* An unjoined event owner keeps transfer storage alive after stop deadlines. */

@@ -3,7 +3,7 @@ PYTHON ?= python3
 PKG_CONFIG ?= pkg-config
 CFLAGS ?= -O2 -g
 CPPFLAGS += -Iinclude -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64
-OS_LIBS ?= -pthread
+OS_LIBS ?= -pthread -lm
 WARN = -std=c11 -Wall -Wextra -Wpedantic
 USB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libusb-1.0)
 USB_LIBS ?= $(shell $(PKG_CONFIG) --libs libusb-1.0)
@@ -41,7 +41,7 @@ tests/test-usb-restart: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o
 tests/test-usb-config-order: tests/test_usb_restart.c src/usb_log.o src/usb_listing.o src/usb_selector.o src/platform.o
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) -DPIX_TEST_CONFIGURE_BEFORE_DRIVER_QUERY $(LDFLAGS) -o $@ $^ $(USB_LIBS) $(OS_LIBS)
 
-tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_live_policy.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c
+tests/test-dt295-capture: tests/test_dt295_capture.c src/dt295_capture.c src/dt295_live_policy.c src/dt295_routes.c src/transport.c src/crypto.c src/platform.c src/protocol.c src/control.c src/channel.c
 	$(CC) $(CPPFLAGS) $(USB_CFLAGS) $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $(filter-out src/dt295_capture.c,$^) $(OS_LIBS)
 tests/test-dt295-protocol: tests/test_dt295_protocol.c src/dt295.c src/dt295_crypto.c src/crypto.c src/dt295_routes.c src/transport.c
 	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) $(WARN) $(LDFLAGS) -o $@ $^ $(OS_LIBS)

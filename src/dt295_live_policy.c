@@ -2,6 +2,7 @@
 #include "dt295_live_policy.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* During a recording, allow only additions to genuinely free slots. Existing
@@ -200,7 +201,15 @@ int live_additions_only(const dt295_route_plan *current,
             current->dedicated_pid[0] &&
             live_pid_is_retained(current, desired, current->dedicated_pid[0]))
             desired->video_stream_type = current->video_stream_type;
-        else {
+        else if (getenv("DT295_TOLERATE_PSI") &&
+                 current->dedicated_pid[0] == desired->dedicated_pid[0] &&
+                 current->dedicated_pid[1] == desired->dedicated_pid[1] &&
+                 current->dedicated_pid[2] == desired->dedicated_pid[2] &&
+                 current->dedicated_pid[3] == desired->dedicated_pid[3]) {
+            /* Opt-in: identical PID layout, only the advertised codec moved.
+             * The on-board transcoder does this at startup; the caller commits
+             * the new type with the rest of the effective plan. */
+        } else {
             snprintf(error, error_size,
                      "broadcast changed primary or dedicated PID metadata during recording");
             return -1;
