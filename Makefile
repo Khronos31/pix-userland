@@ -3,7 +3,7 @@ PYTHON ?= python3
 PKG_CONFIG ?= pkg-config
 CFLAGS ?= -O2 -g
 CPPFLAGS += -Iinclude -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64
-OS_LIBS ?= -pthread
+OS_LIBS ?= -pthread -lm
 WARN = -std=c11 -Wall -Wextra -Wpedantic
 USB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libusb-1.0)
 USB_LIBS ?= $(shell $(PKG_CONFIG) --libs libusb-1.0)

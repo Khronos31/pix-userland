@@ -3,6 +3,7 @@
 #include "crypto.h"
 #include "dt295_crypto.h"
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1466,6 +1467,46 @@ int dt295_satellite_status(dt295 *d, dt295_satellite_state *status, char *e, siz
     status->selected_tsid = (uint16_t)(tsid[0] << 8 | tsid[1]);
     status->agc_raw = (uint8_t)(ba & 0x7f);
     status->cn_raw = (uint16_t)(cn[0] << 8 | cn[1]);
+    seterr(e, en, "");
+    return 0;
+}
+
+/* C/N (0.001 dB) of the TC90522 raw values. Same polynomial fits as Linux
+ * tc90522.c and smpn2/pix-dt295 (MIT). */
+static int cn_t_mdb(uint32_t raw) {
+    if (raw == 0)
+        return 0;
+    double p = 10.0 * log10(5505024.0 / (double)raw);
+    double cn = (((0.024 * p - 1.6) * p + 39.8) * p + 549.1) * p + 3096.5;
+    return cn > 0.0 ? (int)cn : 0;
+}
+static int cn_s_mdb(uint32_t raw) {
+    if (raw < 3000)
+        return 0;
+    double p = sqrt((double)(raw - 3000)) / 64.0;
+    double cn = (((((-1634.6 * p + 14341.0) * p - 50259.0) * p + 88977.0) * p -
+                  89565.0) * p) + 58857.0;
+    return cn > 0.0 ? (int)cn : 0;
+}
+
+int dt295_signal(dt295 *d, int satellite, dt295_signal_state *status, char *e, size_t en) {
+    if (!d || !status || d->cleanup_only || !d->has_session)
+        return fail(d, e, en, "signal requires an authenticated session");
+    if (satellite) {
+        uint8_t c3 = 0, cn[2] = {0, 0};
+        if (sat_reg_read(d, 0xc3, &c3, 1) || sat_reg_read(d, 0xbc, cn, sizeof(cn)))
+            return fail(d, e, en, "satellite signal read failed");
+        status->locked = (c3 & 0x10) ? 0 : 1;
+        status->cn_raw = (uint32_t)(cn[0] << 8 | cn[1]);
+        status->cn_mdb = cn_s_mdb(status->cn_raw);
+    } else {
+        uint8_t lock = 0, cn[3] = {0, 0, 0}, reg = 0x8b;
+        if (demod_read(d, 0x80, &lock) || i2c(d, 0x20, &reg, 1, cn, sizeof(cn)))
+            return fail(d, e, en, "terrestrial signal read failed");
+        status->locked = (lock & 0x80) ? 0 : 1;
+        status->cn_raw = ((uint32_t)cn[0] << 16) | ((uint32_t)cn[1] << 8) | cn[2];
+        status->cn_mdb = cn_t_mdb(status->cn_raw);
+    }
     seterr(e, en, "");
     return 0;
 }

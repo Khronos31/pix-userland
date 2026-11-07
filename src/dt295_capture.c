@@ -446,7 +446,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
         goto done;
     }
     uint64_t preparation_start = now_ms(), last_input = preparation_start,
-             next_status = preparation_start;
+             next_status = preparation_start, next_signal = preparation_start;
+    uint64_t retune_t0 = 0;
     uint8_t data[65536 + 188], out[65536 + 188];
     /* DT295_CONTROL=1 のとき、標準入力から選局指示 ("T21" / "BS01_0" / "quit") を
      * 受け付ける。切替は「セッションを維持したまま stop -> tune -> prepare ->
@@ -466,6 +467,7 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 break;
             if (pr == 1 && (cmd.channel.system != cur_system ||
                             cmd.channel.channel != cur_channel || cmd.channel.slot != cur_slot)) {
+                retune_t0 = now_ms();
                 int next_system = cmd.channel.system;
                 unsigned next_channel = cmd.channel.channel;
                 int next_slot = cmd.channel.slot;
@@ -482,6 +484,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                     rc = 7;
                     break;
                 }
+                fprintf(stderr, "{\"event\":\"retune\",\"step\":\"stop\",\"ms\":%llu}\n",
+                        (unsigned long long)(now_ms() - retune_t0));
                 dt295_routes_destroy(tables);
                 tables = dt295_routes_create();
                 if (!tables) {
@@ -507,14 +511,18 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                     rc = 5;
                     break;
                 }
+                fprintf(stderr, "{\"event\":\"retune\",\"step\":\"tune\",\"ms\":%llu}\n",
+                        (unsigned long long)(now_ms() - retune_t0));
                 dt295_route_plan next_plan = {0};
                 char next_error[DT295_ROUTE_ERROR] = {0};
                 if (dt295_routes_initial_plan(tables, &next_plan, next_error) ||
-                    dt295_prepare_plan(d, &next_plan, error, sizeof(error)) ||
+                    dt295_reprepare_plan(d, &next_plan, error, sizeof(error)) ||
                     dt295_start(d, error, sizeof(error))) {
                     rc = 7;
                     break;
                 }
+                fprintf(stderr, "{\"event\":\"retune\",\"step\":\"prepare\",\"ms\":%llu}\n",
+                        (unsigned long long)(now_ms() - retune_t0));
                 e = dt295_stream_start(usb_native_context(u.usb), usb_native_handle(u.usb),
                                        &u.stream);
                 if (e) {
@@ -522,6 +530,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                     snprintf(error, sizeof(error), "switch USB start error %d", e);
                     break;
                 }
+                fprintf(stderr, "{\"event\":\"retune\",\"step\":\"stream\",\"ms\":%llu}\n",
+                        (unsigned long long)(now_ms() - retune_t0));
                 live = next_plan;
                 cur_system = (pixy_system)next_system;
                 cur_channel = next_channel;
@@ -671,6 +681,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                          "multiple independent ECMs are outside the verified DT295 scope");
                 break;
             }
+            fprintf(stderr, "{\"event\":\"retune\",\"step\":\"psi\",\"ms\":%llu}\n",
+                    (unsigned long long)(now_ms() - retune_t0));
             if (dt295_stop(d, &drained, error, sizeof(error))) {
                 rc = 7;
                 break;
@@ -687,6 +699,8 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 rc = 7;
                 break;
             }
+            fprintf(stderr, "{\"event\":\"retune\",\"step\":\"full\",\"ms\":%llu}\n",
+                    (unsigned long long)(now_ms() - retune_t0));
             e = dt295_stream_start(usb_native_context(u.usb), usb_native_handle(u.usb), &u.stream);
             if (e) {
                 rc = 7;
@@ -714,6 +728,22 @@ int dt295_capture_run(const dt295_capture_config *cfg) {
                 break;
             }
             next_status = now + 10000;
+        }
+        if (d && diag && now >= next_signal) {
+            dt295_signal_state sig = {0, 0, 0};
+            char sig_error[160];
+            if (!dt295_signal(d, cur_system != PIXY_TERRESTRIAL, &sig, sig_error,
+                              sizeof(sig_error))) {
+                char line[256];
+                int n = snprintf(line, sizeof(line),
+                                 "{\"event\":\"signal\",\"system\":\"%s\",\"locked\":%u,"
+                                 "\"cn_raw\":%lu,\"cn_mdb\":%d}\n",
+                                 cur_system != PIXY_TERRESTRIAL ? "satellite" : "terrestrial",
+                                 (unsigned)sig.locked, (unsigned long)sig.cn_raw, sig.cn_mdb);
+                if (n > 0 && (size_t)n < sizeof(line))
+                    (void)ts_output_submit(diag, line, (size_t)n, NULL);
+            }
+            next_signal = now + 5000;
         }
     }
 done:
