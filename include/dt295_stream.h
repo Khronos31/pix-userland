@@ -8,9 +8,13 @@
 
 typedef struct dt295_stream dt295_stream;
 
+/* A bulk transfer completes only when its buffer is full. Before the route plan
+ * starts, only low-rate PSI PIDs are routed (about 110 kbit/s), so a 64 KiB
+ * transfer took about 4.7 s to fill and delayed the first packet. 8 KiB
+ * transfers keep the same 512 KiB in flight and fill in about 0.6 s. */
 enum {
-    DT295_STREAM_TRANSFERS = 8,
-    DT295_STREAM_TRANSFER_BYTES = 65536,
+    DT295_STREAM_TRANSFERS = 64,
+    DT295_STREAM_TRANSFER_BYTES = 8192,
     DT295_STREAM_RING_BYTES = 32 * 1024 * 1024,
     DT295_STREAM_RING_BLOCKS = DT295_STREAM_RING_BYTES / DT295_STREAM_TRANSFER_BYTES,
     DT295_STREAM_ABANDONED = -20001,
