@@ -37,3 +37,6 @@ tests/test-usb-restart
 
 /tests/test-dt295-protocol
 /tests/test-dt295-satellite
+
+/tests/test-dt295-assets-c
+/tests/test-usb-config-order

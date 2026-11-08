@@ -298,6 +298,8 @@ ctest --test-dir build/cmake --output-on-failure
 
 ビルドが完了すると、`build/cmake/` に `pixd`、`pixctl`、`pix-ts` が生成されます。`pixd` の起動時に `--firmware <FILE>` が必要です。
 
+macOS では、リンカーの `--wrap` で関数を差し替えるテストと、`/proc` を読む Termux ランチャーのテストをビルド・登録しません（macOS のリンカーは `--wrap` に対応せず、`/proc` もないため）。これらのテストは Linux で実行してください。
+
 ### ポータブルビルド（静的リンクスクリプト）
 
 各種プラットフォーム向けに、libusb 1.0.30 を静的リンクしたバイナリを `build/` に生成するスクリプトを用意しています。バンドルはビルド出力の `firmware/` にコピーされ、Release アーカイブにも同梱されます。
