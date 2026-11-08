@@ -33,6 +33,8 @@ void __real_dt295_assets_free(dt295_assets *);
 }
 
 namespace {
+// Every queued bulk transfer is accounted for when a stream is retired.
+constexpr unsigned kTransfers = DT295_STREAM_TRANSFERS;
 
 using dtv::userland::detail::ReceiverSystem;
 
@@ -78,7 +80,7 @@ bool wait_stream_done()
 bool wait_cleanup(unsigned timeout_ms)
 {
     for (unsigned attempt = 0U; attempt < timeout_ms; ++attempt) {
-        if (g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == 8U &&
+        if (g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == kTransfers &&
             g_device_freed.load() == 1U && g_routes_freed.load() == 1U &&
             g_assets_freed.load() == 1U)
             return true;
@@ -285,7 +287,7 @@ static int run_detach(pix::capture::dt295::ReceiverAdapter &adapter)
     REQUIRE(adapter.stop_capture(0U, ReceiverSystem::terrestrial));
     REQUIRE(adapter.shutdown());
     counts("after-detach-late-completion-and-retry");
-    REQUIRE(g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == 8U);
+    REQUIRE(g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == kTransfers);
     REQUIRE(g_device_freed.load() == 1U && g_routes_freed.load() == 1U &&
             g_assets_freed.load() == 1U);
     REQUIRE(g_early_close.load() == 0U);
@@ -299,14 +301,14 @@ static int run_retry(pix::capture::dt295::ReceiverAdapter *adapter)
     REQUIRE(g_saved.load() != nullptr);
     dt295_stream_stats stats{};
     dt295_stream_snapshot(g_saved.load(), &stats);
-    REQUIRE(stats.active_transfers == 8U && !stats.thread_done);
+    REQUIRE(stats.active_transfers == kTransfers && !stats.thread_done);
     g_release_callbacks.store(true, std::memory_order_release);
     REQUIRE(wait_stream_done());
     REQUIRE(g_closes.load() == 0U && g_early_close.load() == 0U && g_destroyed.load() == 0U);
     REQUIRE(adapter->shutdown());
     REQUIRE(adapter->shutdown());
     counts("after-retry");
-    REQUIRE(g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == 8U);
+    REQUIRE(g_destroyed.load() == 1U && g_closes.load() == 1U && g_freed.load() == kTransfers);
     REQUIRE(g_device_freed.load() == 1U && g_routes_freed.load() == 1U &&
             g_assets_freed.load() == 1U);
     REQUIRE(g_early_close.load() == 0U);
@@ -320,7 +322,7 @@ static int run_destructor(pix::capture::dt295::ReceiverAdapter *adapter)
     REQUIRE(g_saved.load() != nullptr);
     dt295_stream_stats stats{};
     dt295_stream_snapshot(g_saved.load(), &stats);
-    REQUIRE(stats.active_transfers == 8U && !stats.thread_done);
+    REQUIRE(stats.active_transfers == kTransfers && !stats.thread_done);
     REQUIRE(g_stops.load() >= 2U);
     REQUIRE(g_destroyed.load() == 0U && g_closes.load() == 0U && g_early_close.load() == 0U);
     REQUIRE(g_freed.load() == 0U && g_device_freed.load() == 0U &&
@@ -329,7 +331,7 @@ static int run_destructor(pix::capture::dt295::ReceiverAdapter *adapter)
     g_release_callbacks.store(true, std::memory_order_release);
     REQUIRE(wait_cleanup(10000U));
     counts("after-late-completion-autonomous-cleanup");
-    REQUIRE(g_cancelled.load() == 8U);
+    REQUIRE(g_cancelled.load() == kTransfers);
     REQUIRE(g_early_close.load() == 0U);
     return 0;
 }
